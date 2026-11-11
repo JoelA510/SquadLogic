@@ -46,8 +46,8 @@ SELECT is(
       WHERE attrelid = to_regclass('public.view_league_standings') AND attnum > 0 AND NOT attisdropped),
     ARRAY['team_id', 'organization_id', 'team_name', 'division_id', 'games_played', 'wins', 'losses',
           'draws', 'goals_for', 'goals_against', 'goal_differential', 'points', 'division',
-          'season_settings_id'],
-    'view_league_standings columns, in order, are the definitive schema''s with division and season_settings_id last');
+          'season_settings_id', 'results_not_counted'],
+    'view_league_standings columns, in order, are the definitive schema''s with division and season_settings_id after them, and results_not_counted (20261122010000) last');
 
 SELECT ok(to_regclass('public.view_org_metrics') IS NOT NULL
           AND has_table_privilege('authenticated', 'public.view_org_metrics', 'SELECT'),
@@ -94,8 +94,10 @@ SET LOCAL "request.jwt.claims" TO '';
 
 SELECT is((SELECT count(*)::int FROM public.view_org_metrics), 0,
     'anon reads no metrics rows');
-SELECT is((SELECT count(*)::int FROM public.view_league_standings), 0,
-    'anon reads no standings rows');
+-- 20261122010000: the view reads game_scores, which anon has no grant on (the legacy table it read before was granted to
+-- anon and hidden by RLS), so anon is refused outright instead of reading nothing.
+SELECT throws_ok($$SELECT count(*) FROM public.view_league_standings$$, '42501', NULL,
+    'anon cannot read the standings at all');
 
 SELECT * FROM finish();
 ROLLBACK;

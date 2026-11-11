@@ -14,7 +14,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(65);
+SELECT plan(69);
 
 CREATE FUNCTION pg_temp.err(p_sql text) RETURNS text LANGUAGE plpgsql AS $f$
 DECLARE s text; d text;
@@ -177,16 +177,17 @@ SELECT is(pg_temp.err($$SELECT public.admin_update_team('aaaaaaaa-0000-0000-0000
     'no error', 'admin_update_team is allowed');
 SELECT is(pg_temp.err(format($$SELECT public.admin_cancel_practice_assignment(%L)$$, (SELECT live_pa FROM ids))),
     'no error', 'admin_cancel_practice_assignment is allowed');
+-- 20261122010000 (F11-2): a score names a saved game and is a row of game_scores, which carries the trigger.
+SELECT is(pg_temp.err(format($$SELECT public.update_game_score('a1111111-1111-1111-1111-111111111111', %L, 3::smallint, 1::smallint)$$, (SELECT old_ga FROM ids))),
+    '22023:season_completed', 'update_game_score is refused on a completed season''s game');
+SELECT is(pg_temp.err(format($$SELECT public.update_game_score('a1111111-1111-1111-1111-111111111111', %1$L, 3::smallint, 1::smallint); SELECT public.update_game_score('a1111111-1111-1111-1111-111111111111', %1$L, NULL, NULL)$$, (SELECT live_ga FROM ids))),
+    'no error', 'and allowed on the active season''s (entered, then cleared again so the game is not held for what follows)');
 SELECT is(pg_temp.err(format($$SELECT public.admin_cancel_game_assignment(%L)$$, (SELECT live_ga FROM ids))),
     'no error', 'admin_cancel_game_assignment is allowed');
 SELECT is(pg_temp.err($$SELECT public.admin_assign_team_coach('a1111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-000000000001', NULL)$$),
     'no error', 'a change of the active team''s coaches (here, removing them) is allowed');
 SELECT is(pg_temp.err($$SELECT public.admin_delete_team('aaaaaaaa-0000-0000-0000-000000000004')$$),
     'no error', 'admin_delete_team is allowed');
-SELECT is(pg_temp.err($$SELECT public.update_game_score('a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-0000000ff0a9', 3::smallint, 1::smallint)$$),
-    '22023:season_completed', 'update_game_score is refused on a completed season''s game');
-SELECT is(pg_temp.err($$SELECT public.update_game_score('a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-0000000ff1a9', 3::smallint, 1::smallint)$$),
-    'no error', 'and allowed on the active season''s');
 RESET role;
 
 -- ── Every table, written directly by a signed-in caller ────────────────────
@@ -313,13 +314,29 @@ SELECT is(pg_temp.err($$DELETE FROM public.season_settings WHERE id = 'f7777777-
 SELECT is((SELECT count(*)::int FROM public.teams WHERE organization_id = 'f7777777-7777-7777-7777-777777777701'), 0,
     'and its teams went with it');
 
+-- ── game_scores (20261122010000): the table that holds the results is on the read-only list too (lesson 66) ──
+RESET role;
+SET LOCAL "request.jwt.claims" TO '';
+-- A result entered while the season was active (seeded with no signed-in user, which the trigger lets through).
+INSERT INTO public.game_scores (game_id, organization_id, home_team_id, away_team_id, score_home, score_away)
+SELECT id, organization_id, home_team_id, away_team_id, 4, 4 FROM public.game_assignments WHERE id = (SELECT old_ga FROM ids);
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SELECT is(pg_temp.err(format($$UPDATE public.game_scores SET score_home = 9 WHERE game_id = %L$$, (SELECT old_ga FROM ids))),
+    '22023:season_completed', 'game_scores: a direct score update of a completed season is refused');
+SELECT is(pg_temp.err(format($$DELETE FROM public.game_scores WHERE game_id = %L$$, (SELECT old_ga FROM ids))),
+    '22023:season_completed', 'game_scores: and a delete');
+SELECT is(pg_temp.err(format($$SELECT public.update_game_score('a1111111-1111-1111-1111-111111111111', %L, NULL, NULL)$$, (SELECT old_ga FROM ids))),
+    '22023:season_completed', 'and update_game_score cannot clear it');
+SELECT is((SELECT score_home || '-' || score_away FROM public.game_scores WHERE game_id = (SELECT old_ga FROM ids)), '4-4',
+    'the completed season''s result is as it was');
+
 -- ── Shape ─────────────────────────────────────────────────────────────────
 SELECT is(
     (SELECT array_agg(c.relname::text ORDER BY c.relname::text) FROM pg_trigger g JOIN pg_class c ON c.oid = g.tgrelid
       WHERE g.tgname LIKE '%\_readonly\_when\_completed' AND NOT g.tgisinternal AND g.tgenabled = 'O'
         AND g.tgfoid = 'public.season_schedule_readonly_when_completed()'::regprocedure),
-    ARRAY['coach_practice_preferences', 'game_assignments', 'games', 'practice_assignments', 'practice_exceptions', 'schedule_tbd', 'team_coach_assignments', 'team_players', 'teams'],
-    'the eight schedule tables and the practice preference rules (20261112010000) carry the trigger, enabled');
+    ARRAY['coach_practice_preferences', 'game_assignments', 'game_scores', 'games', 'practice_assignments', 'practice_exceptions', 'schedule_tbd', 'team_coach_assignments', 'team_players', 'teams'],
+    'the eight schedule tables, the practice preference rules (20261112010000) and the score table (20261122010000) carry the trigger, enabled');
 SELECT is(has_function_privilege('authenticated', 'public.season_schedule_readonly_when_completed()', 'EXECUTE')
           OR has_function_privilege('anon', 'public.season_schedule_readonly_when_completed()', 'EXECUTE'), false,
     'and the trigger function is nobody''s to call');

@@ -514,7 +514,7 @@ SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"
 SELECT is(pg_temp.errx(format($$SELECT public.admin_delete_team(%L)$$, pg_temp.t('01'))), '22023:game_published', 'a team with a Published game is still refused');
 SELECT is(pg_temp.err(format($$SELECT public.admin_delete_team(%L)$$, pg_temp.t('06'))), 'no error', 'a team whose scored games are not Published is deleted');
 SELECT is(pg_temp.stored(pg_temp.e('05')) || ' ' || pg_temp.placed(pg_temp.e('05')), 'none gone', 'its games and their scores go with it');
-SELECT is(pg_temp.val($$SELECT metadata ->> 'scores_deleted' FROM public.audit_log WHERE action = 'team.deleted' AND resource_id = pg_temp.t('06')$$), '1',
+SELECT is(pg_temp.val($$SELECT metadata ->> 'game_scores_deleted' FROM public.audit_log WHERE action = 'team.deleted' AND resource_id = pg_temp.t('06')$$), '1',
     'and the audit row counts the scores it took');
 SELECT is(pg_temp.stored(pg_temp.e('02')), '3-1 by 1111', 'control: another team''s score is untouched');
 SET LOCAL "request.jwt.claims" TO '{"sub":"22222222-2222-2222-2222-222222222222"}';

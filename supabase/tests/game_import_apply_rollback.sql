@@ -36,7 +36,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(210);
+SELECT plan(225);
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
 CREATE FUNCTION pg_temp.u(n int) RETURNS uuid LANGUAGE sql IMMUTABLE AS $f$
@@ -633,6 +633,115 @@ SELECT is(pg_temp.val($$SELECT count(*) FROM public.scheduler_runs WHERE organiz
 SELECT is(pg_temp.val($$SELECT count(*) FROM public.teams WHERE is_external$$), '1', 'the outside club was found and reused, not made again');
 SELECT is(pg_temp.val($$SELECT count(*) FROM public.game_assignments WHERE organization_id = 'a1111111-1111-1111-1111-111111111111'$$), '15', 'and the games are still fifteen');
 SELECT is(pg_temp.val($$SELECT status FROM public.import_jobs WHERE id = pg_temp.j('j1b')$$), 'completed', 'the job finishes cleanly: nothing was refused in this file');
+
+-- ── 7b. A scored game and the import (20261122010000, F11-2), and the three riders of that migration ──
+-- One scenario, run inside a sub-transaction that is undone, so the sections below find the state section 7 left. G-101
+-- (Bears against Wolves, Field 2, 09:00 on 2026-05-02) is a game J1 inserted, Published.
+CREATE FUNCTION pg_temp.scored_scenario() RETURNS jsonb LANGUAGE plpgsql AS $f$
+DECLARE
+    c_org constant uuid := 'a1111111-1111-1111-1111-111111111111';
+    v_g uuid; v_job uuid; v_bad uuid; v_res jsonb; v_out jsonb := '{}'::jsonb; v_before text; s text; d text;
+BEGIN
+    BEGIN
+        SELECT id INTO v_g FROM public.game_assignments WHERE external_ref = 'G-101';
+        v_before := pg_temp.gj(v_g);
+        UPDATE public.organizations SET feature_flags = COALESCE(feature_flags, '{}'::jsonb) || '{"score_entry": true}'::jsonb WHERE id = c_org;
+        PERFORM public.update_game_score(c_org, v_g, 2::smallint, 0::smallint);
+        -- (a) the rollback of the import that wrote the game: refused, naming it; nothing deleted.
+        BEGIN
+            PERFORM public.rollback_game_import_job(pg_temp.j('j1'));
+            v_out := v_out || jsonb_build_object('rollback', 'accepted');
+        EXCEPTION WHEN OTHERS THEN
+            GET STACKED DIAGNOSTICS s = RETURNED_SQLSTATE, d = PG_EXCEPTION_DETAIL;
+            v_out := v_out || jsonb_build_object('rollback', s || ':' || replace(d, v_g::text, '<G-101>'));
+        END;
+        -- (b) a new file that moves the game and carries the two parse warnings as staged flags.
+        v_job := (public.create_import_job(c_org, 'games', 'scored.csv')).id;
+        PERFORM set_config('request.jwt.claims', '{}', true);
+        PERFORM pg_temp.stage(v_job, 1, 'ok',  'G-101', 'Org A U10', 'Park One', 'Field 2', 'Bears', 'Wolves', '2026-05-02', '13:00', '14:00', 1);
+        PERFORM pg_temp.stage(v_job, 2, 'tbd', 'G-950', 'Org A U10', '',         '',        'Lions', 'Tigers', '2026-06-06', NULL,    NULL,    6, ARRAY['bad-time']);
+        PERFORM pg_temp.stage(v_job, 3, 'ok',  'G-951', 'Org A U10', 'Park One', 'Field 1', 'Bears', 'Tigers', '2026-06-13', '09:00', '10:00', 7, ARRAY['bad-week']);
+        PERFORM set_config('request.jwt.claims', '{"sub":"11111111-1111-1111-1111-111111111111"}', true);
+        PERFORM public.map_game_import_job(v_job, (SELECT warning_summary -> 'game_mapping' FROM public.import_jobs WHERE id = pg_temp.j('j1b')));
+        v_res := public.apply_game_import_job(v_job, true);
+        v_out := v_out || jsonb_build_object('published_and_scored', v_res #> '{games,skipped}',
+            'flags', (SELECT jsonb_agg(DISTINCT w ->> 'type' ORDER BY w ->> 'type') FROM jsonb_path_query(v_res, '$.** ? (@.type == "bad-time" || @.type == "bad-week")') w));
+        -- (c) changes allowed: the game is no longer Published, and its score still holds it.
+        PERFORM public.admin_set_games_published(c_org, ARRAY[v_g], false, 'conflict-fix');
+        v_res := public.apply_game_import_job(v_job, true);
+        v_out := v_out || jsonb_build_object('scored', v_res #> '{games,skipped}', 'updated_while_scored', v_res #> '{games,updated}',
+            'listed_reason', (SELECT jsonb_agg(DISTINCT w ->> 'reason') FROM jsonb_path_query(v_res, '$.** ? (@.reason == "skipped-scored" || @.reason == "skipped-published")') w));
+        -- (d) the score cleared: the same row is an ordinary update.
+        PERFORM public.update_game_score(c_org, v_g, NULL, NULL);
+        v_res := public.apply_game_import_job(v_job, true);
+        v_out := v_out || jsonb_build_object('cleared', v_res #> '{games,skipped}', 'updated_when_cleared', v_res #> '{games,updated}');
+        -- (e) scored again, and applied for real: the game stays where it was, with its score.
+        PERFORM public.update_game_score(c_org, v_g, 2::smallint, 0::smallint);
+        v_res := public.apply_game_import_job(v_job, false);
+        v_out := v_out || jsonb_build_object('applied', v_res #> '{games,skipped}', 'stayed', regexp_replace(pg_temp.gj(v_g), ' pub=\S+', '') = regexp_replace(v_before, ' pub=\S+', ''),
+            'score', (SELECT score_home || '-' || score_away FROM public.game_scores WHERE game_id = v_g));
+        -- M1: an APPLIED job cannot be cancelled (it used to be marked failed, and lost its roll back).
+        BEGIN
+            PERFORM public.cancel_ready_import_job(v_job, 'games');
+            v_out := v_out || jsonb_build_object('cancel_applied', 'accepted');
+        EXCEPTION WHEN OTHERS THEN
+            GET STACKED DIAGNOSTICS s = RETURNED_SQLSTATE, d = PG_EXCEPTION_DETAIL;
+            v_out := v_out || jsonb_build_object('cancel_applied', s || ':' || d);
+        END;
+        v_out := v_out || jsonb_build_object('status_after_cancel', (SELECT status FROM public.import_jobs WHERE id = v_job));
+        -- M2: get_schedule_tbd returns a TIME TBD game's date and Game ID.
+        v_out := v_out || jsonb_build_object('tbd', (SELECT (t ->> 'external_ref') || ' ' || (t ->> 'game_date')
+                                                       FROM jsonb_array_elements(public.get_schedule_tbd('a1111111-1111-1111-1111-111111111aaa')) t
+                                                      WHERE t ->> 'external_ref' = 'G-950'));
+        -- M3 control: a flag the import does not know still refuses the whole apply.
+        v_bad := (public.create_import_job(c_org, 'games', 'badflag.csv')).id;
+        PERFORM set_config('request.jwt.claims', '{}', true);
+        PERFORM pg_temp.stage(v_bad, 1, 'ok', 'G-960', 'Org A U10', 'Park One', 'Field 1', 'Bears', 'Tigers', '2026-06-20', '09:00', '10:00', 8, ARRAY['made-up']);
+        PERFORM set_config('request.jwt.claims', '{"sub":"11111111-1111-1111-1111-111111111111"}', true);
+        PERFORM public.map_game_import_job(v_bad, (SELECT warning_summary -> 'game_mapping' FROM public.import_jobs WHERE id = pg_temp.j('j1b')));
+        BEGIN
+            PERFORM public.apply_game_import_job(v_bad, true);
+            v_out := v_out || jsonb_build_object('unknown_flag', 'accepted');
+        EXCEPTION WHEN OTHERS THEN
+            GET STACKED DIAGNOSTICS s = RETURNED_SQLSTATE, d = PG_EXCEPTION_DETAIL;
+            v_out := v_out || jsonb_build_object('unknown_flag', s || ':' || d);
+        END;
+        RAISE EXCEPTION 'undo' USING ERRCODE = 'P1120';
+    EXCEPTION WHEN SQLSTATE 'P1120' THEN
+        NULL;
+    END;
+    RETURN v_out;
+END
+$f$;
+INSERT INTO marks VALUES ('fp_before_scored', pg_temp.fp());
+INSERT INTO marks VALUES ('scored', pg_temp.scored_scenario()::text);
+SELECT is((SELECT v::jsonb ->> 'rollback' FROM marks WHERE name = 'scored'), '22023:game_import_changed count=1 ids=<G-101>',
+    'a score entered on a game the import wrote is a change since: the rollback is refused and names the game');
+SELECT is((SELECT v::jsonb ->> 'published_and_scored' FROM marks WHERE name = 'scored'), '{"skipped-published": 1}',
+    'a Published game that is also scored, with a changed row, is skipped as Published (changes must be allowed first)');
+SELECT is((SELECT v::jsonb ->> 'scored' FROM marks WHERE name = 'scored'), '{"skipped-scored": 1}',
+    'once changes are allowed its score still holds it: the row is skipped-scored, the one reason the closed list gained');
+SELECT is((SELECT v::jsonb ->> 'updated_while_scored' FROM marks WHERE name = 'scored'), '0', 'and nothing is planned for it');
+SELECT is((SELECT v::jsonb ->> 'listed_reason' FROM marks WHERE name = 'scored'), '["skipped-scored"]', 'the listed game carries that reason, and no other');
+SELECT is((SELECT (v::jsonb ->> 'cleared') || ' ' || (v::jsonb ->> 'updated_when_cleared') FROM marks WHERE name = 'scored'), '{} 1',
+    'control: with the score cleared the same row is an ordinary update');
+SELECT is((SELECT (v::jsonb ->> 'applied') || ' ' || (v::jsonb ->> 'stayed') || ' ' || (v::jsonb ->> 'score') FROM marks WHERE name = 'scored'), '{"skipped-scored": 1} true 2-0',
+    'the apply does what the preview said: the scored game stays where it was, with its score');
+SELECT is((SELECT v::jsonb ->> 'flags' FROM marks WHERE name = 'scored'), '["bad-time", "bad-week"]',
+    'the parse''s two warnings are staged flags the apply accepts and reports (they reach the result)');
+SELECT is((SELECT v::jsonb ->> 'unknown_flag' FROM marks WHERE name = 'scored'), '22023:game_import_staged_invalid',
+    'control: a flag the import does not know still refuses the whole apply');
+SELECT is((SELECT (v::jsonb ->> 'cancel_applied') || ' ' || (v::jsonb ->> 'status_after_cancel') FROM marks WHERE name = 'scored'),
+    '22023:import_not_ready_to_apply ' || (SELECT v::jsonb ->> 'status_after_cancel' FROM marks WHERE name = 'scored'),
+    'cancel_ready_import_job refuses an applied job');
+SELECT ok((SELECT v::jsonb ->> 'status_after_cancel' FROM marks WHERE name = 'scored') IN ('completed', 'completed_with_warnings'),
+    'which keeps its status (and so its roll back): it is not marked failed');
+SELECT is((SELECT v::jsonb ->> 'tbd' FROM marks WHERE name = 'scored'), 'G-950 2026-06-06', 'get_schedule_tbd returns a TIME TBD game''s Game ID and date');
+SELECT is(pg_temp.fp(), (SELECT v FROM marks WHERE name = 'fp_before_scored'), 'and the scenario left nothing behind (it ran in a sub-transaction that was undone)');
+SELECT is(pg_temp.errx($$SELECT public.cancel_ready_import_job(pg_temp.j('j1'), 'games')$$), '22023:import_not_ready_to_apply',
+    'the applied import J1 cannot be cancelled either');
+SELECT is(pg_temp.val($$SELECT status FROM public.import_jobs WHERE id = pg_temp.j('j1')$$) IN ('completed', 'completed_with_warnings'), true,
+    'control: J1 is an applied job');
 
 -- ── 8. ensure_game_slot: an admin RPC, audited when it creates ─────────────
 SELECT is(pg_temp.val($$SELECT (public.ensure_game_slot('a1111111-1111-1111-1111-111111111111', pg_temp.u(32), '2026-06-20', '08:00', '09:00', 8::smallint, NULL, NULL)) ->> 'created'$$), 'true',

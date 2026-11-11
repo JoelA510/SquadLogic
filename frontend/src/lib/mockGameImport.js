@@ -46,6 +46,7 @@ import {
 import { carryTeamRunResults } from '@squadlogic/core/utils/teamRunResults.js';
 import { sanitizeImportText } from '../utils/importRows.js';
 import { mockGameHeldIds } from './mockGameIdentity.js';
+import { mockGameHoldCode } from './mockGamePublished.js';
 
 export const GAME_IMPORT_RPCS = Object.freeze([
   'map_game_import_job',
@@ -1078,6 +1079,9 @@ function applyJob(db, job, dry, ctx, env) {
   for (const r of refusedRows) reasons[r.reason] = (reasons[r.reason] ?? 0) + 1;
   const skippedRows = rows.filter((r) => r.outcome === 'skipped');
   // The held games a row would have changed or taken out: a placed row that moves one, a TIME TBD row for one.
+  // 20261122010000: a held game that is not Published is held by its score (the database's game_hold_code).
+  const skipReasonOf = (game) =>
+    mockGameHoldCode(game, db) === 'game_scored' ? 'skipped-scored' : 'skipped-published';
   const heldSkips = [
     ...placed
       .filter((p) => p.verdict === 'skip-held')
@@ -1086,12 +1090,14 @@ function applyJob(db, job, dry, ctx, env) {
         rowKey: p.r.rowKey,
         gameId: p.r.gameId,
         game: p.match.id,
+        reason: skipReasonOf(p.match),
       })),
     ...heldSkipTbd.map((t) => ({
       rowNumber: t.r.rowNumber,
       rowKey: t.r.rowKey,
       gameId: t.r.gameId,
       game: t.ga.id,
+      reason: skipReasonOf(t.ga),
     })),
   ].sort((a, b) => a.rowNumber - b.rowNumber);
   const result = {
@@ -1112,7 +1118,11 @@ function applyJob(db, job, dry, ctx, env) {
       updated: updates.length,
       unchanged: placed.filter((p) => p.verdict === 'unchanged').length,
       repointed: carry.length,
-      skipped: heldSkips.length > 0 ? { 'skipped-published': heldSkips.length } : {},
+      skipped: Object.fromEntries(
+        ['skipped-published', 'skipped-scored']
+          .map((reason) => [reason, heldSkips.filter((h) => h.reason === reason).length])
+          .filter(([, count]) => count > 0)
+      ),
     },
     time_tbd: {
       inserted: tbdIns.length,
@@ -1173,7 +1183,7 @@ function applyJob(db, job, dry, ctx, env) {
         row_key: h.rowKey,
         game_id: h.gameId,
         game: h.game,
-        reason: 'skipped-published',
+        reason: h.reason,
       })),
     },
     ids: { run_id: null, team_run_ids: [] },

@@ -153,7 +153,13 @@ describe('schedule import: the reason codes', () => {
     // list is closed and this PR has no migration), and the SQL still takes them as a staged refusal.
     expect([...SCHEDULE_IMPORT_PARSE_WARNINGS].sort()).toEqual(['bad-time', 'bad-week']);
     expect([...SCHEDULE_IMPORT_RETIRED_ROW_REFUSALS].sort()).toEqual(['bad-time', 'bad-week']);
-    expect([...SCHEDULE_IMPORT_STAGED_FLAGS].sort()).toEqual(['time-ambiguous', 'week-differs']);
+    // Since 20261122010000 the SQL takes the parse's two warnings as staged flags too.
+    expect([...SCHEDULE_IMPORT_STAGED_FLAGS].sort()).toEqual([
+      'bad-time',
+      'bad-week',
+      'time-ambiguous',
+      'week-differs',
+    ]);
     for (const code of SCHEDULE_IMPORT_PARSE_WARNINGS) {
       expect(SCHEDULE_IMPORT_ROW_REFUSALS).not.toContain(code);
       expect(SCHEDULE_IMPORT_FLAGS).toContain(code);

@@ -28,6 +28,7 @@ import {
 } from '../packages/core/src/scheduleImport/index.js';
 import { COLLISION_MESSAGE, handleGameImportRpc } from '../frontend/src/lib/mockGameImport.js';
 import { loadScheduleFixture, outsideDecisionsFor } from './helpers/scheduleFixtureLoad.js';
+import { GAME_IMPORT_SQL } from './helpers/gameImportSql.js';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PGTAP = readFileSync(
@@ -1490,10 +1491,7 @@ describe('fix round 1: the mock and the pgTAP file agree (the same inputs, the s
     expect(out.data.games.updated).toBe(2);
     expect(out.data.warnings.filter((w) => w.type === 'games-swapped')).toHaveLength(2);
     // The words of the one warning are the SQL's: the migration carries the same sentence.
-    const migration = readFileSync(
-      path.join(REPO, 'supabase/migrations/20261121010000_game_import.sql'),
-      'utf8'
-    );
+    const migration = GAME_IMPORT_SQL;
     expect(migration).toContain(
       out.data.warnings.find((w) => w.type === 'games-swapped').message.replaceAll("'", "''")
     );

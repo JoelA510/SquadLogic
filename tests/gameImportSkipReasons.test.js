@@ -2,9 +2,9 @@
  * The closed lists the games import's SQL and core both keep (PR 5, F11 plan "What PR 5 ... must do or avoid", item 3).
  *
  * - **Skip reasons.** A game the file names that the apply does not write carries a reason from a closed list that can
- *   grow by one later (`skipped-scored`, F11-2). The list is ONE constant in core with words for each reason; this test
+ *   grow (`skipped-scored` joined it with F11-2, 20261122010000). The list is ONE constant in core with words for each reason; this test
  *   fails when a reason has no words, and holds the SQL's literal to the constant in both directions, so adding
- *   `skipped-scored` in the migration without the constant (or the constant without words) is red.
+ *   a new `skipped-*` literal in the migration without the constant (or the constant without words) is red.
  * - **Row refusals.** The SQL's `c_row_refusals` (the reasons a staged row may carry from the file check, and the ones
  *   the apply adds) equals core's `SCHEDULE_IMPORT_ROW_REFUSALS`.
  */
@@ -23,14 +23,10 @@ import {
   describeScheduleImportReason,
   describeScheduleImportSkip,
 } from '../packages/core/src/scheduleImport/index.js';
+import { GAME_IMPORT_SQL } from './helpers/gameImportSql.js';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const MIGRATION = readdirSync(path.join(REPO, 'supabase/migrations')).find((f) =>
-  f.endsWith('_game_import.sql')
-);
-const SQL = MIGRATION
-  ? readFileSync(path.join(REPO, 'supabase/migrations', MIGRATION), 'utf8')
-  : '';
+const SQL = GAME_IMPORT_SQL;
 /** The text of the apply function only. */
 const APPLY = SQL.slice(SQL.indexOf('CREATE FUNCTION public.apply_game_import_job'));
 
@@ -45,12 +41,12 @@ describe('the skip reasons are one constant with words, held to the SQL', () => 
   });
 
   it('a reason with no words fails (the check can fail)', () => {
-    expect(() => describeScheduleImportSkip('skipped-scored')).toThrow(
+    expect(() => describeScheduleImportSkip('skipped-forfeit')).toThrow(
       /not a skip reason with words/
     );
     expect(() => describeScheduleImportSkip('')).toThrow();
     // The list a planted reason would join: it has no entry in the words, so it is caught.
-    const planted = [...SCHEDULE_IMPORT_SKIP_REASONS, 'skipped-scored'];
+    const planted = [...SCHEDULE_IMPORT_SKIP_REASONS, 'skipped-forfeit'];
     expect(
       planted.filter((reason) => {
         try {
@@ -60,7 +56,7 @@ describe('the skip reasons are one constant with words, held to the SQL', () => 
           return true;
         }
       })
-    ).toEqual(['skipped-scored']);
+    ).toEqual(['skipped-forfeit']);
   });
 
   it('the SQL emits exactly the reasons of the list, and no other skipped-* literal', () => {
@@ -72,7 +68,7 @@ describe('the skip reasons are one constant with words, held to the SQL', () => 
   });
 
   it('CONTROL: a planted literal in the SQL would be found', () => {
-    const planted = `${APPLY} SELECT 'skipped-scored';`;
+    const planted = `${APPLY} SELECT 'skipped-forfeit';`;
     const literals = [
       ...new Set([...planted.matchAll(/'(skipped-[a-z-]+)'/g)].map((m) => m[1])),
     ].sort();
@@ -132,12 +128,18 @@ describe("the row refusals of the SQL equal core's", () => {
     );
   });
 
-  it('the staged flags the SQL takes are SCHEDULE_IMPORT_STAGED_FLAGS (a parse warning staged would refuse the apply)', () => {
+  it('the staged flags the SQL takes are SCHEDULE_IMPORT_STAGED_FLAGS, the parse warnings among them since 20261122010000', () => {
     const m = /AND r\.flags <@ ARRAY\[([^\]]*)\]/.exec(APPLY);
     expect(m).not.toBeNull();
     const sqlFlags = [...(m?.[1] ?? '').matchAll(/'([a-z-]+)'/g)].map((x) => x[1]);
     expect(sqlFlags.sort()).toEqual([...SCHEDULE_IMPORT_STAGED_FLAGS].sort());
-    for (const code of SCHEDULE_IMPORT_PARSE_WARNINGS) expect(sqlFlags).not.toContain(code);
+    // The parse's two warnings reach the saved result: the SQL takes them, and says each in words of its own.
+    for (const code of SCHEDULE_IMPORT_PARSE_WARNINGS) {
+      expect(sqlFlags).toContain(code);
+      expect(APPLY).toMatch(new RegExp(`WHEN '${code}' THEN '`));
+    }
+    // CONTROL: a code that is no staged flag is not in the SQL's list.
+    expect(sqlFlags).not.toContain('games-swapped');
   });
 
   it('every refusal the apply raises while resolving is one of them', () => {

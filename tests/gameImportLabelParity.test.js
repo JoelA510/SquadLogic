@@ -36,15 +36,13 @@ import {
 } from '../packages/core/src/scheduleImport/index.js';
 import { normaliseExternalLabel } from '../packages/core/src/externalImport/mapping.js';
 import { handleGameImportRpc } from '../frontend/src/lib/mockGameImport.js';
+import { GAME_IMPORT_SQL } from './helpers/gameImportSql.js';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FIXTURE = JSON.parse(
   readFileSync(path.join(REPO, 'tests/fixtures/labelNormalisationCases.json'), 'utf8')
 );
-const MIGRATION = readFileSync(
-  path.join(REPO, 'supabase/migrations/20261121010000_game_import.sql'),
-  'utf8'
-);
+const MIGRATION = GAME_IMPORT_SQL;
 const PGTAP = readFileSync(path.join(REPO, 'supabase/tests/game_import_round2.sql'), 'utf8');
 
 /** The rows between two marker comments of the pgTAP file, as arrays of their quoted JSON literals. */

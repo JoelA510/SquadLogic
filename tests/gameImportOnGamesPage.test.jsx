@@ -21,6 +21,7 @@ import {
   seedGameImportWorld,
 } from './helpers/gameImportWorld.js';
 import { seedMockDb } from './helpers/seedMockDb.js';
+import { GAME_IMPORT_SQL } from './helpers/gameImportSql.js';
 
 vi.mock('../frontend/src/lib/supabaseClient.js', async () => {
   const { mockSupabase } = await import('../frontend/src/lib/mockSupabaseClient.js');
@@ -169,7 +170,7 @@ describe('F9: the Games page lists what an import said, in words', () => {
   });
 
   it('holds the three sentences to the database’s own (read from the migration), and names no game for another warning', () => {
-    const sql = readFileSync('supabase/migrations/20261121010000_game_import.sql', 'utf8');
+    const sql = GAME_IMPORT_SQL;
     for (const sentence of [
       'This game takes the place of a game the file moves away: both are written.',
       'The file gives this game a date and no time: it is no longer placed, and stands on the TIME TBD list.',

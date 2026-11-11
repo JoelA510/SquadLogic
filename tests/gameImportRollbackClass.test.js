@@ -29,10 +29,11 @@ import {
 } from '../packages/core/src/scheduleImport/index.js';
 import { handleGameImportRpc } from '../frontend/src/lib/mockGameImport.js';
 import { readCurrentSavedGameIds } from '../frontend/src/utils/gamePublishedClient.js';
+import { GAME_IMPORT_SQL } from './helpers/gameImportSql.js';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (file) => readFileSync(path.join(REPO, file), 'utf8');
-const MIGRATION = read('supabase/migrations/20261121010000_game_import.sql');
+const MIGRATION = GAME_IMPORT_SQL;
 const MOCK = read('frontend/src/lib/mockGameImport.js');
 const PGTAP = read('supabase/tests/game_import_rollback_class.sql');
 const SCENARIOS = JSON.parse(read('tests/fixtures/rollbackClassScenarios.json')).scenarios;

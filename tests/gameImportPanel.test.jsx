@@ -1151,7 +1151,7 @@ describe('G1: a confirm whose answer is lost is resolved from the stored job, an
     expect(cancels(rpc)).toHaveLength(1);
   });
 
-  it('CONTROL: the mock’s cancel is the SQL’s: called blind on a completed job it marks it failed', async () => {
+  it('CONTROL: the mock’s cancel is the SQL’s (20261122010000): called blind on a completed job it is refused, and the job keeps its status', async () => {
     render(<ScheduleImportPanel />);
     await toConfirm();
     fireEvent.click(screen.getByRole('button', { name: 'Confirm and import' }));
@@ -1162,8 +1162,8 @@ describe('G1: a confirm whose answer is lost is resolved from the stored job, an
       p_import_job_id: job.id,
       p_import_type: 'games',
     });
-    expect(error).toBeNull();
-    expect((await jobs())[0].status).toBe('failed');
+    expect(error).toMatchObject({ code: '22023', details: 'import_not_ready_to_apply' });
+    expect((await jobs())[0].status).toMatch(/^completed/);
   });
 });
 

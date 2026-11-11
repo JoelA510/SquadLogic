@@ -289,6 +289,8 @@ const SCHEDULE_TABLES = [
   'game_assignments',
   'games',
   'schedule_tbd',
+  // 20261122010000: the table that holds the results (its season is its home team's division's).
+  'game_scores',
 ];
 
 /** The season a schedule row belongs to: its own column (exceptions, TIME TBD), else its team's division's season. */

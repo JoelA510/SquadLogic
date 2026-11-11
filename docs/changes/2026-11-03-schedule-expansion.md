@@ -1456,46 +1456,152 @@ players), if the nine teaming suites move, or if a reader of `teams` cannot be c
 Depends on: PR 5 merged and deployed. Review (c) because it holds an Edge write path (`import-validation`) and the
 preview and apply parity.
 
-- [ ] F1 (M) `import-validation` accepts `games`: the allowlist, Zod rows, the 2,400 cap, the season clock via
+- [x] F1 (M) `import-validation` accepts `games`: the allowlist, Zod rows, the 2,400 cap, the season clock via
       `_shared/timing`. Tests: a Deno test and a vitest twin with named zones and dates (spring-forward gap refused,
       fall-back first occurrence flagged, a half-hour zone, a southern-hemisphere zone), run with `TZ` set to two other
       zones to prove the host zone is not read; a 500-row chunk timed with coverage on.
-- [ ] F2 (L) The Games tab of the Import panel: upload, mapping, preview, confirm, result, rollback; accessible, both
+- [x] F2 (L) The Games tab of the Import panel: upload, mapping, preview, confirm, result, rollback; accessible, both
       themes, no color-only state. Tests: `tests/gameImportPanel.test.jsx` (the confirm lists everything that will be
       created; nothing is created without it; each unmapped row is listed with its reason).
-- [ ] F3 (S) The twin: `tests/gameImportPreviewTwin.test.js` requires the preview's counts, its conflict audit and the
+- [x] F3 (S) The twin: `tests/gameImportPreviewTwin.test.js` requires the preview's counts, its conflict audit and the
       saved result to agree over one file that reaches every outcome.
-- [ ] F4 (M) E2E `tests/e2e/features/schedule_import.feature`: import the fixture, map the outside clubs, see the flagged
+- [x] F4 (M) E2E `tests/e2e/features/schedule_import.feature`: import the fixture, map the outside clubs, see the flagged
       conflicts, confirm, see the games Published, roll back. Only this feature locally.
-- [ ] G3 (S, moved from PR 7) The SquadLogic schedule CSV, whose test exports the fixture's imported schedule and
+- [x] G3 (S, moved from PR 7) The SquadLogic schedule CSV, whose test exports the fixture's imported schedule and
       re-imports it as a dry run: **zero changes**. It is here because the importer it tests is here.
 - [ ] G5 (S, moved from PR 7) Optional "record as baseline" at import (decision 15), ticked by default when the games
-      arrive Published. Tests of G3 and G5: as they were in PR 7 (as 5.1 and 5.6, each with a case for a cancelled game
+      arrive Published. **Deferred, 2026-11-10 (the coordinating agent, under the delegation of section 10): to PR 6b
+      (baseline at import). It needs the Exports page's generation as a shared function.** Tests of G3 and G5: as they were in PR 7 (as 5.1 and 5.6, each with a case for a cancelled game
       and a TIME TBD game).
 
-- [ ] F5 (S, added 2026-11-10; section 10, the 2026-11-10 answers, entry 4) Core's parse turns a `bad-time` row into a
+- [x] F5 (S, added 2026-11-10; section 10, the 2026-11-10 answers, entry 4) Core's parse turns a `bad-time` row into a
       dated TIME TBD game with a warning and derives the week of a `bad-week` row from its date with a warning;
       `outside-season-window` stays a refusal. Test `tests/scheduleImportParse.test.js`: one case per code, each beside a
       well-formed control, and a `bad-week` row whose date is outside the season still refused.
-- [ ] F6 (M, added 2026-11-10; entry 1) A TIME TBD game's date is shown with a blank time on the Games page list, in the
+- [x] F6 (M, added 2026-11-10; entry 1) A TIME TBD game's date is shown with a blank time on the Games page list, in the
       master export, and under its date in the Day Sheet (data: `schedule_tbd.game_date`). Tests: a case in each of the
       three surfaces' existing test files for a dated TIME TBD game (the date present, the time blank) beside an undated
       one, which reads as today.
-- [ ] F7 (M, added 2026-11-10; entry 3) Preview-stale protection: the confirm step passes the previewed counts, and the
+- [x] F7 (M, added 2026-11-10; entry 3) Preview-stale protection: the confirm step passes the previewed counts, and the
       apply is refused with `game_import_preview_stale` when its own differ. PR 6 has no migration, so the Edge function
       re-runs the dry run, compares, and refuses. Tests: a Deno test and its mock twin in which the schedule changes
       between preview and confirm (refused, nothing written), beside an unchanged control that applies.
-- [ ] F8 (S, added 2026-11-10; entry 4) The mapping screen defaults to "map to existing" when a match exists. Test: a
+- [x] F8 (S, added 2026-11-10; entry 4) The mapping screen defaults to "map to existing" when a match exists. Test: a
       case in `tests/gameImportPanel.test.jsx` (a label with a match opens on "map to existing"; one without does not).
-- [ ] F9 (S, added 2026-11-10) The Games page shows the import's warning list (`games-swapped`, `game-made-time-tbd`,
+- [x] F9 (S, added 2026-11-10) The Games page shows the import's warning list (`games-swapped`, `game-made-time-tbd`,
       `week-differs`). Test: a case in `tests/gameImportPanel.test.jsx`, or the Games page's own test file, that each of
       the three is listed in words and that no list is drawn when there is none.
-- [ ] F3b (S, added 2026-11-10) Align the reason code for an outside club whose custom name collides with an own team:
+- [x] F3b (S, added 2026-11-10) Align the reason code for an outside club whose custom name collides with an own team:
       core and the mock say `unknown-team`, the SQL says `label-is-own-team`; both refuse (reported from PR 5's review,
       not re-traced here). Test: one case in `tests/gameImportLabelParity.test.js` requiring the same code from all three.
 
 Plants: the conversion reads the host zone; an unmatched label created without the confirm list; the preview's counts
 computed apart from the dry run.
+
+**As built (2026-11-10; the pull request has the detail).** Eleven of the twelve tasks are done; **G5 is deferred to
+PR 6b** (a baseline is the master export's rows, and the import panel does not make that file: recording one from the
+panel needs the Exports page's own generation as a shared function, a refactor that goes in its own pull request,
+AGENTS.md section 3). What differs from the text above, each a decision of the build under the delegation of 2026-11-10 (section 10):
+
+- F1/F5: `bad-time` and `bad-week` are warnings of the parse that are **not staged**. The apply's shape check takes two
+  staged flags (`time-ambiguous`, `week-differs`) and this PR has no migration, so a third would refuse the whole apply.
+  They are said at the upload and in the preview; the saved result does not carry them. The next replacement of
+  `apply_game_import_job` can take them (and drop the two codes from `c_row_refusals`).
+- F1: a Week past 255 is `bad-week` (derived), because `game_slots.week_index` holds 1 to 255 and a staged 256 would
+  refuse the apply; core read 1 to 999 before.
+- F3b: confirmed (core and the mock said `unknown-team`), and a second case found with it: an outside club named like a
+  team shell of the same file was accepted by core and refused by the SQL (`shell_here`). Core now says
+  `label-is-own-team` for both.
+- F6: the master export keeps `TIME TBD` in the Start cell of a dated TIME TBD game (every reader of that file matches
+  the cell exactly) and says the date in Notes; the Day Sheet lists a dated game under its date only; the Games page
+  gains a "TIME TBD games" list. `get_schedule_tbd` does not return `game_date`: the client reads it from the table.
+- F7: the comparison is every count the confirm screen shows (`scheduleImportConfirmCounts`); `games.repointed` and
+  `reused.slots` are not shown and not compared. The re-run and the apply are two statements.
+- Plan 4.4's preview audit (coach overlap, hosting balance, judged in the browser) is **not** in the preview: it states
+  what it did not check, as the SQL result does (`not_judged`).
+- Found while building: the mock resolved a single match with no stored decision; the database does not. Core takes
+  `explicitOnly` and the mock passes it (lesson 107).
+- Fix round 1 (2026-11-10, Codex and CI): the panel's workflow is keyed by organization and season, and a roll back is
+  refused for a job of another scope; a blank Division or team, and a time and field with no Venue, are refused as a
+  row at staging (`unknown-division`, `unknown-team`, `unknown-venue`) instead of failing the apply's shape check for
+  the whole job; a value is read by the header as the file wrote it; the schedule CSV writes a game's own start and
+  end on the season clock, not its slot's; the Edge handler reads the job's season through the shared module.
+
+**For the next replacement of `apply_game_import_job` and `get_schedule_tbd` (noted 2026-11-10; F11-2 replaces
+neither, so whichever pull request next replaces one takes its line):**
+
+- `apply_game_import_job` is callable directly by an admin, without the preview-stale check the Edge function makes.
+  Moving the comparison into the function (the confirmed counts as a parameter) closes that, and makes the re-run and
+  the apply one statement.
+- Its staged-flag list (`time-ambiguous`, `week-differs`) should take `bad-time` and `bad-week`, so the two warnings
+  reach the saved result, and `c_row_refusals` should drop the two codes.
+- `get_schedule_tbd` should return `game_date` and `external_ref`; the client's second read of `schedule_tbd` then
+  goes.
+
+**For the next migration, whichever it is (F11-2's or its own; noted 2026-11-11, fix round 3):**
+`cancel_ready_import_job` must refuse a job that is not `ready_to_apply`. It is a deployed function (PR 5 added
+`games` to it) with no check of the job's status: called for an applied job of any of its six types it marks the job
+`failed` and audits `import.canceled`, while everything the apply wrote stays. PR 6 closes the games panel's way to
+that call from the client (below); only the function can close the time between a client's read and its call, and
+the other callers. The mock's copy has no status check either, on purpose, until the SQL has one.
+
+**Review round (2026-11-11, the one adversarial review, ten findings, all taken).** The panel: a roll back is kept
+per job (the next import's result is its own); "nothing to apply" says why from the counts; the "Games arrive
+Published" box shows the STORED mapping and there is no confirm without a preview of it; a column the import reads
+given twice refuses the file (the CSV reader renames a repeat, so the parse never saw it); the mapping controls are off
+while a preview is made and the confirm lists the names of the mapping that was sent; the Import page's 10 MB guard;
+a staged import that is left is discarded (`cancel_ready_import_job`: the job is marked failed, its staged rows stay
+with it) and one left by a closed tab is named on the upload step with "Discard it". The reports: the coach schedule
+shows a TIME TBD game's date; a TIME TBD game whose date changed is a change since publication; the Day Sheet says how
+many TIME TBD games it left to another day. The template's header row is in a constants-only module, so the Import
+page does not load the parser.
+
+**Fix round 3 (2026-11-11, Codex on the review round's push, two findings, both taken).** (1) A confirm whose
+answer was lost after the apply committed left the panel free to discard the job on leaving, and
+`cancel_ready_import_job` marks an applied job `failed`: the games stayed, the job left the roll back, and a false
+`import.canceled` was audited. The panel now settles a failed confirm from the job itself before anything else
+(applied: the result screen with its roll back; still `ready_to_apply`: "The import was not applied", confirm again or
+discard; unreadable: the outcome is said to be unknown, "Check again", nothing sent again and nothing discarded), and
+`discardGameImport` reads the job and calls the cancel only for one read as `ready_to_apply`, for every caller (Cancel,
+another tile, a switch of organization or season, the page closing, the unfinished list). Declared: the read and the
+call are two statements; the function's own check (above) closes that. (2) The schedule CSV wrote an end in the hour
+the clocks repeat as its wall time, which the import reads as the first time round: a game ending the second time
+round came back an hour shorter. Such an end is now written as a `Length` with a blank End Time (the column joins the
+file only then); a start the second time round cannot be written and is counted and said
+(`omitted.repeatedHour`); a start the first time round round-trips. No stored instant reads as a time in the hour the
+clocks skip, and the import refuses a file that names one, so the export has no such case
+(`tests/scheduleCsvRepeatedHour.test.js`: Los Angeles, Sydney, and Phoenix as the control).
+
+**Follow-ups found in PR 6's review (2026-11-11; recorded, not fixed here).**
+
+1. `ImportContext` keeps `activeJob` and `imported*.importJobId` across a switch of organization or season, for the
+   coach, field, field availability and evaluations imports (statically read, not reproduced): the same class as the
+   schedule panel's Codex P1, in another component.
+2. The calendar feed (`supabase/functions/_shared/calendar/teamFeed.ts`) and `useTeamPortal.js` read the SLOT's times,
+   not the game's own `start` and `end`: an imported game whose end differs from its slot's shows the slot's end.
+3. At the next replacement of `apply_game_import_job` or `get_schedule_tbd` (the three lines above): the staged-flag
+   list for `bad-time` and `bad-week`, `game_date` returned by the RPC, the preview-stale check inside the RPC.
+4. A sweep in SQL for abandoned `ready_to_apply` games jobs, if the panel's client-side discard proves insufficient
+   (a closed tab never runs it; the upload step lists what it left).
+5. `cancel_ready_import_job` refuses a job that is not `ready_to_apply` (the note for the next migration, above; fix
+   round 3). Until then the Import page's own deferred-apply flow can still reach it blind: `ImportContext`'s
+   `cancelDeferredImport` (`importDeferredActions.js`, `cancelDeferredImportJob`) is offered again after
+   `applyDeferredImport` throws, for the coach, field, field availability, practice preference and evaluation
+   imports, and a finalize that committed and lost its answer throws (statically read, not reproduced; not changed
+   in PR 6).
+
+### PR 6b: baseline at import (S after its refactor; no migration; Review: (a); added 2026-11-10)
+
+Depends on: PR 6 merged. On no other pull request's dependency path; placed after F11-3 in the order.
+
+- [ ] G5a (M) Lift the Exports page's master-file generation (`buildExportPayload`, the directory read and
+      `generateScheduleExports` as `OutputGenerationPanel` calls them) into one function both callers use. A refactor,
+      in its own pull request first if it is more than a move. Test: the Exports page's existing tests unchanged, and
+      the function's rows equal to the page's for one seeded league.
+- [ ] G5 (S) The import's result offers "record this import as the publication baseline", ticked by default when the
+      games arrive Published, and records the shared function's rows through `admin_publish_schedule_baseline`. Tests
+      as 5.1 and 5.6 (each with a case for a cancelled game and a TIME TBD game), and "Changes since publication"
+      against that baseline shows no change right after the import.
 
 ### PR 7: reports (M; no migration; Review: (a))
 
@@ -2510,13 +2616,18 @@ lifted the hold. The verbatim messages, the nine agreed changes and the answer t
 owner's answers of 2026-11-09 and of 2026-11-09 evening and 2026-11-10 follow them: read them first. **Merged on `main`**
 (statically read from `git log` at `ad18861`; whether each migration is deployed was not checked): PR 4 (#706), PR 1
 (#707), PR 9 (#708), PR 2 (#709), PR 3 (#710), PR 13 (#711), PR 7 (#713), the F11 plan's F11-1 (#712), and PR 5 (#719,
-`ad18861`). **Not merged:** PR 6, 8, 10, 11 and 12, and F11-2 to F11-5. PR 14 stays held.
+`ad18861`). **In review:** PR 6 (opened 2026-11-10; no migration; task G5 not built, see "As built" under PR 6 in
+section 7). **Not merged:** PR 8, 10, 11 and 12, and F11-2 to F11-5. PR 14 stays held.
 
 - **Order and the dependency rule.** Section 7 ("Dependencies and order") has the dependency table and the one priority
   rule: at most two PRs in flight; a free slot takes the first PR, in the order PR 1; PR 4; PR 2; PR 5; PR 3; PR 9;
   PR 6; PR 10; PR 7; PR 13; PR 8; PR 11; PR 12, whose dependencies are merged and deployed. There are no waves. PR 14 is
-  held (decision 28). Left, with the F11 plan's pull requests in their places: PR 6 (next, once PR 5's migration
-  `20261121010000` is deployed and verified; its task list grew on 2026-11-10, F5 to F9 and F3b), then F11-2, F11-3,
+  held (decision 28). Left, with the F11 plan's pull requests in their places: PR 6 (in review; PR 5's migration
+  `20261121010000` was deployed first; its task list grew on 2026-11-10, F5 to F9 and F3b), then F11-2, F11-3,
+  PR 6b (baseline at import, task G5, deferred from PR 6 on 2026-11-10; it is on no dependency path),
+  and the four follow-ups of PR 6's review, listed under PR 6 in section 7 (the scope switch in `ImportContext`; slot
+  times in the calendar feed and the team portal; the three changes for the next function replacement; a SQL sweep
+  for abandoned games jobs), none with a pull request number yet,
   PR 10, PR 8, PR 11, F11-4, PR 12. F11-5 and PR 14 are the coordinating agent's call when their turn comes (section 10, the 2026-11-10
   answers, entry 5). Later, with no PR number: the B5.10 discovery pass and its plan-change (registration state and
   optional-data features), which the owner agreed to on 2026-11-09 (section 10, the 2026-11-09 answers, entry 2). Outside

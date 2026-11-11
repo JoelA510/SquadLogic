@@ -87,7 +87,9 @@ export function makeNamers({ teams, fields, venues }) {
  * @param {Array<{ id: string, name: string, division?: string | null }>} input.teams - the registry
  * @param {Array<{ id: string, name: string, venueId?: string | null }>} input.fields
  * @param {Array<{ id: string, name: string }>} input.venues
- * @param {Array<{ homeTeamId: string, awayTeamId: string, weekIndex: number, reason: string }>} [input.tbdGames]
+ * @param {Array<{ homeTeamId: string, awayTeamId: string, weekIndex: number, reason: string, gameDate?: string | null }>} [input.tbdGames]
+ *   a game an import gave a date and no time carries `gameDate`: it is listed under THAT date (with no date chosen,
+ *   with every other); one with no date is listed whatever the date, as it always was
  * @param {string} input.timeZone - the season's IANA zone
  * @param {string | null} input.date - `YYYY-MM-DD`, or none: then no game is on the date, and the TIME TBD games and the
  *   games with no readable time are still listed
@@ -160,8 +162,12 @@ export function buildDaySheet({
       a.home.localeCompare(b.home)
   );
 
-  const tbd = tbdGames.map((game) => ({
-    Date: '',
+  // A dated TIME TBD game belongs to its day: on another day's sheet it is not listed, and is counted.
+  const tbdListed = tbdGames.filter(
+    (game) => !game.gameDate || date === null || game.gameDate === date
+  );
+  const tbd = tbdListed.map((game) => ({
+    Date: game.gameDate ?? '',
     Kickoff: PUBLICATION_TBD.TIME,
     Ends: '',
     Venue: PUBLICATION_TBD.LOCATION,
@@ -183,6 +189,7 @@ export function buildDaySheet({
       onDate,
       shown: dated.length,
       tbd: tbd.length,
+      tbdOtherDates: tbdGames.length - tbdListed.length,
       unreadable: unreadable.length,
       unknownGround,
     },

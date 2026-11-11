@@ -29,6 +29,7 @@ import { describe, expect, it } from 'vitest';
 import {
   divisionDecisionKey,
   fieldDecisionKey,
+  resolveScheduleRows,
   teamDecisionKey,
   toStagedGameRow,
   venueDecisionKey,
@@ -406,4 +407,145 @@ describe('the mock reads two labels as one exactly when the SQL does (the same p
       expect(mismatches).toEqual([]);
     });
   }
+});
+
+// ------------------------------------------------------------------- F3b (PR 6): one code from core, the mock and the SQL
+describe('F3b: an outside club whose NAME is an own team’s is label-is-own-team in core, the mock and the SQL', () => {
+  // The cases above name the outside club by its label. A decision can also carry a name (`{ action: 'outside', name }`),
+  // and the SQL judges that name (`cname = COALESCE(d.dname, k.label)`): `own_named` (an own team of the division has it)
+  // and `shell_here` (a team this same file creates in the division has it) both make the label `own-name`, refused
+  // `label-is-own-team`. Core judged the LABEL, so a custom name fell through to "a team of that name exists" and was
+  // refused `unknown-team`, and a name a shell takes was not refused at all.
+  const D = U(100);
+  const league = {
+    divisions: [{ id: D, name: 'PDX' }],
+    teams: [
+      { id: U(101), name: 'Anchor', divisionId: D, isExternal: false },
+      { id: U(102), name: 'Home Side', divisionId: D, isExternal: false },
+    ],
+    venues: [{ id: U(30), name: 'Round Park' }],
+    fields: [{ id: U(31), venueId: U(30), name: 'Pitch 1' }],
+  };
+  const parsedRow = (n, home, away, date, week) => ({
+    rowNumber: n,
+    rowKey: `row-${n}`,
+    gameId: `F3B-${n}`,
+    status: 'ok',
+    reason: null,
+    message: null,
+    tbdReason: null,
+    date,
+    startTime: '09:00',
+    endTime: '10:00',
+    start: `${date}T09:00:00-07:00`,
+    end: `${date}T10:00:00-07:00`,
+    venueLabel: 'Round Park',
+    fieldLabel: 'Pitch 1',
+    divisionLabel: 'PDX',
+    homeLabel: home,
+    awayLabel: away,
+    weekIndex: week,
+    weekSource: 'file',
+    flags: [],
+  });
+  const baseDecisions = {
+    divisions: { [divisionDecisionKey('PDX')]: { action: 'map', id: D } },
+    venues: { [venueDecisionKey('Round Park')]: { action: 'map', id: U(30) } },
+    fields: { [fieldDecisionKey('Round Park', 'Pitch 1')]: { action: 'map', id: U(31) } },
+  };
+  /** Core and the mock over one file and one set of decisions: the refusal reasons each gives, by row. */
+  function both(rows, teams) {
+    const decisions = { ...baseDecisions, teams };
+    const core = resolveScheduleRows({ rows, league, decisions }).rows.map((r) => r.reason);
+    const db = {
+      season_settings: [{ id: SEASON, organization_id: ORG, status: 'active', name: 'Spring' }],
+      divisions: [{ id: D, organization_id: ORG, season_settings_id: SEASON, name: 'PDX' }],
+      teams: league.teams.map((t) => ({
+        id: t.id,
+        organization_id: ORG,
+        division_id: D,
+        name: t.name,
+      })),
+      locations: [{ id: U(30), organization_id: ORG, name: 'Round Park' }],
+      fields: [{ id: U(31), organization_id: ORG, location_id: U(30), name: 'Pitch 1' }],
+      game_slots: [],
+      scheduler_runs: [],
+      game_assignments: [],
+      import_jobs: [
+        {
+          id: 'job',
+          organization_id: ORG,
+          job_type: 'games',
+          status: 'importing',
+          season_settings_id: SEASON,
+          warning_summary: {},
+        },
+      ],
+      staging_import_rows: rows.map((row, i) => ({
+        id: `r${i}`,
+        organization_id: ORG,
+        import_job_id: 'job',
+        import_type: 'games',
+        ...toStagedGameRow(/** @type {any} */ (row)),
+      })),
+      import_application_records: [],
+      schedule_tbd: [],
+      audit_log: [],
+    };
+    expect(
+      rpc(db, 'map_game_import_job', { p_import_job_id: 'job', p_mapping: decisions }).error
+    ).toBeNull();
+    const out = rpc(db, 'apply_game_import_job', { p_import_job_id: 'job', p_dry_run: true });
+    expect(out.error).toBeNull();
+    return { core, mock: out.data.refused_by_reason, created: out.data.created };
+  }
+
+  it('a custom name that is an own team’s: the same code from all three, beside a control that creates the club', () => {
+    const rows = [parsedRow(1, 'Visitors', 'Anchor', '2027-04-03', 20)];
+    const key = teamDecisionKey('PDX', 'Visitors');
+    const anchor = { [teamDecisionKey('PDX', 'Anchor')]: { action: 'map', id: U(101) } };
+    // CONTROL: a name nobody has makes one outside club and refuses nothing.
+    const control = both(rows, { ...anchor, [key]: { action: 'outside', name: 'Far Club' } });
+    expect(control.core).toEqual([null]);
+    expect(control.mock).toEqual({});
+    expect(control.created.outside_teams).toBe(1);
+    // The collision, in a different spelling of the own team's name (one normaliser).
+    const hit = both(rows, { ...anchor, [key]: { action: 'outside', name: ' home  SIDE ' } });
+    expect(hit.core).toEqual(['label-is-own-team']);
+    expect(hit.mock).toEqual({ 'label-is-own-team': 1 });
+    expect(hit.created.outside_teams).toBe(0);
+  });
+
+  it('a custom name that a team shell of the same file takes: the same code (the SQL’s `shell_here`)', () => {
+    const rows = [
+      parsedRow(1, 'Visitors', 'Anchor', '2027-04-03', 20),
+      parsedRow(2, 'New Shell', 'Anchor', '2027-04-10', 21),
+    ];
+    const got = both(rows, {
+      [teamDecisionKey('PDX', 'Anchor')]: { action: 'map', id: U(101) },
+      [teamDecisionKey('PDX', 'Visitors')]: { action: 'outside', name: 'new shell' },
+      [teamDecisionKey('PDX', 'New Shell')]: { action: 'create' },
+    });
+    expect(got.core).toEqual(['label-is-own-team', null]);
+    expect(got.mock).toEqual({ 'label-is-own-team': 1 });
+    expect(got.created).toMatchObject({ teams: 1, outside_teams: 0 });
+  });
+
+  it('the SQL judges the NAME and says label-is-own-team for both (read from the migration; not executed here)', () => {
+    const apply = MIGRATION.slice(
+      MIGRATION.indexOf('CREATE FUNCTION public.apply_game_import_job')
+    );
+    // the name is the decision's, else the label
+    expect(apply).toContain('COALESCE(d.dname, k.label) AS cname');
+    // an own team of that NAME, and a shell this file creates under that NAME
+    expect(apply).toMatch(
+      /NOT t\.is_external\s+AND public\.normalise_external_label\(t\.name\) = public\.normalise_external_label\(j\.cname\)\)\) AS own_named/
+    );
+    expect(apply).toMatch(/j2\.action = 'create'[\s\S]{0,400}\) AS shell_here/);
+    expect(apply).toContain(
+      "WHEN k2.action = 'outside' AND k2.division_ref IS NOT NULL AND (k2.own_named OR k2.shell_here) THEN 'own-name'"
+    );
+    expect(apply).toContain("WHEN th.kind = 'own-name' THEN 'refused:label-is-own-team'");
+    expect(apply).toContain("WHEN ta.kind = 'own-name' THEN 'refused:label-is-own-team'");
+  });
 });

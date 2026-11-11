@@ -34,6 +34,9 @@ import * as reasonModule from '../packages/core/src/scheduleImport/reasonCodes.j
 import {
   SCHEDULE_IMPORT_FILE_REFUSALS,
   SCHEDULE_IMPORT_FLAGS,
+  SCHEDULE_IMPORT_PARSE_WARNINGS,
+  SCHEDULE_IMPORT_RETIRED_ROW_REFUSALS,
+  SCHEDULE_IMPORT_STAGED_FLAGS,
   SCHEDULE_IMPORT_LIMITS,
   SCHEDULE_IMPORT_REASON,
   SCHEDULE_IMPORT_ROW_REFUSALS,
@@ -94,6 +97,26 @@ function refused(over, code, extra) {
   return r;
 }
 
+/**
+ * F5 (owner, 2026-11-10): a row whose TIME cannot be read is kept as a dated TIME TBD game with a `bad-time` warning.
+ * @param {any} r
+ */
+function expectTimeTbd(r) {
+  expect(r.status).toBe('tbd');
+  expect(r.reason).toBeNull();
+  expect(r.tbdReason).toBe('imported-without-time');
+  expect(r.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  expect([r.startTime, r.endTime, r.start, r.end]).toEqual([null, null, null, null]);
+  const flag = r.flags.find((f) => f.code === 'bad-time');
+  expect(flag).toBeDefined();
+  expect(flag.message).toMatch(/TIME TBD/);
+  expect(typeof r.weekIndex).toBe('number');
+  reached.add('bad-time');
+  return r;
+}
+/** @param {Record<string, string>} over @param {object} [extra] */
+const timeTbd = (over, extra) => expectTimeTbd(one(over, extra));
+
 describe('schedule import: the reason codes', () => {
   it('names every code once, and describes each in a sentence', () => {
     const codes = Object.values(SCHEDULE_IMPORT_REASON);
@@ -107,11 +130,10 @@ describe('schedule import: the reason codes', () => {
   });
 
   it('states the closed lists of plan 4.4 and 4.8, and the additions this build made', () => {
-    // plan 4.4 (the first thirteen), then the additions: bad-week, bad-game-id
+    // plan 4.4 (the first thirteen, less bad-time: F5 made it a warning), then the addition bad-game-id
     expect([...SCHEDULE_IMPORT_ROW_REFUSALS].sort()).toEqual(
       [
         'bad-date',
-        'bad-time',
         'end-not-after-start',
         'same-team',
         'time-in-dst-gap',
@@ -123,11 +145,19 @@ describe('schedule import: the reason codes', () => {
         'label-is-own-team',
         'duplicate-row',
         'game-id-reused',
-        'bad-week',
         'bad-game-id',
         'missing-week',
       ].sort()
     );
+    // F5: the two the parse no longer refuses. They are flags the parse raises and never stages (the SQL's staged-flag
+    // list is closed and this PR has no migration), and the SQL still takes them as a staged refusal.
+    expect([...SCHEDULE_IMPORT_PARSE_WARNINGS].sort()).toEqual(['bad-time', 'bad-week']);
+    expect([...SCHEDULE_IMPORT_RETIRED_ROW_REFUSALS].sort()).toEqual(['bad-time', 'bad-week']);
+    expect([...SCHEDULE_IMPORT_STAGED_FLAGS].sort()).toEqual(['time-ambiguous', 'week-differs']);
+    for (const code of SCHEDULE_IMPORT_PARSE_WARNINGS) {
+      expect(SCHEDULE_IMPORT_ROW_REFUSALS).not.toContain(code);
+      expect(SCHEDULE_IMPORT_FLAGS).toContain(code);
+    }
     expect([...SCHEDULE_IMPORT_FILE_REFUSALS].sort()).toEqual(
       [
         'missing-column',
@@ -145,6 +175,8 @@ describe('schedule import: the reason codes', () => {
         'home-away-imbalance',
         'time-ambiguous',
         'week-differs',
+        'bad-time',
+        'bad-week',
       ].sort()
     );
     expect(SCHEDULE_IMPORT_REASON.IMPORTED_WITHOUT_TIME).toBe('imported-without-time');
@@ -276,11 +308,25 @@ describe('schedule import: times', () => {
     expect([night.startTime, night.endTime]).toEqual(['00:00', '01:00']);
   });
 
-  it('refuses a malformed start or end as bad-time, never as a blank', () => {
-    refused({ 'Start Time': '25:00', 'End Time': '26:00' }, 'bad-time');
-    refused({ 'End Time': 'noon' }, 'bad-time');
-    refused({ 'Start Time': '9.30' }, 'bad-time');
-    refused({ 'Start Time': '13:00 PM', 'End Time': '14:00' }, 'bad-time');
+  it('keeps a row with a malformed start or end as a dated TIME TBD game with a bad-time warning (F5)', () => {
+    // CONTROL: the same row with a time it can read is a placed game with no warning.
+    expect(one()).toMatchObject({ status: 'ok', flags: [], startTime: '09:00' });
+    timeTbd({ 'Start Time': '25:00', 'End Time': '26:00' });
+    timeTbd({ 'End Time': 'noon' });
+    timeTbd({ 'Start Time': '9.30' });
+    const r = timeTbd({ 'Start Time': '13:00 PM', 'End Time': '14:00' });
+    // the rest of the row is kept, the message says what could not be read, and the date is the file's
+    expect(r).toMatchObject({ date: '2026-09-12', weekIndex: 1, homeLabel: 'U05B Team 01' });
+    expect(r.flags.find((f) => f.code === 'bad-time').message).toContain('13:00 PM');
+  });
+
+  it('a bad-time row is still refused for what else is wrong with it (F5 edge cases)', () => {
+    // outside the season: no week can be derived, so the row cannot be stored
+    refused({ 'Start Time': '25:00', Date: '2026-08-29', Week: '' }, 'outside-season-window');
+    // the same team twice
+    refused({ 'Start Time': '25:00', 'Away Team': 'u05b  team 01' }, 'same-team');
+    // and a bad date is still a bad date: a TIME TBD game holds a date
+    refused({ 'Start Time': '25:00', Date: 'soon' }, 'bad-date');
   });
 
   it('refuses an end that is not after the start, and never repairs a 12-hour end', () => {
@@ -309,13 +355,10 @@ describe('schedule import: Length instead of End Time', () => {
     expect(r.end).toBe('2026-09-12T09:55:00-07:00');
   });
 
-  it('refuses a length that is not whole minutes, or that runs past midnight', () => {
-    expect(parseLen({ Length: '60 min' })).toMatchObject({ status: 'refused', reason: 'bad-time' });
-    expect(parseLen({ Length: '0' })).toMatchObject({ status: 'refused', reason: 'bad-time' });
-    expect(parseLen({ 'Start Time': '23:30', Length: '60' })).toMatchObject({
-      status: 'refused',
-      reason: 'bad-time',
-    });
+  it('keeps as TIME TBD a length that is not whole minutes, or that runs past midnight (F5)', () => {
+    expectTimeTbd(parseLen({ Length: '60 min' }));
+    expectTimeTbd(parseLen({ Length: '0' }));
+    expectTimeTbd(parseLen({ 'Start Time': '23:30', Length: '60' }));
   });
 
   it('accepts both an End Time and a Length that agree, and refuses ones that disagree', () => {
@@ -331,7 +374,7 @@ describe('schedule import: Length instead of End Time', () => {
       rows: [row({ Length: '45' })],
       season: SEASON,
     }).rows[0];
-    expect(clash).toMatchObject({ status: 'refused', reason: 'bad-time' });
+    expectTimeTbd(clash);
   });
 });
 
@@ -396,22 +439,16 @@ describe('schedule import: a Length is elapsed time from the resolved start (Cod
     expect(r).toMatchObject({ status: 'refused', reason: 'time-in-dst-gap' });
   });
 
-  it('a Length that would run past midnight is still refused, on a normal day and across a change', () => {
-    expect(parseLen({ 'Start Time': '23:30', Length: '60' })).toMatchObject({
-      status: 'refused',
-      reason: 'bad-time',
-    });
-    expect(parseLen({ Date: '2026-11-01', 'Start Time': '23:30', Length: '60' })).toMatchObject({
-      status: 'refused',
-      reason: 'bad-time',
-    });
+  it('a Length that would run past midnight is never placed, on a normal day and across a change', () => {
+    expectTimeTbd(parseLen({ 'Start Time': '23:30', Length: '60' }));
+    expectTimeTbd(parseLen({ Date: '2026-11-01', 'Start Time': '23:30', Length: '60' }));
   });
 
   it('with both an End Time and a Length, compares the resolved instants, not the wall difference', () => {
     // 00:30 PDT to 02:30 PST is 180 minutes, though the wall clock reads two hours
-    expect(
+    expectTimeTbd(
       parseBoth({ Date: '2026-11-01', 'Start Time': '00:30', 'End Time': '02:30', Length: '120' })
-    ).toMatchObject({ status: 'refused', reason: 'bad-time' });
+    );
     const agree = parseBoth({
       Date: '2026-11-01',
       'Start Time': '00:30',
@@ -429,12 +466,12 @@ describe('schedule import: a Length is elapsed time from the resolved start (Cod
     });
     expect(spring.status).toBe('ok');
     expect(minutesApart(spring)).toBe(60);
-    expect(
+    expectTimeTbd(
       parseBoth({ Date: '2027-03-14', 'Start Time': '01:30', 'End Time': '03:30', Length: '120' })
-    ).toMatchObject({ status: 'refused', reason: 'bad-time' });
+    );
     // an ordinary day is unchanged
     expect(parseBoth({ Length: '60' }).status).toBe('ok');
-    expect(parseBoth({ Length: '45' })).toMatchObject({ status: 'refused', reason: 'bad-time' });
+    expectTimeTbd(parseBoth({ Length: '45' }));
   });
 });
 
@@ -537,8 +574,8 @@ describe('schedule import: review round: TBD repeats, a derived end in the repea
     expect(endMidnight).toMatchObject({ status: 'refused', reason: 'end-not-after-start' });
     expect(endMidnight.message).toMatch(/midnight/);
     const lengthMidnight = parseLen({ 'Start Time': '23:30', Length: '30' });
-    expect(lengthMidnight).toMatchObject({ status: 'refused', reason: 'bad-time' });
-    expect(lengthMidnight.message).toMatch(/midnight/);
+    expectTimeTbd(lengthMidnight);
+    expect(lengthMidnight.flags.find((f) => f.code === 'bad-time').message).toMatch(/midnight/);
     // one minute short of it is fine
     expect(parseLen({ 'Start Time': '23:30', Length: '29' }).status).toBe('ok');
   });
@@ -568,8 +605,10 @@ describe('schedule import: a row with no time becomes TIME TBD, never a dropped 
     refused({ Date: '', 'Start Time': '', 'End Time': '' }, 'bad-date');
   });
 
-  it('a malformed time is bad-time, even beside a blank start', () => {
-    refused({ 'Start Time': '', 'End Time': 'soon' }, 'bad-time');
+  it('a malformed time is said (bad-time), even beside a blank start: blank and malformed stay different', () => {
+    timeTbd({ 'Start Time': '', 'End Time': 'soon' });
+    // CONTROL: the blank row beside it is TIME TBD with NO warning
+    expect(one({ 'Start Time': '', 'End Time': '' }).flags).toEqual([]);
   });
 });
 
@@ -751,9 +790,33 @@ describe('schedule import: the week rule (decision 17)', () => {
     expect(one({ Week: '1', Date: '2026-09-12' }).flags).toEqual([]);
   });
 
-  it('refuses a Week that is not a positive whole number', () => {
-    for (const bad of ['0', '-1', '2.5', 'three', '1e1', '3rd', '0x3'])
-      refused({ Week: bad }, 'bad-week');
+  it('derives the week from the date, with a bad-week warning, when the Week is not one it can store (F5)', () => {
+    // CONTROL: a Week it can read is kept as the file's, with no warning.
+    expect(one({ Week: '1' })).toMatchObject({ weekIndex: 1, weekSource: 'file', flags: [] });
+    // 256 and up cannot be stored (`game_slots.week_index` is 1 to 255), so they are derived too.
+    for (const bad of ['0', '-1', '2.5', 'three', '1e1', '3rd', '0x3', '256', '999']) {
+      const r = one({ Week: bad, Date: '2026-10-03' });
+      expect([bad, r.status, r.reason]).toEqual([bad, 'ok', null]);
+      expect(r.weekIndex).toBe(4);
+      expect(r.weekSource).toBe('derived');
+      const flag = r.flags.find((f) => f.code === 'bad-week');
+      expect(flag).toBeDefined();
+      expect(flag.message).toContain('week 4');
+      expect(flag.details).toEqual({ weekDerived: 4 });
+      // never also week-differs: there is no file week to differ
+      expect(r.flags.map((f) => f.code)).toEqual(['bad-week']);
+    }
+    expect(one({ Week: '255' })).toMatchObject({ weekIndex: 255, weekSource: 'file' });
+    reached.add('bad-week');
+  });
+
+  it('still refuses a bad-week row whose date is outside the season, or that has no start date to derive from (F5)', () => {
+    refused({ Week: 'three', Date: '2026-08-29' }, 'outside-season-window');
+    refused({ Week: 'three', Date: '2027-04-03' }, 'outside-season-window');
+    // no season start: nothing to derive the week from, so the row cannot be stored
+    refused({ Week: 'three' }, 'missing-week', {
+      season: { timeZone: 'America/Los_Angeles', startDate: null, endDate: null },
+    });
   });
 
   it('refuses a date before the season window, and one after its end', () => {
@@ -1029,8 +1092,8 @@ describe('schedule import: same team, Game ID, repeats', () => {
     ]);
     expect(result.rows.map((r) => r.status)).toEqual(['refused', 'ok']);
     // and a refused repeat does not itself become the first
-    const three = parse([row(), row({ 'Start Time': '25:00' }), row()]);
-    expect(three.rows.map((r) => r.reason)).toEqual([null, 'bad-time', 'duplicate-row']);
+    const three = parse([row(), row({ Date: 'soon' }), row()]);
+    expect(three.rows.map((r) => r.reason)).toEqual([null, 'bad-date', 'duplicate-row']);
   });
 
   it('does not call two different games one because their labels run together (sibling: the content key)', () => {
@@ -1110,8 +1173,11 @@ describe('schedule import: schedule-invalid.csv, parse and mapping together', ()
 
   const verdict = (r) => {
     if (r.status === 'refused') return r.reason;
-    if (r.status === 'tbd') return 'tbd';
-    const flag = r.flags.find((f) => ['time-ambiguous', 'week-differs'].includes(f.code));
+    // F5: the generator's note says what is wrong with the row; the import now keeps the row and says so.
+    if (r.status === 'tbd') return r.flags.some((f) => f.code === 'bad-time') ? 'bad-time' : 'tbd';
+    const flag = r.flags.find((f) =>
+      ['time-ambiguous', 'week-differs', 'bad-week'].includes(f.code)
+    );
     return flag ? flag.code : 'ok';
   };
 
@@ -1132,11 +1198,10 @@ describe('schedule import: schedule-invalid.csv, parse and mapping together', ()
   it('reaches every row-level reason it can, and the ones it cannot are reached above', () => {
     const fromFile = new Set(resolved.rows.map((r) => r.reason).filter(Boolean));
     for (const code of fromFile) reached.add(code);
-    // the file reaches the thirteen of plan 4.4 and bad-week
+    // the file reaches the twelve of plan 4.4 that still refuse a row (bad-time and bad-week are kept rows, below)
     expect([...fromFile].sort()).toEqual(
       [
         'bad-date',
-        'bad-time',
         'end-not-after-start',
         'same-team',
         'time-in-dst-gap',
@@ -1148,9 +1213,23 @@ describe('schedule import: schedule-invalid.csv, parse and mapping together', ()
         'label-is-own-team',
         'duplicate-row',
         'game-id-reused',
-        'bad-week',
       ].sort()
     );
+  });
+
+  it('keeps the rows the file calls bad-time and bad-week: dated TIME TBD games and a derived week (F5)', () => {
+    const noted = (note) =>
+      resolved.rows.filter((_, i) => fixture.invalid.rows[i].Notes === `expect: ${note}`);
+    const badTime = noted('bad-time');
+    expect(badTime.length).toBeGreaterThanOrEqual(2);
+    for (const r of badTime) {
+      expect(r.status).toBe('tbd');
+      expect(r.date).toBe('2026-09-12');
+      expect(r.start).toBeNull();
+    }
+    const badWeek = noted('bad-week');
+    expect(badWeek).toHaveLength(1);
+    expect(badWeek[0]).toMatchObject({ status: 'ok', weekSource: 'derived', weekIndex: 7 });
   });
 
   it('keeps the unexpected out: no row the Notes call ok has a reason, a flag or a gap in its ids', () => {
@@ -1180,7 +1259,12 @@ describe('schedule import: every reason of the closed list was reached', () => {
     expect(missingFile).toEqual([]);
     // the flags and the TIME TBD reason that the parse and the mapping produce (the audit's four are
     // produced in tests/scheduleImportAudit.test.js)
-    for (const code of ['time-ambiguous', 'week-differs', 'imported-without-time'])
+    for (const code of [
+      'time-ambiguous',
+      'week-differs',
+      'imported-without-time',
+      ...SCHEDULE_IMPORT_PARSE_WARNINGS,
+    ])
       expect(reached.has(code)).toBe(true);
   });
 });

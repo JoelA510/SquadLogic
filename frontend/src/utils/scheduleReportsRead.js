@@ -40,7 +40,8 @@ const AUDIT_LIMIT = 500;
 
 /**
  * The tables each report needs, so a report is not blocked by a read it does not use. The league is what every report
- * is built over (venues, fields, divisions, teams, slots, the TIME TBD list); the coaches group is the coach schedule's
+ * is built over (venues, fields, divisions, teams, slots, the TIME TBD list, which `readScheduleTbd` reads from the RPC
+ * and, for the date an import gave a game, from `schedule_tbd`); the coaches group is the coach schedule's
  * alone (the coaches, their assignments and the practices), read with the divisions and teams that scope them to the
  * season.
  */
@@ -298,6 +299,7 @@ export async function loadReportsReference(
           awayTeamId: item.awayTeamId,
           weekIndex: item.weekIndex,
           reason: item.reason,
+          gameDate: item.gameDate ?? null,
         })),
     },
   };

@@ -159,12 +159,14 @@ describe('ImportPanel', () => {
       'min-w-0',
       'overflow-visible'
     );
-    // Five import types (E3c added evaluations): three across on a tablet, five on a desktop.
-    expect(screen.getByTestId('import-type-selector')).toHaveClass(
-      'grid',
-      'grid-cols-1',
-      'sm:grid-cols-3',
-      'lg:grid-cols-5'
+    // Six import types (PR 6 of the schedule expansion added games): three across from a tablet up, in two rows.
+    const selector = screen.getByTestId('import-type-selector');
+    expect(selector).toHaveClass('grid', 'grid-cols-1', 'sm:grid-cols-3');
+    expect(selector).not.toHaveClass('lg:grid-cols-5');
+    expect(within(selector).getAllByRole('button')).toHaveLength(6);
+    expect(within(selector).getByRole('button', { name: /^games/i })).toHaveAttribute(
+      'aria-pressed',
+      'false'
     );
 
     const notifyButton = screen.getByRole('button', { name: /notify when import completes/i });
@@ -590,5 +592,31 @@ describe('ImportPanel', () => {
     // An empty box captioned "Import log" is worse than no box: it reads as
     // "nothing happened" on a screen that exists to report what did.
     expect(screen.queryByTestId('import-log')).toBeNull();
+  });
+
+  it('the Games tab hands the screen to the schedule import panel, and the file drop zone is not drawn under it', async () => {
+    // The panel's own work is in tests/gameImportPanel.test.jsx (against the real mock client); here it is only
+    // reached: the tab is one of the six, pressing it selects it, and the generic upload does not sit beside it.
+    render(<ImportPanel onImport={vi.fn()} />);
+    expect(screen.getByText('Drag and drop your CSV file here')).toBeInTheDocument();
+    const tab = screen.getByRole('button', { name: /^games/i });
+    fireEvent.click(tab);
+    expect(tab).toHaveAttribute('aria-pressed', 'true');
+    const panel = await screen.findByTestId('schedule-import-panel');
+    expect(panel).toHaveAttribute('data-kind', 'games');
+    expect(
+      within(panel).getByRole('heading', { name: 'Import a game schedule' })
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Drag and drop your CSV file here')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /download games template/i })
+    ).not.toBeInTheDocument();
+    expect(
+      within(panel).getByRole('button', { name: 'Download the template' })
+    ).toBeInTheDocument();
+    // back to a people import: the generic upload returns
+    fireEvent.click(screen.getByRole('button', { name: /^players/i }));
+    expect(screen.getByText('Drag and drop your CSV file here')).toBeInTheDocument();
+    expect(screen.queryByTestId('schedule-import-panel')).not.toBeInTheDocument();
   });
 });

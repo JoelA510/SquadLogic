@@ -15,7 +15,10 @@ import { describe, expect, it } from 'vitest';
 import {
   SCHEDULE_IMPORT_APPLY_WARNINGS,
   SCHEDULE_IMPORT_FLAGS,
+  SCHEDULE_IMPORT_PARSE_WARNINGS,
+  SCHEDULE_IMPORT_RETIRED_ROW_REFUSALS,
   SCHEDULE_IMPORT_ROW_REFUSALS,
+  SCHEDULE_IMPORT_STAGED_FLAGS,
   SCHEDULE_IMPORT_SKIP_REASONS,
   describeScheduleImportReason,
   describeScheduleImportSkip,
@@ -111,13 +114,30 @@ describe('the warnings the apply makes of its own plan are one list with words, 
 });
 
 describe("the row refusals of the SQL equal core's", () => {
-  it('c_row_refusals is SCHEDULE_IMPORT_ROW_REFUSALS', () => {
+  it('c_row_refusals is SCHEDULE_IMPORT_ROW_REFUSALS, plus the two the parse stopped refusing in PR 6 (F5)', () => {
     const m = /c_row_refusals constant text\[\] := ARRAY\[([\s\S]*?)\];/.exec(APPLY);
     expect(m).not.toBeNull();
     const sqlList = [...(m?.[1] ?? '').matchAll(/'([a-z-]+)'/g)].map((x) => x[1]);
     // The reasons the apply raises on its own are in core's list too (it is the one closed list); the file check's
     // `missing-week` stands on both lists.
-    expect([...new Set(sqlList)].sort()).toEqual([...new Set(SCHEDULE_IMPORT_ROW_REFUSALS)].sort());
+    // PR 6 has no migration: the SQL still takes `bad-time` and `bad-week` as a staged refusal (a job staged before F5
+    // may carry one), and core lists them apart as retired. The next replacement of the function drops them.
+    expect([...SCHEDULE_IMPORT_RETIRED_ROW_REFUSALS].sort()).toEqual(['bad-time', 'bad-week']);
+    for (const code of SCHEDULE_IMPORT_RETIRED_ROW_REFUSALS)
+      expect(SCHEDULE_IMPORT_ROW_REFUSALS).not.toContain(code);
+    expect([...new Set(sqlList)].sort()).toEqual(
+      [
+        ...new Set([...SCHEDULE_IMPORT_ROW_REFUSALS, ...SCHEDULE_IMPORT_RETIRED_ROW_REFUSALS]),
+      ].sort()
+    );
+  });
+
+  it('the staged flags the SQL takes are SCHEDULE_IMPORT_STAGED_FLAGS (a parse warning staged would refuse the apply)', () => {
+    const m = /AND r\.flags <@ ARRAY\[([^\]]*)\]/.exec(APPLY);
+    expect(m).not.toBeNull();
+    const sqlFlags = [...(m?.[1] ?? '').matchAll(/'([a-z-]+)'/g)].map((x) => x[1]);
+    expect(sqlFlags.sort()).toEqual([...SCHEDULE_IMPORT_STAGED_FLAGS].sort());
+    for (const code of SCHEDULE_IMPORT_PARSE_WARNINGS) expect(sqlFlags).not.toContain(code);
   });
 
   it('every refusal the apply raises while resolving is one of them', () => {

@@ -101,13 +101,18 @@ export function describeScheduleTbdReason(kind, reason) {
  */
 export function scheduleTbdNote(item, { ordinal = 1 } = {}) {
   const why = describeScheduleTbdReason(item.kind, item.reason);
-  if (item.kind === 'game') return `Game not scheduled (week ${item.weekIndex}): ${why}.`;
+  // A game an import gave a date and no time (`schedule_tbd.game_date`) says its date; it still has no time.
+  if (item.kind === 'game') {
+    return item.gameDate
+      ? `Game not scheduled (week ${item.weekIndex}, on ${item.gameDate}): ${why}.`
+      : `Game not scheduled (week ${item.weekIndex}): ${why}.`;
+  }
   return item.missingCount > 1
     ? `Practice not scheduled (${ordinal} of ${item.missingCount} missing): ${why}.`
     : `Practice not scheduled: ${why}.`;
 }
 
-const GAME_TBD_NOTE = /^Game not scheduled \(week (\d+)\): (.+)\.$/;
+const GAME_TBD_NOTE = /^Game not scheduled \(week (\d+)(?:, on (\d{4}-\d{2}-\d{2}))?\): (.+)\.$/;
 
 /**
  * The week and the reason in words out of a game's `Notes` cell, the inverse of {@link scheduleTbdNote} for a game
@@ -115,14 +120,16 @@ const GAME_TBD_NOTE = /^Game not scheduled \(week (\d+)\): (.+)\.$/;
  * this sentence and nowhere else; `tests/reportsChangesSincePublication.test.js` holds the two to each other.
  *
  * @param {unknown} note
- * @returns {{ weekIndex: number, why: string } | null} `null` for any note this module did not write
+ * @returns {{ weekIndex: number, why: string, gameDate?: string } | null} `null` for any note this module did not
+ *   write; `gameDate` only for a game that holds a date
  */
 export function parseGameTbdNote(note) {
   if (typeof note !== 'string') return null;
   const match = GAME_TBD_NOTE.exec(note.trim());
   if (match === null) return null;
   const weekIndex = Number(match[1]);
-  return Number.isInteger(weekIndex) && weekIndex > 0 ? { weekIndex, why: match[2] } : null;
+  if (!(Number.isInteger(weekIndex) && weekIndex > 0)) return null;
+  return match[2] ? { weekIndex, why: match[3], gameDate: match[2] } : { weekIndex, why: match[3] };
 }
 
 const practiceItem = z.object({
@@ -142,6 +149,11 @@ const gameItem = z.object({
   reason: z.enum(
     /** @type {[string, ...string[]]} */ (/** @type {unknown} */ (SCHEDULE_TBD_STORED_GAME_REASONS))
   ),
+  /** The date a schedule import gave the game (`schedule_tbd.game_date`); it has a day and no time. */
+  gameDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
 });
 
 /**
@@ -169,6 +181,8 @@ export const ScheduleTbdRowSchema = z.object({
   week_index: z.number().int().nullish(),
   missing_count: z.number().int().nullish(),
   reason: z.string(),
+  // The table's own column, joined on by the client (`scheduleTbdClient.js`): `get_schedule_tbd` does not return it.
+  game_date: z.string().nullish(),
 });
 
 /**
@@ -198,6 +212,7 @@ export function scheduleTbdItemsFromRows(rows) {
             awayTeamId: row.away_team_id,
             weekIndex: row.week_index,
             reason: row.reason,
+            ...(row.game_date ? { gameDate: row.game_date } : {}),
           }
     );
   });

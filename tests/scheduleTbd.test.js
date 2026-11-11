@@ -20,6 +20,7 @@ import {
   SCHEDULE_TBD_PRACTICE_REASONS,
   SCHEDULE_TBD_STORED_GAME_REASONS,
   describeScheduleTbdReason,
+  parseGameTbdNote,
   parseGameUnscheduled,
   scheduleTbdItemsFromRows,
   scheduleTbdNote,
@@ -230,6 +231,53 @@ describe('the RPC rows become export items, or an error', () => {
       },
     ]);
     assert.deepEqual(scheduleTbdItemsFromRows([]), []);
+  });
+
+  it('F6: a dated TIME TBD game carries its date and no time, beside an undated one that reads as it always has', () => {
+    const dated = {
+      ...gameRow,
+      id: 'r3',
+      reason: 'imported-without-time',
+      game_date: '2026-10-17',
+    };
+    assert.deepEqual(scheduleTbdItemsFromRows([gameRow, dated]), [
+      // CONTROL: the undated game, to the last key, with no `gameDate` invented for it
+      {
+        kind: 'game',
+        homeTeamId: 't2',
+        awayTeamId: 't1',
+        weekIndex: 4,
+        reason: 'duplicate-matchup',
+      },
+      {
+        kind: 'game',
+        homeTeamId: 't2',
+        awayTeamId: 't1',
+        weekIndex: 4,
+        reason: 'imported-without-time',
+        gameDate: '2026-10-17',
+      },
+    ]);
+    // a date that is not a date is an unread row, never a game on no date
+    assert.throws(() => scheduleTbdItemsFromRows([{ ...dated, game_date: '10/17/2026' }]));
+    // the master export's note names the date; the undated note is as it was
+    const [plain, onDate] = scheduleTbdItemsFromRows([gameRow, dated]);
+    assert.equal(
+      scheduleTbdNote(plain),
+      `Game not scheduled (week 4): ${describeScheduleTbdReason('game', 'duplicate-matchup')}.`
+    );
+    assert.match(scheduleTbdNote(onDate), /^Game not scheduled \(week 4, on 2026-10-17\): .+\.$/);
+    // and the note reads back: the week and the reason as before, and the date when there is one
+    assert.deepEqual(parseGameTbdNote(scheduleTbdNote(plain)), {
+      weekIndex: 4,
+      why: describeScheduleTbdReason('game', 'duplicate-matchup'),
+    });
+    assert.deepEqual(parseGameTbdNote(scheduleTbdNote(onDate)), {
+      weekIndex: 4,
+      why: describeScheduleTbdReason('game', 'imported-without-time'),
+      gameDate: '2026-10-17',
+    });
+    assert.equal(parseGameTbdNote('Game not scheduled (week 4, on 17 October): x.'), null);
   });
 
   it('refuses what is not a list, and a row that is not an item (an unread list is an error, never an empty one)', () => {

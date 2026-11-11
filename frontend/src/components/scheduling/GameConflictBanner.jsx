@@ -23,6 +23,12 @@ const SEVERITY_MAP = {
   'shared-slot-imbalance': 'warning',
   // Advisory: a team hosts or visits more than one game more than the other.
   'home-away-imbalance': 'warning',
+  // What a schedule import did and said (the run's `results.warnings`, written by `apply_game_import_job`): each is
+  // a thing that was done, never a refusal.
+  'games-swapped': 'warning',
+  'game-made-time-tbd': 'warning',
+  'week-differs': 'warning',
+  'time-ambiguous': 'warning',
 };
 
 /**
@@ -38,7 +44,35 @@ const TYPE_LABELS = {
   'unscheduled-matchups': 'Unscheduled',
   'shared-slot-imbalance': 'Imbalance',
   'home-away-imbalance': 'Home/Away',
+  'games-swapped': 'Import: swapped',
+  'game-made-time-tbd': 'Import: now TIME TBD',
+  'week-differs': 'Import: week',
+  'time-ambiguous': 'Import: clock repeat',
 };
+
+/** The warnings a schedule import writes about one game of its file. */
+const IMPORT_WARNING_TYPES = new Set([
+  'games-swapped',
+  'game-made-time-tbd',
+  'week-differs',
+  'time-ambiguous',
+]);
+
+/**
+ * Which game an import's warning is about, in the file's own words: its Game ID when the file gave one, else its row,
+ * and its date. The database's sentence says what happened; without this every such line would read the same.
+ *
+ * @param {{ type: string, details?: Record<string, any> }} warning
+ * @returns {string} `''` for a warning that is not an import's
+ */
+export function importWarningSubject(warning) {
+  if (!IMPORT_WARNING_TYPES.has(warning.type)) return '';
+  const d = warning.details ?? {};
+  const row = /^row-(\d+)$/.exec(String(d.rowKey ?? ''));
+  const which = d.gameId ? `Game ${d.gameId}` : row ? `Row ${row[1]} of the file` : '';
+  const on = typeof d.date === 'string' && d.date !== '' ? ` on ${d.date}` : '';
+  return which === '' && on === '' ? '' : `${which || 'A game'}${on}: `;
+}
 
 function ConflictItem({ warning, onConflictClick }) {
   const severity = SEVERITY_MAP[warning.type] || 'warning';
@@ -54,7 +88,10 @@ function ConflictItem({ warning, onConflictClick }) {
       } ${severity === 'error' ? 'border-status-error/30' : 'border-status-warning/30'}`}
       data-testid={`conflict-item-${warning.type}`}
     >
-      <span className="text-text-secondary">{warning.message}</span>
+      <span className="text-text-secondary">
+        {importWarningSubject(warning)}
+        {warning.message}
+      </span>
       <span
         className={`text-xs px-2 py-0.5 rounded-full font-semibold whitespace-nowrap ml-3 ${
           severity === 'error'

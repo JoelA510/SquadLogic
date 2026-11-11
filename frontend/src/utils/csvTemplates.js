@@ -15,6 +15,8 @@
  */
 
 import { escapeCsvCell } from '@squadlogic/core/csv.js';
+// The constants module, not the parser: this file loads with the Import page, the parser only with the schedule panel.
+import { SCHEDULE_IMPORT_TEMPLATE_HEADER } from '@squadlogic/core/scheduleImport/columns.js';
 
 export const CSV_TEMPLATES = {
   players: {
@@ -44,6 +46,25 @@ export const CSV_TEMPLATES = {
     headers: ['Registration ID', 'Years Played', 'Skill Tier', 'Rating'],
     example: ['GS-1001', '2', 'developing', '3'],
     filename: 'squadlogic-evaluations-template.csv',
+  },
+  // The games import (plan 4.3 of docs/changes/2026-11-03-schedule-expansion.md): the header row is core's own
+  // (`SCHEDULE_IMPORT_TEMPLATE_HEADER`), so the template cannot name a column the import does not read. Placeholder
+  // values; a `Length` column of minutes may stand in for `End Time`.
+  games: {
+    headers: [...SCHEDULE_IMPORT_TEMPLATE_HEADER],
+    example: [
+      'G-0001',
+      '2026-09-12',
+      '09:00',
+      '10:00',
+      'Venue A',
+      'Field 1',
+      'U10 Boys',
+      'Home Team Name',
+      'Away Team Name',
+      '1',
+    ],
+    filename: 'squadlogic-games-template.csv',
   },
   fields: {
     headers: [
@@ -147,7 +168,7 @@ function toCsv(rows) {
 
 /**
  * Generate a template CSV and trigger a browser download.
- * @param {'players'|'coaches'|'evaluations'|'fields'|'field_availability'} type
+ * @param {'players'|'coaches'|'evaluations'|'fields'|'field_availability'|'games'} type
  */
 export function downloadTemplate(type) {
   const tmpl = CSV_TEMPLATES[type];

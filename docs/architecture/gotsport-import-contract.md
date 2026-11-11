@@ -343,10 +343,19 @@ true)`: the same statement with its writes switched off, so the numbers shown ar
 ## Schedule import — kept fields (`20261121010000`)
 
 A club that already has a game schedule can bring it in as a file (plan `docs/changes/2026-11-03-schedule-expansion.md`,
-4.5 to 4.7; PR 5 is the database, the Edge validation and the Games page are PR 6). The `games` type keeps **21
+4.5 to 4.7; PR 5 is the database, PR 6 the Edge validation and the Import panel's Games tab). The `games` type keeps **21
 snake_case keys** per staged row and nothing else (`GAME_IMPORT_KEYS` in `frontend/src/utils/importAllowlist.js`, its Edge
 twin, and `import_allowed_keys('games')`; `tests/importAllowlistParity.test.js` holds the three equal to the keys the apply
 reads). A format, a note, a coach, an email or a phone in the file is never read, so it is never staged.
+
+**The file's columns are an allowlist too** (PR 6): `import-validation` keeps `Game ID`, `Date`, `Start Time`, `End Time`,
+`Length`, `Venue`, `Field`, `Division`, `Home Team`, `Away Team` and `Week`, matched by the header's normalised name, and
+drops every other column before a value is read from it. The staged `raw_payload` is those columns as typed, under the
+template's names, and nothing else. The season's clock places the times (the job's season; the host zone is never read).
+
+**A time or a week that cannot be read does not lose the game** (owner, 2026-11-10). A malformed time makes the row a dated
+TIME TBD game (`bad-time`); a Week that cannot be stored is derived from the date (`bad-week`). Both are warnings said at
+the upload and in the preview; they are not staged, because the apply takes only the flags it knows.
 
 | Staged key(s)                                                            | Becomes                                           | Rule                                                                                        |
 | ------------------------------------------------------------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------- |

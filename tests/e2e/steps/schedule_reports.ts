@@ -463,7 +463,9 @@ Then(
     const apart = page.getByTestId('day-sheet-tbd');
     await expect(apart).toContainText(`${home} v ${away}`);
     await expect(apart).toContainText('no game slot was free for it');
-    await expect(apart).toContainText('no date or venue');
+    await expect(apart).toContainText(
+      'A game with no date yet is listed whatever date and venue you choose'
+    );
   }
 );
 

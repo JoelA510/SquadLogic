@@ -10,8 +10,8 @@
  *   definition of every CHECK on the three import tables, and of every SQL function whose body names `evaluations`) and
  *   in the code (every production file that names the type or its allowlist). A list is not found by reading the plan,
  *   so a list the plan forgot is a list this finds.
- * - **Each is classified**: `ready` (it holds `games` now), `deferred` (PR 6 owns it: the Edge function
- *   `import-validation` and the Import panel; it must NOT hold `games` yet, so PR 6 has to move the entry), or
+ * - **Each is classified**: `ready` (it holds `games` now), `deferred` (a later PR owns it and it must NOT hold `games`
+ *   yet; PR 6 moved every such entry, so none is left), or
  *   `not-a-list` (it names the type for another reason, said).
  * - **Both directions fail**: a list nobody classified, and an entry that no longer names the type.
  *
@@ -152,24 +152,24 @@ const CODE_REGISTRY = {
     why: "the evaluations finalizer's own mock: it names the type for itself, not in a list",
   },
   'frontend/src/components/ImportPanel.jsx': {
-    class: 'deferred',
-    why: "PR 6: the Import panel's tab list and telemetry (the Games tab)",
+    class: 'ready',
+    why: "PR 6: the Import panel's tab list holds games, and hands the tab to ScheduleImportPanel (its own steps: mapping, preview, confirm)",
   },
   'frontend/src/contexts/ImportContext.jsx': {
-    class: 'deferred',
-    why: 'PR 6: the import state per type',
+    class: 'ready',
+    why: 'PR 6: names games to leave a games job to its own panel (the context has no apply for one, and a waiting games job must not take the screen over after a reload)',
   },
   'frontend/src/utils/csvTemplates.js': {
-    class: 'deferred',
-    why: 'PR 6: the downloadable template (the header row of 4.3)',
+    class: 'not-a-list',
+    why: 'PR 6: holds the games template under an object key, its header row taken from core (asserted below); it lists no import type by name',
   },
   'frontend/src/utils/importDeferredActions.js': {
-    class: 'deferred',
-    why: "PR 6: the panel's deferred-apply actions",
+    class: 'not-a-list',
+    why: 'PR 6 decided: a games import does not use the deferred-apply actions (its panel calls map, preview, apply and roll back itself); the file names evaluations for its own preview',
   },
   'supabase/functions/import-validation/index.ts': {
-    class: 'deferred',
-    why: "PR 6: the Edge function's import_type enum, REQUIRED_FIELDS and sensitive-type list (the function is not touched by PR 5)",
+    class: 'ready',
+    why: 'PR 6: the Edge function takes games as its own request shape (GamesImportPayload), staged by _shared/schedule-import.ts; a games file has no REQUIRED_FIELDS entry or alias map (the parse names its columns) and is not a people import (no sensitive-type entry)',
   },
 };
 
@@ -304,6 +304,51 @@ describe('the code names games where the plan says it does, and not where PR 6 o
         wrong.push(`${file}: classed deferred (PR 6) but already names games: move the entry`);
     }
     expect(wrong).toEqual([]);
+  });
+
+  it('PR 6: the downloadable games template is the header row core reads, and nothing else', async () => {
+    const { CSV_TEMPLATES } = await import('../frontend/src/utils/csvTemplates.js');
+    const { SCHEDULE_IMPORT_TEMPLATE_HEADER, parseScheduleRows } =
+      await import('../packages/core/src/scheduleImport/index.js');
+    expect(CSV_TEMPLATES.games.headers).toEqual([...SCHEDULE_IMPORT_TEMPLATE_HEADER]);
+    expect(CSV_TEMPLATES.games.example).toHaveLength(CSV_TEMPLATES.games.headers.length);
+    // the example row is one the import reads as a placed game, with no column dropped
+    const example = Object.fromEntries(
+      CSV_TEMPLATES.games.headers.map((h, i) => [h, CSV_TEMPLATES.games.example[i]])
+    );
+    const parsed = parseScheduleRows({
+      headers: CSV_TEMPLATES.games.headers,
+      rows: [example],
+      season: { timeZone: 'America/Los_Angeles', startDate: '2026-09-07', endDate: '2027-03-31' },
+    });
+    expect(parsed.droppedColumns).toEqual([]);
+    expect(parsed.rows[0]).toMatchObject({ status: 'ok', flags: [] });
+  });
+
+  it('R9: the files the Import page loads eagerly do not import the schedule parser (only its constants)', () => {
+    // `ImportPanel.jsx` and `csvTemplates.js` load with the Import page; the parser, the season clock and the mapping
+    // load with the schedule import's own panel (a lazy chunk). A static import of the parser from either would put
+    // it in the page's first load.
+    const eager = ['frontend/src/utils/csvTemplates.js', 'frontend/src/components/ImportPanel.jsx'];
+    for (const file of eager) {
+      const source = readFileSync(path.join(REPO, file), 'utf8');
+      const statics = [...source.matchAll(/^import [^;]*? from '([^']+)';/gms)].map((m) => m[1]);
+      expect(statics.length).toBeGreaterThan(1);
+      const offending = statics.filter(
+        (spec) => /scheduleImport\//.test(spec) && !spec.endsWith('scheduleImport/columns.js')
+      );
+      expect(offending, file).toEqual([]);
+    }
+    // the constants module imports nothing at all
+    const columns = readFileSync(
+      path.join(REPO, 'packages/core/src/scheduleImport/columns.js'),
+      'utf8'
+    );
+    expect(columns).not.toMatch(/^import /m);
+    // and the panel is reached by a dynamic import
+    expect(readFileSync(path.join(REPO, eager[1]), 'utf8')).toContain(
+      "lazy(() => import('./import/ScheduleImportPanel.jsx'))"
+    );
   });
 
   it('PLANT: a ready file that stops naming games is reported', () => {

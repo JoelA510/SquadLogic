@@ -24,7 +24,18 @@
  *   the whole weeks since the Monday of the week the season starts. A `Week` that differs from the
  *   date is stored as written and flagged `week-differs`, never renumbered.
  * - **A game with no time or no field** is a TIME TBD game (`imported-without-time`), never dropped.
- *   A malformed time is `bad-time`; blank and malformed are different things.
+ *   **A row with no Division, Home Team or Away Team, or with a time and a field and no Venue,** is
+ *   refused as a row (`unknown-division`, `unknown-team`, `unknown-venue`), with the words the mapping
+ *   step uses for the same blank.
+ * - **A time the import cannot read** (`25:00`, `noon`, a Length of `60 min`, an End Time and a Length
+ *   that disagree, a game that would pass midnight) is a TIME TBD game too, on its date, with a
+ *   `bad-time` warning that says what could not be read (owner, 2026-11-10: prefer a warning to a
+ *   refusal; a TIME TBD game holds a date and no time). Blank and malformed stay different things:
+ *   the blank one carries no warning. `end-not-after-start` and `time-in-dst-gap` are still refusals:
+ *   those times were read, and they are wrong.
+ * - **A Week the import cannot store** (`three`, `0`, anything past 255) is derived from the date,
+ *   with a `bad-week` warning. With no season start date there is nothing to derive it from, and the
+ *   row is refused `missing-week`; a date outside the season is refused `outside-season-window` first.
  *
  * ## Only the allowlisted columns are read
  *
@@ -43,42 +54,19 @@ import { seasonCalendarDate, resolveZonedInstant } from '../timing/seasonClock.j
 import { TIMING_REASON } from '../timing/reasonCodes.js';
 import { scheduleLabelKey } from './mapping.js';
 import { SCHEDULE_IMPORT_LIMITS, SCHEDULE_IMPORT_REASON as R } from './reasonCodes.js';
+import { SCHEDULE_IMPORT_COLUMNS, SCHEDULE_IMPORT_TEMPLATE_HEADER } from './columns.js';
 
-/** The columns of plan 4.3, by the name the template uses. */
-export const SCHEDULE_IMPORT_COLUMNS = Object.freeze({
-  GAME_ID: 'Game ID',
-  DATE: 'Date',
-  START: 'Start Time',
-  END: 'End Time',
-  LENGTH: 'Length',
-  VENUE: 'Venue',
-  FIELD: 'Field',
-  DIVISION: 'Division',
-  HOME: 'Home Team',
-  AWAY: 'Away Team',
-  WEEK: 'Week',
-});
+// The column names and the template's header row live in a module of constants (`columns.js`), so a caller that only
+// needs the header row does not load this parser. They are re-exported here: one list, wherever it is read from.
+export { SCHEDULE_IMPORT_COLUMNS, SCHEDULE_IMPORT_TEMPLATE_HEADER };
 const C = SCHEDULE_IMPORT_COLUMNS;
-
-/** The header row of the downloadable template (PR 6): `Length` is the alternative to `End Time`. */
-export const SCHEDULE_IMPORT_TEMPLATE_HEADER = Object.freeze([
-  C.GAME_ID,
-  C.DATE,
-  C.START,
-  C.END,
-  C.VENUE,
-  C.FIELD,
-  C.DIVISION,
-  C.HOME,
-  C.AWAY,
-  C.WEEK,
-]);
 
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const US_DATE = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
 const CLOCK_TIME = /^(\d{1,2}):(\d{2})\s*([AaPp][Mm])?$/;
 const WHOLE_NUMBER = /^\d+$/;
-const MAX_WEEK = 999;
+/** `game_slots.week_index` and `schedule_tbd.week_index` hold 1 to 255; the SQL's shape check refuses a staged row past it. */
+const MAX_WEEK = 255;
 const MS_PER_DAY = 86400000;
 const MS_PER_MINUTE = 60000;
 
@@ -272,7 +260,9 @@ const quoted = (text) => `"${text.length > 60 ? `${text.slice(0, 57)}...` : text
  * @property {string} awayLabel
  * @property {number | null} weekIndex
  * @property {'file' | 'derived' | null} weekSource
- * @property {ScheduleImportFlag[]} flags
+ * @property {ScheduleImportFlag[]} flags  what was accepted and said: `time-ambiguous` and
+ *   `week-differs` (staged, the SQL knows them) and the parse's own `bad-time` and `bad-week`
+ *   (`SCHEDULE_IMPORT_PARSE_WARNINGS`: shown at upload and in the preview, never staged)
  */
 
 /**
@@ -313,11 +303,18 @@ function fileRefusal(code, message, column) {
  * @param {{ timeZone?: string | null, startDate?: string | null, endDate?: string | null } | null} [input.season]
  *   the season's clock (`season_settings.timezone`) and window; `startDate` is what a blank `Week` is
  *   derived from
+ * @param {number} [input.rowOffset]  how many rows of the file came before these (0 for a whole file).
+ *   The Edge function reads a file in chunks of at most 500 rows (PR 6); a row's number and key are
+ *   its place in the FILE, and the row limit is the file's. A repeat is judged within the rows given:
+ *   one that straddles two chunks is refused by the apply, which judges every staged row together.
  * @returns {ScheduleImportParseResult}
  */
-export function parseScheduleRows({ headers, rows, season }) {
+export function parseScheduleRows({ headers, rows, season, rowOffset = 0 }) {
   if (!Array.isArray(headers)) throw new TypeError('parseScheduleRows: headers must be an array');
   if (!Array.isArray(rows)) throw new TypeError('parseScheduleRows: rows must be an array');
+  if (!Number.isInteger(rowOffset) || rowOffset < 0) {
+    throw new TypeError('parseScheduleRows: rowOffset must be a whole number, 0 or more');
+  }
 
   // Columns: match by the shared normaliser (trim, collapse, fold case; a byte-order mark is
   // whitespace to it), drop every name that is not on the list, and refuse a name given twice.
@@ -395,10 +392,10 @@ export function parseScheduleRows({ headers, rows, season }) {
       C.WEEK
     );
   }
-  if (rows.length > SCHEDULE_IMPORT_LIMITS.MAX_ROWS) {
+  if (rowOffset + rows.length > SCHEDULE_IMPORT_LIMITS.MAX_ROWS) {
     return fileRefusal(
       R.TOO_MANY_ROWS,
-      `The file has ${rows.length.toLocaleString('en-US')} rows; one import takes at most ${SCHEDULE_IMPORT_LIMITS.MAX_ROWS.toLocaleString('en-US')}. Split it and import the parts one after the other.`
+      `The file has ${(rowOffset + rows.length).toLocaleString('en-US')} rows; one import takes at most ${SCHEDULE_IMPORT_LIMITS.MAX_ROWS.toLocaleString('en-US')}. Split it and import the parts one after the other.`
     );
   }
 
@@ -411,7 +408,15 @@ export function parseScheduleRows({ headers, rows, season }) {
   };
 
   const parsed = rows.map((row, index) =>
-    parseRow({ row, index, cell, hasWeek: header.has(C.WEEK), timeZone, seasonStart, seasonEnd })
+    parseRow({
+      row,
+      index: rowOffset + index,
+      cell,
+      hasWeek: header.has(C.WEEK),
+      timeZone,
+      seasonStart,
+      seasonEnd,
+    })
   );
   refuseRepeats(parsed);
 
@@ -493,18 +498,23 @@ function parseRow({ row, index, cell, hasWeek, timeZone, seasonStart, seasonEnd 
   const startText = cell(row, C.START);
   const endText = cell(row, C.END);
   const lengthText = cell(row, C.LENGTH);
-  const startMin = startText === '' ? null : parseScheduleTime(startText);
+  // A time that cannot be read does not refuse the row (F5): the game is kept on its date as a TIME TBD
+  // game and the first thing that could not be read is said. The rest of the row is still judged.
+  /** @type {string | null} */
+  let timeProblem = null;
+  let startMin = startText === '' ? null : parseScheduleTime(startText);
   if (startText !== '' && startMin === null) {
-    return refuse(R.BAD_TIME, `The start time ${quoted(startText)} is not HH:mm or h:mm AM/PM.`);
+    timeProblem = `The start time ${quoted(startText)} is not HH:mm or h:mm AM/PM.`;
   }
-  const endGiven = endText === '' ? null : parseScheduleTime(endText);
+  let endGiven = endText === '' ? null : parseScheduleTime(endText);
   if (endText !== '' && endGiven === null) {
-    return refuse(R.BAD_TIME, `The end time ${quoted(endText)} is not HH:mm or h:mm AM/PM.`);
+    timeProblem ??= `The end time ${quoted(endText)} is not HH:mm or h:mm AM/PM.`;
   }
-  const lengthMin = lengthText === '' ? null : parseScheduleLength(lengthText);
+  let lengthMin = lengthText === '' ? null : parseScheduleLength(lengthText);
   if (lengthText !== '' && lengthMin === null) {
-    return refuse(R.BAD_TIME, `The length ${quoted(lengthText)} is not a whole number of minutes.`);
+    timeProblem ??= `The length ${quoted(lengthText)} is not a whole number of minutes.`;
   }
+  if (timeProblem !== null) [startMin, endGiven, lengthMin] = [null, null, null];
   // The wall reading of an End Time must be after the start's: `game_slots` holds both wall times and
   // refuses an end that is not after its start. (A Length is added later, to the resolved start.)
   if (startMin !== null && endGiven !== null && endGiven <= startMin) {
@@ -518,7 +528,18 @@ function parseRow({ row, index, cell, hasWeek, timeZone, seasonStart, seasonEnd 
   if (startMin !== null) out.startTime = hhmm(startMin);
   if (endGiven !== null) out.endTime = hhmm(endGiven);
 
-  // 4. The two teams are two teams
+  // 4. A game has a division and two teams, and the two teams are two teams. A blank one is refused HERE, as a row:
+  // staged as an accepted row it would fail the apply's shape check, and that refuses the whole import, not the row.
+  if (scheduleLabelKey(out.divisionLabel) === '') {
+    return refuse(R.UNKNOWN_DIVISION, 'The Division is blank.');
+  }
+  for (const [which, label] of [
+    ['Home', out.homeLabel],
+    ['Away', out.awayLabel],
+  ]) {
+    if (scheduleLabelKey(label) === '')
+      return refuse(R.UNKNOWN_TEAM, `The ${which} Team is blank.`);
+  }
   const homeKey = scheduleLabelKey(out.homeLabel);
   if (homeKey !== '' && homeKey === scheduleLabelKey(out.awayLabel)) {
     return refuse(R.SAME_TEAM, `The home and away teams are both ${quoted(out.homeLabel)}.`);
@@ -527,15 +548,20 @@ function parseRow({ row, index, cell, hasWeek, timeZone, seasonStart, seasonEnd 
   // 5. The week
   const weekText = hasWeek ? cell(row, C.WEEK) : '';
   let weekGiven = null;
+  /** @type {string | null} a Week that cannot be stored: the week is derived from the date, and said (F5) */
+  let badWeekText = null;
   if (weekText !== '') {
     const n = WHOLE_NUMBER.test(weekText) ? Number(weekText) : NaN;
-    if (!(n >= 1 && n <= MAX_WEEK)) {
+    if (n >= 1 && n <= MAX_WEEK) {
+      weekGiven = n;
+    } else if (seasonStart === null) {
       return refuse(
-        R.BAD_WEEK,
-        `The week ${quoted(weekText)} is not a whole number from 1 to ${MAX_WEEK}.`
+        R.MISSING_WEEK,
+        `The week ${quoted(weekText)} is not a whole number from 1 to ${MAX_WEEK}, and the season has no start date to work the week out from. Correct the Week, or set the season’s start date.`
       );
+    } else {
+      badWeekText = weekText;
     }
-    weekGiven = n;
   } else if (seasonStart === null) {
     return refuse(
       R.MISSING_WEEK,
@@ -551,8 +577,22 @@ function parseRow({ row, index, cell, hasWeek, timeZone, seasonStart, seasonEnd 
     return refuse(R.OUTSIDE_SEASON_WINDOW, `${date} is after the season ends (${seasonEnd}).`);
   }
   const weekDerived = seasonStart === null ? null : scheduleWeekOf(date, seasonStart);
+  // A week worked out from the date that no slot can hold (a season with no end date, and a date years on).
+  if (weekGiven === null && weekDerived !== null && weekDerived > MAX_WEEK) {
+    return refuse(
+      R.OUTSIDE_SEASON_WINDOW,
+      `${date} is week ${weekDerived} of the season; a schedule holds weeks 1 to ${MAX_WEEK}. Check the date, or give the Week.`
+    );
+  }
   out.weekIndex = weekGiven ?? weekDerived;
   out.weekSource = weekGiven === null ? 'derived' : 'file';
+  if (badWeekText !== null) {
+    out.flags.push({
+      code: R.BAD_WEEK,
+      message: `The week ${quoted(badWeekText)} is not a whole number from 1 to ${MAX_WEEK}, so the week was worked out from the date: week ${weekDerived}.`,
+      details: { weekDerived },
+    });
+  }
   if (weekGiven !== null && weekDerived !== null && weekGiven !== weekDerived) {
     out.flags.push({
       code: R.WEEK_DIFFERS,
@@ -560,6 +600,27 @@ function parseRow({ row, index, cell, hasWeek, timeZone, seasonStart, seasonEnd 
       details: { weekGiven, weekDerived },
     });
   }
+
+  /**
+   * The row's time cannot be used (F5): the game is kept on its date as a TIME TBD game, with what was
+   * wrong said. It carries no time at all, as every TIME TBD game does.
+   * @param {string} problem
+   */
+  const unreadableTime = (problem) => {
+    out.status = 'tbd';
+    out.tbdReason = R.IMPORTED_WITHOUT_TIME;
+    out.startTime = null;
+    out.endTime = null;
+    out.start = null;
+    out.end = null;
+    out.flags.push({
+      code: R.BAD_TIME,
+      message: `${problem} The game is kept on ${date} with no time (TIME TBD).`,
+      details: {},
+    });
+    return out;
+  };
+  if (timeProblem !== null) return unreadableTime(timeProblem);
 
   // 7. The clock. The start is put on the season's clock first; an End Time is put on it too, and a
   // Length is ELAPSED minutes from the resolved start (a game does not get longer or shorter because
@@ -575,8 +636,10 @@ function parseRow({ row, index, cell, hasWeek, timeZone, seasonStart, seasonEnd 
     const failed = [startAt, endAt].find((p) => p !== null && p.iso === null);
     if (failed) {
       const finding = failed.findings[0];
-      return refuse(
-        finding?.code === TIMING_REASON.WALL_TIME_NONEXISTENT ? R.TIME_IN_DST_GAP : R.BAD_TIME,
+      if (finding?.code === TIMING_REASON.WALL_TIME_NONEXISTENT) {
+        return refuse(R.TIME_IN_DST_GAP, finding.message);
+      }
+      return unreadableTime(
         finding?.message ?? 'The time could not be placed on the season’s clock.'
       );
     }
@@ -589,8 +652,7 @@ function parseRow({ row, index, cell, hasWeek, timeZone, seasonStart, seasonEnd 
         return refuse(R.END_NOT_AFTER_START, 'The game ends at or before it starts on the clock.');
       }
       if (lengthMin !== null && elapsed !== lengthMin) {
-        return refuse(
-          R.BAD_TIME,
+        return unreadableTime(
           `The End Time and the Length disagree: from ${out.startTime} to ${out.endTime} is ${elapsed} minutes on the clock, not ${lengthMin}.`
         );
       }
@@ -598,8 +660,7 @@ function parseRow({ row, index, cell, hasWeek, timeZone, seasonStart, seasonEnd 
     } else {
       const ends = wallOfInstant(startMs + lengthMin * MS_PER_MINUTE, timeZone);
       if (ends.date !== date) {
-        return refuse(
-          R.BAD_TIME,
+        return unreadableTime(
           'The game would reach or pass midnight. The latest end this import stores is 23:59.'
         );
       }
@@ -648,7 +709,13 @@ function parseRow({ row, index, cell, hasWeek, timeZone, seasonStart, seasonEnd 
     }
   }
 
-  // 8. No time, or no field: a TIME TBD game, never a dropped one
+  // 8. A time and a field with no venue: the field cannot be found (a field is one of a venue's). Refused as a row,
+  // as the mapping step always refused it; staged as placed it would fail the apply's shape check for the whole job.
+  if (timed && out.fieldLabel !== '' && scheduleLabelKey(out.venueLabel) === '') {
+    return refuse(R.UNKNOWN_VENUE, 'The Venue is blank.');
+  }
+
+  // No time, or no field: a TIME TBD game, never a dropped one
   if (!timed || out.fieldLabel === '') {
     out.status = 'tbd';
     out.tbdReason = R.IMPORTED_WITHOUT_TIME;

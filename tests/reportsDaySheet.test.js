@@ -253,6 +253,55 @@ describe('the Day Sheet equals the master export, row for row', () => {
   });
 });
 
+describe('F6: a TIME TBD game that holds a date is listed under its date, with no time', () => {
+  // The import gives a game with no time its date (`schedule_tbd.game_date`); a game the solver could not place has none.
+  const undated = tbdGames()[0];
+  const dated = {
+    homeTeamId: 't-4',
+    awayTeamId: 't-5',
+    weekIndex: 3,
+    reason: 'imported-without-time',
+    gameDate: '2026-10-03',
+  };
+  const both = [undated, dated];
+
+  it('on its own date: the date is in the row and the time is not; the undated game reads as it always has', () => {
+    const result = sheet({ tbdGames: both, date: '2026-10-03' });
+    expect(result.tbd).toHaveLength(2);
+    const [plain, onDate] = result.tbd;
+    // CONTROL: the undated game, exactly as today
+    expect(plain).toEqual(sheet().tbd[0]);
+    expect(plain.Date).toBe('');
+    // the dated one: its date, and no time anywhere in the row
+    expect(onDate).toMatchObject({
+      Date: '2026-10-03',
+      Kickoff: 'TIME TBD',
+      Ends: '',
+      Home: 'Synthetic Planets',
+      Away: 'Synthetic Moons',
+    });
+    expect(Object.values(onDate).join(' ')).not.toMatch(/\d{1,2}:\d{2}/);
+    expect(result.counts).toMatchObject({ tbd: 2, tbdOtherDates: 0 });
+  });
+
+  it('on another date it is not listed (it is that day’s game), and is counted, never dropped in silence', () => {
+    const result = sheet({ tbdGames: both, date: '2026-10-24' });
+    expect(result.tbd.map((row) => row.Home)).toEqual([sheet().tbd[0].Home]);
+    expect(result.counts).toMatchObject({ tbd: 1, tbdOtherDates: 1 });
+  });
+
+  it('with no date chosen every TIME TBD game is listed, the dated one with its date', () => {
+    const result = sheet({ tbdGames: both, date: null });
+    expect(result.tbd.map((row) => row.Date)).toEqual(['', '2026-10-03']);
+    expect(result.counts).toMatchObject({ tbd: 2, tbdOtherDates: 0 });
+  });
+
+  it('the file carries the date of a dated TIME TBD game', () => {
+    const csv = daySheetCsv(sheet({ tbdGames: both, date: '2026-10-03' }));
+    expect(csv).toMatch(/\n2026-10-03,TIME TBD,,/);
+  });
+});
+
 describe('with no date chosen', () => {
   it('has no dated game, and still lists the TIME TBD games and the games with no readable time', () => {
     const games = [

@@ -24,8 +24,9 @@
  * - **A team is judged inside its division** (`UNIQUE (division_id, name)`: two divisions may each
  *   have a `Lions`), a **field inside its venue**.
  * - **An outside club** (decision 5) is a team row flagged `is_external`, one per division and club
- *   label. An outside label that is the name of an own team in that division is
- *   `label-is-own-team`, never an outside club; a game between two outside clubs is not one of yours.
+ *   label. An outside club whose name (the decision's `name`, else the label) is the name of an own
+ *   team in that division, or of a team this file creates there, is `label-is-own-team`, never an
+ *   outside club; a game between two outside clubs is not one of yours.
  *   An outside team that already exists (a previous import made it) is found and reused.
  * - **Skipped is not refused.** Rows of a label the admin skips are listed apart from the rows the
  *   import refuses.
@@ -204,9 +205,9 @@ const SKIP = Object.freeze({ type: 'skip' });
 /**
  * Everything the mapping step knows: the entries to show and the references rows resolve through.
  *
- * @param {{ rows: Array<any>, league: LeagueView, decisions?: Record<string, any> }} input
+ * @param {{ rows: Array<any>, league: LeagueView, decisions?: Record<string, any>, explicitOnly?: boolean }} input
  */
-function analyse({ rows, league, decisions }) {
+function analyse({ rows, league, decisions, explicitOnly = false }) {
   requireArray(rows, 'rows');
   const world = indexLeague(league);
   const usable = rows.filter((r) => r.status === 'ok' || r.status === 'tbd');
@@ -246,7 +247,8 @@ function analyse({ rows, league, decisions }) {
       candidates: candidates.map((c) => ({ id: c.id, name: c.name })),
       proposed,
       decision,
-      effective: invalid ? null : (decision ?? proposed),
+      // With `explicitOnly` a proposal is shown and never in effect: only a decision that was made is.
+      effective: invalid ? null : (decision ?? (explicitOnly ? null : proposed)),
       options: [...ACTIONS[kind]],
       ...(invalid ? { problem: 'invalid-decision' } : {}),
     };
@@ -430,9 +432,13 @@ function analyse({ rows, league, decisions }) {
       if (refs.team.has(key)) continue;
       const e = entry.effective;
       if (e?.action === 'outside') {
-        // An outside club already on file is reused; an own team's name is not an outside club.
-        const own = candidates.filter((c) => !c.isExternal);
-        const external = candidates.filter((c) => c.isExternal);
+        // An outside club already on file is reused; an own team's name is not an outside club. The
+        // NAME is judged, as the SQL judges it (`cname`): the decision's own name when it carries one,
+        // else the label (PR 6, task F3b: a custom name that is an own team's was `unknown-team` here
+        // and `label-is-own-team` in the SQL).
+        const named = namedHere(scheduleLabelKey(e.name ?? label));
+        const own = named.filter((c) => !c.isExternal);
+        const external = named.filter((c) => c.isExternal);
         if (own.length > 0) {
           refs.team.set(key, { type: 'own-name', label });
         } else if (external.length === 1) {
@@ -468,6 +474,20 @@ function analyse({ rows, league, decisions }) {
     }
   }
 
+  // An outside club whose name a team shell of this same file takes in the division is refused as one
+  // named like an own team (the SQL's `shell_here`): `UNIQUE (division_id, name)` holds for both, and
+  // the shell is the one created.
+  const shellNames = new Set(
+    [...refs.team.values()]
+      .filter((ref) => ref && ref.type === 'create')
+      .map((ref) => tuple(ref.divisionId, ref.key))
+  );
+  for (const [key, ref] of refs.team) {
+    if (ref && ref.type === 'outside' && shellNames.has(tuple(ref.divisionId, ref.key))) {
+      refs.team.set(key, { type: 'own-name', label: teamEntries.get(key)?.label ?? ref.name });
+    }
+  }
+
   return { world, refs, divisionEntries, venueEntries, fieldEntries, teamEntries };
 }
 
@@ -479,15 +499,16 @@ const sortedEntries = (entries) =>
  * For every distinct label of the file: what the organization has that it could mean, what is
  * proposed (only an exact, single match), what the admin decided, and what is therefore in effect.
  *
- * @param {{ rows: Array<any>, league: LeagueView, decisions?: Record<string, any> }} input
+ * @param {{ rows: Array<any>, league: LeagueView, decisions?: Record<string, any>, explicitOnly?: boolean }} input
  *   `rows` are the parse's rows; only the ones it accepted are asked about
  * @returns {{ divisions: MappingEntry[], venues: MappingEntry[], fields: MappingEntry[], teams: MappingEntry[] }}
  */
-export function proposeScheduleMapping({ rows, league, decisions = {} }) {
+export function proposeScheduleMapping({ rows, league, decisions = {}, explicitOnly = false }) {
   const { divisionEntries, venueEntries, fieldEntries, teamEntries } = analyse({
     rows,
     league,
     decisions,
+    explicitOnly,
   });
   return {
     divisions: sortedEntries(divisionEntries),
@@ -511,18 +532,23 @@ export function proposeScheduleMapping({ rows, league, decisions = {} }) {
  * Order within a row: division, venue, field, home team, away team, then the two teams as a pair.
  * The first to fail is the row's reason; a label the admin skipped makes the row `skipped`.
  *
- * @param {{ rows: Array<any>, league: LeagueView, decisions?: Record<string, any> }} input
+ * @param {{ rows: Array<any>, league: LeagueView, decisions?: Record<string, any>, explicitOnly?: boolean }} input
+ *   `explicitOnly`: resolve as the database does (`apply_game_import_job` reads the STORED decisions and guesses
+ *   nothing: a label with a single match and no stored decision is unknown there). The mock's apply and the confirm
+ *   screen pass it, with the decisions as they are stored; without it a single match is in effect on its own, which is
+ *   what the mapping screen proposes before anything is stored.
  * @returns {{
  *   rows: Array<any>,
  *   creations: { divisions: any[], venues: any[], fields: any[], teamShells: any[], outsideTeams: any[] },
  *   counts: { rows: number, ok: number, tbd: number, refused: number, skipped: number, byReason: Record<string, number> },
  * }}
  */
-export function resolveScheduleRows({ rows, league, decisions = {} }) {
+export function resolveScheduleRows({ rows, league, decisions = {}, explicitOnly = false }) {
   const { refs, divisionEntries, venueEntries, fieldEntries, teamEntries } = analyse({
     rows,
     league,
     decisions,
+    explicitOnly,
   });
   /**
    * Why a label is unresolved, in words: a decision that cannot be read or a name that is taken says

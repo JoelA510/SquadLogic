@@ -49,7 +49,7 @@ import {
 } from './mockFacilityPermits.js';
 import { handleHeatSettingsRpc } from './mockHeatSettings.js';
 import { handleEvaluationImportRpc } from './mockEvaluations.js';
-import { handleGameImportRpc } from './mockGameImport.js';
+import { handleGameImportFunction, handleGameImportRpc } from './mockGameImport.js';
 import { validateEvaluationRow } from '../utils/importEvaluations.js';
 import { handleScheduleTbdRpc } from './mockScheduleTbd.js';
 import {
@@ -5103,9 +5103,11 @@ export const mockSupabase = {
       if (importType === 'games' && job.job_type !== 'games') {
         return { data: null, error: { message: 'Import job is not games' } };
       }
-      if (job.status !== 'ready_to_apply') {
-        return { data: null, error: { message: `Import job is ${job.status}` } };
-      }
+      // No check of `job.status`, as the deployed SQL has none (20261121010000_game_import.sql): the function marks
+      // ANY job of the right type `failed`, an applied one too. The mock once refused a job that was not
+      // `ready_to_apply`, which hid a caller that cancels blind. The SQL is to refuse such a job in the next
+      // migration (docs/changes/2026-11-03-schedule-expansion.md, "Follow-ups found in PR 6's review"); this check
+      // comes back then, with it.
 
       const stagedRows = (db.staging_import_rows || []).filter(
         (row) =>
@@ -8093,6 +8095,31 @@ export const mockSupabase = {
   },
   functions: {
     invoke: async (name, options) => {
+      if (name === 'import-validation' && options?.body?.import_type === 'games') {
+        // The games arm (PR 6): its own request shape, staged by core's `stageScheduleChunk`, and the confirm with
+        // its preview-stale check (`mockGameImport.js` says what is mirrored).
+        const db = getDB();
+        const storedSession =
+          typeof window !== 'undefined' ? sessionStorage.getItem('__MOCK_SESSION__') : null;
+        const currentUserId = storedSession
+          ? JSON.parse(storedSession)?.user?.id || 'mock-admin-id'
+          : null;
+        const { wrote, ...answer } = handleGameImportFunction(db, options.body, {
+          currentUserId,
+          isOrgAdmin: (organizationId) =>
+            ADMIN_ROLES.includes(
+              String(
+                (db.organization_members || []).find(
+                  (item) =>
+                    String(item.organization_id) === String(organizationId) &&
+                    String(item.profile_id) === String(currentUserId)
+                )?.role || ''
+              )
+            ),
+        });
+        if (wrote) saveDB(db);
+        return answer;
+      }
       if (name === 'import-validation') {
         const body = options?.body || {};
         const aliases = HEADER_ALIASES;

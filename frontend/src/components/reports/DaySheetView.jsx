@@ -130,6 +130,9 @@ export default function DaySheetView({ games, reference, timeZone }) {
           {venue && elsewhere > 0
             ? ` ${elsewhere} ${plural(elsewhere, 'game', 'games')} on this date ${plural(elsewhere, 'is', 'are')} at another venue.`
             : ''}
+          {sheet.counts.tbdOtherDates > 0
+            ? ` ${sheet.counts.tbdOtherDates} TIME TBD ${plural(sheet.counts.tbdOtherDates, 'game holds', 'games hold')} another date and ${plural(sheet.counts.tbdOtherDates, 'is', 'are')} on that day's sheet.`
+            : ''}
           {venue && sheet.counts.unknownGround > 0
             ? ` ${sheet.counts.unknownGround} ${plural(sheet.counts.unknownGround, 'game is', 'games are')} at a field with no known venue, so no venue shows ${plural(sheet.counts.unknownGround, 'it', 'them')}.`
             : ''}
@@ -173,13 +176,16 @@ export default function DaySheetView({ games, reference, timeZone }) {
             {`TIME TBD games (${sheet.tbd.length})`}
           </h3>
           <p className="text-xs text-text-muted">
-            These games have no date or venue yet, so they are listed whatever date and venue you
-            choose. They are in the file after the games of the date.
+            A game with no date yet is listed whatever date and venue you choose. A game that has a
+            date and no time is listed on its date only. They are in the file after the games of the
+            date.
           </p>
           <ul className="text-sm mt-1">
             {sheet.tbd.map((row, index) => (
               <li key={`${row.Home}-${row.Away}-${index}`}>
-                {`${row.Division ? `${row.Division}: ` : ''}${row.Home} v ${row.Away}. ${row.Status}`}
+                {`${row.Division ? `${row.Division}: ` : ''}${row.Home} v ${row.Away}. ${
+                  row.Date ? `${row.Date}, no time yet. ` : ''
+                }${row.Status}`}
               </li>
             ))}
           </ul>

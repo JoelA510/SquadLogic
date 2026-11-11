@@ -227,6 +227,25 @@ describe('one coach’s schedule', () => {
     });
   });
 
+  it('R6: a TIME TBD game that holds a date shows its date and no time, as the master export and the Day Sheet do', () => {
+    const dated = tbdGames().map((g) => ({ ...g, gameDate: '2026-10-17' }));
+    const tbd = rowsOf(schedule('c-1', { tbdGames: dated }), 'Game').find(
+      (row) => row.Status === 'TIME TBD'
+    );
+    expect(tbd).toMatchObject({
+      Date: '2026-10-17',
+      Start: '',
+      End: '',
+      Reason: 'Game not scheduled (week 2, on 2026-10-17): no game slot was free for it.',
+    });
+    // CONTROL: the undated game reads as it always has (the case below)
+    const plain = rowsOf(schedule('c-1'), 'Game').find((row) => row.Status === 'TIME TBD');
+    expect(plain).toMatchObject({
+      Date: '',
+      Reason: 'Game not scheduled (week 2): no game slot was free for it.',
+    });
+  });
+
   it('keeps a game on the TIME TBD list, with the reason in the same words as the master export', () => {
     const tbd = rowsOf(schedule('c-1'), 'Game').find((row) => row.Status === 'TIME TBD');
     expect(tbd).toMatchObject({

@@ -34,6 +34,8 @@ function query(rows) {
     select: () => builder,
     eq: () => builder,
     in: () => builder,
+    // the context leaves a games job to its own panel (`.neq('job_type', 'games')`)
+    neq: () => builder,
     order: () => builder,
     limit: () => builder,
     then: (resolve) => resolve({ data: rows, error: null }),

@@ -237,6 +237,42 @@ test('a game item gives a home row and an away row, with the sides it was given'
   assert.equal(exports.perTeam.length, 2);
 });
 
+test('F6: a TIME TBD game that holds a date says its date and still has no time, beside an undated one that reads as today', () => {
+  const undated = {
+    kind: 'game',
+    homeTeamId: 'T2',
+    awayTeamId: 'T1',
+    weekIndex: 4,
+    reason: 'coach-scheduling-conflict',
+  };
+  const dated = {
+    ...undated,
+    weekIndex: 6,
+    reason: 'imported-without-time',
+    gameDate: '2026-10-17',
+  };
+  const before = generateScheduleExports({ teams: TBD_TEAMS, tbdItems: [undated] });
+  const exports = generateScheduleExports({ teams: TBD_TEAMS, tbdItems: [undated, dated] });
+  assert.equal(exports.master.rows.length, 4);
+  const onDate = exports.master.rows.filter((row) => /on 2026-10-17/.test(row.Notes));
+  const plain = exports.master.rows.filter((row) => !/on 2026-10-17/.test(row.Notes));
+  // CONTROL: the undated game's two rows are, to the last cell, what they were without the dated game
+  assert.deepEqual(plain, before.master.rows);
+  assert.equal(onDate.length, 2);
+  for (const row of onDate) {
+    // the date is said; the time is the TIME TBD token every reader of the master file keys on, and no clock time
+    assert.equal(
+      row.Notes,
+      'Game not scheduled (week 6, on 2026-10-17): the imported file gave it no time or no field.'
+    );
+    assert.equal(row.Start, 'TIME TBD');
+    assert.equal(row.End, '');
+    assert.equal(row.Field, 'LOCATION TBD');
+    assert.doesNotMatch(Object.values(row).join(' '), /\d{1,2}:\d{2}/);
+  }
+  assert.match(exports.master.csv, /on 2026-10-17/);
+});
+
 test("TIME TBD rows sort after the team's dated rows, and the dated rows are untouched", () => {
   const dated = {
     teamId: 'T1',

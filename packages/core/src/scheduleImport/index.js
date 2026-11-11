@@ -6,10 +6,13 @@
  * | module | what it is |
  * | --- | --- |
  * | `reasonCodes.js` | the closed lists: what refuses a file, what lists a row, what is flagged |
+ * | `columns.js` | the column names and the template's header row: constants only (re-exported by `parseRows.js`) |
  * | `parseRows.js` | the CSV rows: dates, times, the week rule, the allowlist, the season clock |
  * | `mapping.js` | the file's labels against the organization's records: proposals, decisions, outside clubs |
  * | `audit.js` | the conflict audit, with what it did not check |
  * | `staging.js` | what a parsed row becomes in `staging_import_rows` (the keys the SQL apply reads) |
+ * | `previewCounts.js` | the counts a confirm shows, and whether an apply would still do them (PR 6, F7) |
+ * | `scheduleCsv.js` | the saved schedule as a file this import reads (PR 6, G3: the round trip) |
  *
  * ## What it is not
  *
@@ -25,3 +28,5 @@ export * from './parseRows.js';
 export * from './mapping.js';
 export * from './audit.js';
 export * from './staging.js';
+export * from './previewCounts.js';
+export * from './scheduleCsv.js';

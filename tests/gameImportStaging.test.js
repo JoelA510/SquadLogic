@@ -17,6 +17,9 @@ import {
   teamDecisionKey,
   toStagedGameRow,
 } from '../packages/core/src/scheduleImport/index.js';
+import { stageScheduleChunk } from '../packages/core/src/scheduleImport/index.js';
+import { sanitizeImportText } from '../frontend/src/utils/importRows.js';
+import * as edge from '../supabase/functions/_shared/schedule-import.ts';
 import { loadScheduleFixture } from './helpers/scheduleFixtureLoad.js';
 
 const fixture = loadScheduleFixture();
@@ -264,8 +267,13 @@ describe('every parse outcome stages in a shape the SQL accepts (a JS twin of it
   }));
 
   it('reaches ok, every TIME TBD form and every refusal the parse can give (a check over fewer would pass)', () => {
+    // F5: `bad-time` and `bad-week` are kept rows that carry the code as a flag, so a flag reaches its code too.
     const reached = new Set(
-      outcomes.map(({ row }) => (row.status === 'refused' ? row.reason : `${row.status}`))
+      outcomes.flatMap(({ row }) =>
+        row.status === 'refused'
+          ? [row.reason]
+          : [`${row.status}`, ...row.flags.map((/** @type {{ code: string }} */ f) => f.code)]
+      )
     );
     for (const code of [
       'ok',
@@ -295,6 +303,32 @@ describe('every parse outcome stages in a shape the SQL accepts (a JS twin of it
       const staged = toStagedGameRow(row);
       expect(shapeProblem(/** @type {any} */ (staged)), `${name} row ${row.rowNumber}`).toBeNull();
     }
+  });
+
+  it('F5: a bad-time row stages as a dated TIME TBD game and a bad-week row with its derived week; the warning is not staged', () => {
+    const [badTime] = parseFile([fileRow({ 'Start Time': '25:99' })]);
+    const [badWeek] = parseFile([fileRow({ Week: 'abc' })]);
+    const t = /** @type {any} */ (toStagedGameRow(/** @type {any} */ (badTime)));
+    expect(t.validation_errors).toEqual([]);
+    expect(t.normalized_payload).toMatchObject({
+      status: 'tbd',
+      tbd_reason: 'imported-without-time',
+      date: '2026-09-12',
+      start: null,
+      end: null,
+      start_time: null,
+      end_time: null,
+      flags: [],
+    });
+    const w = /** @type {any} */ (toStagedGameRow(/** @type {any} */ (badWeek)));
+    expect(w.normalized_payload).toMatchObject({ status: 'ok', week_index: 1, flags: [] });
+    // CONTROL: a flag the SQL knows IS staged, and staging the parse's warning would be refused by the SQL's shape check.
+    const [differs] = parseFile([fileRow({ Week: '3' })]);
+    const d = /** @type {any} */ (toStagedGameRow(/** @type {any} */ (differs)));
+    expect(d.normalized_payload.flags).toEqual(['week-differs']);
+    expect(
+      shapeProblem({ ...t, normalized_payload: { ...t.normalized_payload, flags: ['bad-time'] } })
+    ).toBe('flags');
   });
 
   it('CONTROL: the twin refuses what the SQL refuses (so it can fail)', () => {
@@ -328,6 +362,29 @@ describe('every parse outcome stages in a shape the SQL accepts (a JS twin of it
     ).toMatch(/closed list/);
   });
 
+  it('the twin holds the keys as the SQL does (a key of blank parts is not a key)', () => {
+    // The SQL reads `division_key`, `home_key` and `away_key` as text and requires them non-empty; a team key is a JSON
+    // tuple, so the twin also requires each PART of it, which is what "a blank Home Team" breaks.
+    const [placed] = parseFile([fileRow()]);
+    const ok = /** @type {any} */ (toStagedGameRow(/** @type {any} */ (placed)));
+    expect(
+      shapeProblem({
+        ...ok,
+        normalized_payload: {
+          ...ok.normalized_payload,
+          home_team: '',
+          home_key: '["u05 boys",""]',
+        },
+      })
+    ).toBe('home_team');
+    expect(
+      shapeProblem({ ...ok, normalized_payload: { ...ok.normalized_payload, division: ' ' } })
+    ).toBe('division');
+    expect(
+      shapeProblem({ ...ok, normalized_payload: { ...ok.normalized_payload, venue: '' } })
+    ).toBe('venue');
+  });
+
   it('the SQL still states the clauses the twin copies (so the twin cannot drift from it)', () => {
     const migration = readFileSync(
       path.join(process.cwd(), 'supabase/migrations/20261121010000_game_import.sql'),
@@ -343,8 +400,125 @@ describe('every parse outcome stages in a shape the SQL accepts (a JS twin of it
       'r.end_ts > r.start_ts',
       'ELSE r.start_ts IS NULL AND r.end_ts IS NULL END',
       "r.flags <@ ARRAY['time-ambiguous', 'week-differs']",
+      // the labels and keys a blank cell would leave empty (PR 6 fix round 1, Codex P2)
+      "COALESCE(r.division_key, '') <> '' AND COALESCE(r.home_key, '') <> '' AND COALESCE(r.away_key, '') <> ''",
+      "COALESCE(r.division_label, '') <> '' AND COALESCE(r.home_label, '') <> '' AND COALESCE(r.away_label, '') <> ''",
+      "COALESCE(r.venue_key, '') <> '' AND COALESCE(r.field_key, '') <> ''",
+      "COALESCE(r.venue_label, '') <> '' AND COALESCE(r.field_label, '') <> ''",
     ]) {
       expect(check, clause).toContain(clause);
+    }
+  });
+});
+
+// ------------------------------------------------------------------- PR 6 fix round 1 (Codex P2): the class, not the case
+describe('EVERY row staging accepts passes the apply’s shape check, whatever cell is blank', () => {
+  // A row staging returns as accepted (`ok` or `tbd`) that the apply's shape check refuses does not fail alone: the
+  // apply raises `game_import_staged_invalid` for the WHOLE job. A blank Division or team did exactly that. So the
+  // subject set is generated: every column the shape check reads, blanked every way a cell can be blank, alone and in
+  // pairs, through BOTH staging implementations (core's, which the mock runs, and the Edge function's).
+  const BLANKS = ['', ' ', '\t', '\u00a0', ' \u00a0 '];
+  const COLUMNS = [
+    'Game ID',
+    'Date',
+    'Start Time',
+    'End Time',
+    'Venue',
+    'Field',
+    'Division',
+    'Home Team',
+    'Away Team',
+    'Week',
+  ];
+  const HEADERS = COLUMNS;
+  const base = () => fileRow();
+  const table = [];
+  for (const column of COLUMNS)
+    for (const blank of BLANKS)
+      table.push({
+        name: `${column}=${JSON.stringify(blank)}`,
+        row: { ...base(), [column]: blank },
+      });
+  for (let i = 0; i < COLUMNS.length; i += 1)
+    for (let j = i + 1; j < COLUMNS.length; j += 1)
+      table.push({
+        name: `${COLUMNS[i]} and ${COLUMNS[j]} blank`,
+        row: { ...base(), [COLUMNS[i]]: '', [COLUMNS[j]]: ' ' },
+      });
+  // and the cells that are not blank but cannot be stored
+  table.push({
+    name: 'a date 300 weeks on, no season end',
+    row: { ...base(), Date: '2032-06-12', Week: '' },
+    season: { ...fixture.season, endDate: null },
+  });
+  table.push({ name: 'a Week of 256', row: { ...base(), Week: '256' } });
+
+  /** @type {Array<[string, (input: any) => any]>} */
+  const stagers = [
+    ['core', (input) => stageScheduleChunk({ ...input, clean: sanitizeImportText })],
+    ['edge', (input) => edge.stageGameChunk(input)],
+  ];
+
+  it('the table blanks every column the shape check reads (a table that skipped one would pass)', () => {
+    expect(table.length).toBeGreaterThanOrEqual(COLUMNS.length * BLANKS.length + 45);
+    for (const column of COLUMNS)
+      expect(table.some((t) => t.name.startsWith(`${column}=`))).toBe(true);
+    // CONTROL: the row the table is built from is a placed game with nothing blank
+    expect(parseFile([base()])[0]).toMatchObject({ status: 'ok', flags: [] });
+  });
+
+  for (const [who, stage] of stagers) {
+    it(`${who}: no accepted row fails the shape check, and each blank has its outcome`, () => {
+      const failures = [];
+      const outcome = new Map();
+      for (const { name, row, season } of table) {
+        const result = stage({
+          headers: HEADERS,
+          rows: [row],
+          season: season ?? fixture.season,
+          rowOffset: 0,
+        });
+        expect(result.refusal, name).toBeNull();
+        expect(result.staged, name).toHaveLength(1);
+        const staged = JSON.parse(JSON.stringify(result.staged[0]));
+        const problem = shapeProblem(staged);
+        if (problem !== null) failures.push(`${name}: ${problem}`);
+        outcome.set(
+          name,
+          staged.normalized_payload
+            ? staged.normalized_payload.status
+            : staged.validation_errors[0].code
+        );
+      }
+      expect(failures).toEqual([]);
+      // what each blank becomes, written out: a row with no division or team cannot be a game; one with no place is TIME TBD
+      expect(outcome.get('Division=""')).toBe('unknown-division');
+      expect(outcome.get('Home Team=" "')).toBe('unknown-team');
+      expect(outcome.get('Away Team="\u00a0"')).toBe('unknown-team');
+      // (a time and a field with no venue: the mapping step's own refusal, `unknown-venue`, made at staging)
+      expect(outcome.get('Venue=""')).toBe('unknown-venue');
+      expect(outcome.get('Venue and Field blank')).toBe('tbd');
+      expect(outcome.get('Field=""')).toBe('tbd');
+      expect(outcome.get('Start Time=""')).toBe('tbd');
+      expect(outcome.get('Date=""')).toBe('bad-date');
+      expect(outcome.get('Game ID=""')).toBe('ok');
+      expect(outcome.get('Week=""')).toBe('ok');
+      expect(outcome.get('a date 300 weeks on, no season end')).toBe('outside-season-window');
+      expect(outcome.get('a Week of 256')).toBe('ok');
+    });
+  }
+
+  it('core and the Edge mirror stage every row of the table alike', () => {
+    for (const { name, row, season } of table) {
+      const input = {
+        headers: HEADERS,
+        rows: [row],
+        season: season ?? fixture.season,
+        rowOffset: 0,
+      };
+      expect(JSON.parse(JSON.stringify(stagers[1][1](input))), name).toEqual(
+        JSON.parse(JSON.stringify(stagers[0][1](input)))
+      );
     }
   });
 });

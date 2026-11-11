@@ -161,8 +161,57 @@ describe('loadReportsReference: the league the reports are built over', () => {
       { id: 's-2', weekIndex: 1 },
     ]);
     expect(data.tbdGames).toEqual([
-      { homeTeamId: 't-1', awayTeamId: 't-3', weekIndex: 2, reason: 'no-slot-available' },
+      {
+        homeTeamId: 't-1',
+        awayTeamId: 't-3',
+        weekIndex: 2,
+        reason: 'no-slot-available',
+        gameDate: null,
+      },
     ]);
+  });
+
+  it('F6: reads the date an import gave a TIME TBD game from the table, by row id, beside an undated game', async () => {
+    // `get_schedule_tbd` does not return `game_date` (the column is newer than the function), so it is read from
+    // `schedule_tbd` and joined on by id. The undated game is the control: no date is invented for it.
+    const [undated] = tbdRows();
+    const dated = {
+      ...undated,
+      id: 'tbd-dated',
+      home_team_id: 't-4',
+      away_team_id: 't-5',
+      week_index: 3,
+      reason: 'imported-without-time',
+    };
+    const tables = /** @type {Record<string, any>} */ (SEASON_TABLES());
+    tables.schedule_tbd = [
+      { id: undated.id, game_date: null, external_ref: null },
+      { id: 'tbd-dated', game_date: '2026-10-17', external_ref: 'N-7' },
+    ];
+    const client = fakeClient({ tables, rpcs: { get_schedule_tbd: [undated, dated] } });
+    const result = await loadReportsReference(client, params);
+    expect(result.ok).toBe(true);
+    expect(result.data.tbdGames.map((g) => [g.homeTeamId, g.gameDate])).toEqual([
+      ['t-1', null],
+      ['t-4', '2026-10-17'],
+    ]);
+    // the read is the season's games of the TIME TBD table, and only the two columns it adds
+    const read = client.calls.find((c) => c.table === 'schedule_tbd');
+    expect(read.select).toBe('id, game_date, external_ref');
+    expect(read.filters).toEqual([
+      ['season_settings_id', SEASON_ID],
+      ['kind', 'game'],
+    ]);
+    // a refused read of the dates is an unread list (named), never a list with its dates missing
+    const refused = await loadReportsReference(
+      fakeClient({
+        tables,
+        rpcs: { get_schedule_tbd: [undated, dated] },
+        failures: { schedule_tbd: 'permission denied' },
+      }),
+      params
+    );
+    expect(refused).toMatchObject({ ok: false, table: 'get_schedule_tbd' });
   });
 
   it('takes the teams of the season through its divisions, and names the division on each', async () => {
@@ -297,7 +346,8 @@ describe('loadReportsReference: the league the reports are built over', () => {
   });
 
   describe('in two groups, so a report is not blocked by a read it does not use', () => {
-    const LEAGUE = ['locations', 'fields', 'divisions', 'teams', 'game_slots'];
+    // `schedule_tbd` is the read that joins a TIME TBD game's date onto the list (F6 of PR 6).
+    const LEAGUE = ['locations', 'fields', 'divisions', 'teams', 'game_slots', 'schedule_tbd'];
     const COACHES_GROUP = ['coaches', 'team_coach_assignments', 'practice_assignments'];
     const tablesRead = (client) =>
       [...new Set(client.calls.filter((c) => c.table).map((c) => c.table))].sort();

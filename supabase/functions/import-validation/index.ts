@@ -41,6 +41,14 @@ import {
 import { composeFullName, normalizeImportRow, sanitizeImportText } from '../_shared/import-rows.ts';
 import { validateEvaluationRow } from '../_shared/import-evaluations.ts';
 import { loadImportAgeRule } from '../_shared/import-age-rule.ts';
+import {
+  applyGameImportConfirmed,
+  GAME_IMPORT_LIMITS,
+  isGameImportConfirmCounts,
+  loadGameImportSeason,
+  type SeasonReader,
+  stageGameChunk,
+} from '../_shared/schedule-import.ts';
 
 // --- Constants ---
 const MAX_ROWS = 5000;
@@ -538,6 +546,45 @@ const ImportValidationPayload = z.object({
   row_offset: z.number().int().min(0).optional().default(0),
 });
 
+/**
+ * A games import (plan `docs/changes/2026-11-03-schedule-expansion.md` 4.2, PR 6). Its own shape, because a schedule
+ * file is not a people file: the header row travels with each chunk (the allowlist is by header name, and there is no
+ * alias map), a chunk is at most 500 rows of a file of at most 2,400, and the confirm is a second action.
+ *
+ * - `action: 'stage'` (the default): read one chunk and stage it. The season, and so the clock, is the JOB's.
+ * - `action: 'apply'`: the confirm. `confirmed` is the counts the admin saw; the dry run is run again and the apply
+ *   is refused with `game_import_preview_stale` when its counts differ (task F7).
+ */
+const GamesImportPayload = z.object({
+  import_type: z.literal('games'),
+  action: z.enum(['stage', 'apply']).optional().default('stage'),
+  organization_id: z.string().uuid(),
+  import_job_id: z.string().uuid(),
+  headers: z
+    .array(z.string().max(GAME_IMPORT_LIMITS.MAX_CELL_LENGTH))
+    .max(GAME_IMPORT_LIMITS.MAX_HEADERS)
+    .optional()
+    .default([]),
+  rows: z
+    .array(z.record(z.unknown()))
+    .max(
+      GAME_IMPORT_LIMITS.MAX_CHUNK_ROWS,
+      `Maximum ${GAME_IMPORT_LIMITS.MAX_CHUNK_ROWS} rows per request`
+    )
+    .optional()
+    .default([]),
+  row_offset: z.number().int().min(0).max(GAME_IMPORT_LIMITS.MAX_ROWS).optional().default(0),
+  confirmed: z.record(z.union([z.number(), z.boolean()])).optional(),
+});
+
+/** The HTTP status a database refusal of the games RPCs is answered with. */
+function statusOfDatabaseError(code: string | undefined): number {
+  if (code === '42501') return 403;
+  if (code === 'P0002') return 404;
+  if (code === '22023' || code === '23505') return 409;
+  return 500;
+}
+
 // --- Handler ---
 const handler = withFailureLogging('import-validation', async (req: Request, logCtx) => {
   if (req.method === 'OPTIONS') {
@@ -585,35 +632,50 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
     );
   }
 
-  // 3. Parse and validate request body
-  let body: z.infer<typeof ImportValidationPayload>;
+  // 3. Parse and validate request body. A games import has its own shape (see `GamesImportPayload`).
+  let parsedGeneric: z.infer<typeof ImportValidationPayload> | null = null;
+  let parsedGames: z.infer<typeof GamesImportPayload> | null = null;
   try {
     const raw = await req.json();
-    const parsed = ImportValidationPayload.safeParse(raw);
+    const isGames =
+      raw !== null &&
+      typeof raw === 'object' &&
+      (raw as Record<string, unknown>).import_type === 'games';
+    const parsed = isGames
+      ? GamesImportPayload.safeParse(raw)
+      : ImportValidationPayload.safeParse(raw);
     if (!parsed.success) {
       return jsonResponse(
         { status: 'error', message: 'Invalid payload', issues: parsed.error.issues },
         400
       );
     }
-    body = parsed.data;
+    if (isGames) parsedGames = parsed.data as z.infer<typeof GamesImportPayload>;
+    else parsedGeneric = parsed.data as z.infer<typeof ImportValidationPayload>;
   } catch {
     return jsonResponse({ status: 'error', message: 'Invalid JSON' }, 400);
   }
+  // Constants from here on: a callback below reads them, and only a constant keeps its narrowing inside one.
+  const games = parsedGames;
+  const generic = parsedGeneric;
+  const organizationId = (games ?? generic)?.organization_id;
+  if (!organizationId) {
+    return jsonResponse({ status: 'error', message: 'Invalid payload' }, 400);
+  }
 
   // 4. Verify org admin access before staging or validating import payloads.
-  const isOrgAdmin = await verifyOrgAdmin(serviceClient, user.id, body.organization_id);
+  const isOrgAdmin = await verifyOrgAdmin(serviceClient, user.id, organizationId);
   if (!isOrgAdmin) {
     return jsonResponse(
       { status: 'error', message: 'Access denied: not an admin of this organization' },
       403
     );
   }
-  logCtx.organizationId = body.organization_id;
+  logCtx.organizationId = organizationId;
 
   // The demo league imports nothing (D3): no file is validated or staged for it. The database
   // refuses its import jobs and staged rows too; this is the early answer.
-  const demo = await readDemoState(asDemoClient(serviceClient), body.organization_id);
+  const demo = await readDemoState(asDemoClient(serviceClient), organizationId);
   if (demo === null || demo.isDemo) {
     return jsonResponse(
       {
@@ -624,6 +686,242 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
       403
     );
   }
+
+  // ---------------------------------------------------------------------------------------------- games
+  if (games) {
+    const { data: job, error: jobError } = await serviceClient
+      .from('import_jobs')
+      .select('id, organization_id, job_type, status, season_settings_id')
+      .eq('id', games.import_job_id)
+      .eq('organization_id', organizationId)
+      .maybeSingle();
+    if (jobError) {
+      await logFailure(logCtx, 'Import job lookup failed', jobError);
+      return jsonResponse({ status: 'error', message: 'Import job lookup failed' }, 500);
+    }
+    if (!job) {
+      return jsonResponse(
+        { status: 'error', message: 'Import job not found for organization' },
+        404
+      );
+    }
+    if (job.job_type !== 'games') {
+      return jsonResponse(
+        { status: 'error', message: `Import job type ${job.job_type} does not match games` },
+        409
+      );
+    }
+
+    // The confirm (F7): the database is asked AS THE CALLER, so `auth.uid()` is the admin, the
+    // function's own checks hold, and the audit rows it writes are theirs.
+    if (games.action === 'apply') {
+      if (!isGameImportConfirmCounts(games.confirmed)) {
+        return jsonResponse(
+          {
+            status: 'error',
+            code: 'confirmed_counts_required',
+            message:
+              'The confirm must carry the counts of the preview it confirms. Preview the import again.',
+          },
+          400
+        );
+      }
+      const userClient = createUserClient(req, supabaseUrl, anonKey);
+      const outcome = await applyGameImportConfirmed({
+        rpc: (name, params) => userClient.rpc(name, params),
+        jobId: games.import_job_id,
+        confirmed: games.confirmed,
+      });
+      if (outcome.kind === 'stale') {
+        return jsonResponse(
+          {
+            status: 'error',
+            code: outcome.code,
+            message: outcome.message,
+            differing: outcome.differing,
+            confirmed: outcome.confirmed,
+            current: outcome.current,
+            preview: outcome.preview,
+          },
+          409
+        );
+      }
+      if (outcome.kind === 'error') {
+        const status = statusOfDatabaseError(outcome.error.code);
+        if (status === 500) {
+          await logFailure(logCtx, `Games import ${outcome.stage} failed`, outcome.error);
+        }
+        return jsonResponse(
+          {
+            status: 'error',
+            code: outcome.error.details || outcome.error.code || 'game_import_failed',
+            message:
+              status === 500
+                ? 'The import could not be applied.'
+                : (outcome.error.message ?? 'The import was refused.'),
+          },
+          status
+        );
+      }
+      return jsonResponse({ status: 'success', import_type: 'games', result: outcome.result });
+    }
+
+    if (['completed', 'completed_with_warnings', 'failed', 'needs_fix'].includes(job.status)) {
+      return jsonResponse(
+        { status: 'error', message: `Import job cannot accept staged rows while ${job.status}` },
+        409
+      );
+    }
+    if (games.row_offset + games.rows.length > GAME_IMPORT_LIMITS.MAX_ROWS) {
+      // Said by the parse too, from the offset; this is the answer when the chunk itself is empty.
+      return jsonResponse(
+        {
+          status: 'refused',
+          import_type: 'games',
+          code: 'too-many-rows',
+          message: `One import takes at most ${GAME_IMPORT_LIMITS.MAX_ROWS} rows. Split the file and import the parts one after the other.`,
+        },
+        200
+      );
+    }
+
+    // The clock and the window are the season the JOB imports into: never the request's word.
+    // Read by the shared module: the handler itself reads no season (the player arm's rule is one call, and
+    // `_shared/tests/import-age-rule_test.ts` holds the handler to that).
+    const { data: seasonRow, error: seasonError } = await loadGameImportSeason(
+      // The client's own query types are wider than the three calls this read makes.
+      serviceClient as unknown as SeasonReader,
+      { seasonSettingsId: job.season_settings_id, organizationId }
+    );
+    if (seasonError) {
+      await logFailure(logCtx, 'Season lookup failed', seasonError);
+      return jsonResponse({ status: 'error', message: 'Season lookup failed' }, 500);
+    }
+    if (!seasonRow) {
+      return jsonResponse(
+        {
+          status: 'error',
+          code: 'season_missing',
+          message: 'This import has no season to import into. Start the import again.',
+        },
+        409
+      );
+    }
+
+    let chunk: ReturnType<typeof stageGameChunk>;
+    try {
+      chunk = stageGameChunk({
+        headers: games.headers,
+        rows: games.rows as Array<Record<string, unknown>>,
+        season: {
+          timeZone: seasonRow.timezone ?? null,
+          startDate: seasonRow.season_start ?? null,
+          endDate: seasonRow.season_end ?? null,
+        },
+        rowOffset: games.row_offset,
+      });
+    } catch (error) {
+      // The parse throws only on a season date that is not a date: a defect in stored data, not in the file.
+      if (!(error instanceof TypeError)) throw error;
+      await logFailure(logCtx, 'Season dates could not be read for a games import', error);
+      return jsonResponse(
+        { status: 'error', message: 'The season’s dates could not be read.' },
+        500
+      );
+    }
+
+    const userClient = createUserClient(req, supabaseUrl, anonKey);
+    if (chunk.refusal) {
+      await recordAuditNow(userClient, logCtx, {
+        organizationId,
+        action: 'import.failed',
+        resourceType: 'import_job',
+        metadata: {
+          import_type: 'games',
+          total_rows: games.rows.length,
+          valid_rows: 0,
+          error_rows: games.rows.length,
+          staged_rows: 0,
+          refusal: chunk.refusal.code,
+        },
+      });
+      return jsonResponse({
+        status: 'refused',
+        import_type: 'games',
+        code: chunk.refusal.code,
+        message: chunk.refusal.message,
+        column: chunk.refusal.column ?? null,
+      });
+    }
+
+    // The first chunk starts the file over: nothing a previous attempt staged under this job stays.
+    const stale = serviceClient
+      .from('staging_import_rows')
+      .delete()
+      .eq('import_job_id', games.import_job_id)
+      .eq('import_type', 'games');
+    const { error: deleteError } =
+      games.row_offset === 0
+        ? await stale
+        : await stale.in(
+            'source_row_number',
+            chunk.staged.map((row) => row.source_row_number)
+          );
+    if (deleteError) {
+      await logFailure(logCtx, 'Failed to replace staged games rows', deleteError);
+      return jsonResponse(
+        { status: 'error', message: 'Failed to replace staged import rows' },
+        500
+      );
+    }
+    if (chunk.staged.length > 0) {
+      const { error: stageError } = await serviceClient.from('staging_import_rows').insert(
+        chunk.staged.map((row) => ({
+          import_job_id: games.import_job_id,
+          organization_id: organizationId,
+          import_type: 'games',
+          source_row_number: row.source_row_number,
+          raw_payload: row.raw_payload,
+          normalized_payload: row.normalized_payload,
+          validation_errors: row.validation_errors,
+        }))
+      );
+      if (stageError) {
+        await logFailure(logCtx, 'Failed to stage games rows', stageError);
+        return jsonResponse({ status: 'error', message: 'Failed to stage import rows' }, 500);
+      }
+    }
+
+    await recordAuditNow(userClient, logCtx, {
+      organizationId,
+      action: 'import.started',
+      resourceType: 'import_job',
+      metadata: {
+        import_type: 'games',
+        total_rows: chunk.summary.rows,
+        valid_rows: chunk.summary.ok + chunk.summary.tbd,
+        error_rows: chunk.summary.refused,
+        staged_rows: chunk.staged.length,
+        row_offset: games.row_offset,
+      },
+    });
+
+    return jsonResponse({
+      status: 'success',
+      import_type: 'games',
+      row_offset: games.row_offset,
+      total_rows: chunk.summary.rows,
+      staged_rows: chunk.staged.length,
+      valid_rows: chunk.summary.ok + chunk.summary.tbd,
+      error_rows: chunk.summary.refused,
+      summary: chunk.summary,
+    });
+  }
+
+  if (!generic) {
+    return jsonResponse({ status: 'error', message: 'Invalid payload' }, 400);
+  }
+  const body = generic;
 
   if (body.import_job_id) {
     const { data: job, error: jobError } = await serviceClient

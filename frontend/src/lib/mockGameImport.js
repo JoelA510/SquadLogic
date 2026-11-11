@@ -236,7 +236,11 @@ function ensureGameSlot(db, params, ctx, env) {
 const FLAG_MESSAGE = (code) =>
   code === 'time-ambiguous'
     ? 'The clocks repeat this time on its date; the first occurrence was taken.'
-    : 'The week is not the week the date falls in.';
+    : code === 'bad-time'
+      ? 'The time could not be read: the game is a TIME TBD game on its date.'
+      : code === 'bad-week'
+        ? 'The Week could not be read or stored: the week was taken from the date.'
+        : 'The week is not the week the date falls in.';
 
 export const COLLISION_MESSAGE =
   "A game this file does not move already stands on this place, and this row's Game ID (or the lack of one) does not name it. Nothing is written for the row.";

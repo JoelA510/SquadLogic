@@ -171,9 +171,38 @@ describe('loadReportsReference: the league the reports are built over', () => {
     ]);
   });
 
-  it('F6: reads the date an import gave a TIME TBD game from the table, by row id, beside an undated game', async () => {
-    // `get_schedule_tbd` does not return `game_date` (the column is newer than the function), so it is read from
-    // `schedule_tbd` and joined on by id. The undated game is the control: no date is invented for it.
+  it('M2 (20261122010000): uses the date and Game ID the RPC returns, and makes no second read', async () => {
+    const [undated] = tbdRows();
+    const rows = [
+      { ...undated, game_date: null, external_ref: null },
+      {
+        ...undated,
+        id: 'tbd-dated',
+        home_team_id: 't-4',
+        away_team_id: 't-5',
+        week_index: 3,
+        reason: 'imported-without-time',
+        game_date: '2026-10-17',
+        external_ref: 'N-7',
+      },
+    ];
+    const tables = /** @type {Record<string, any>} */ (SEASON_TABLES());
+    // A table that would give another answer: reading it would show.
+    tables.schedule_tbd = [{ id: 'tbd-dated', game_date: '1999-01-01', external_ref: 'WRONG' }];
+    const client = fakeClient({ tables, rpcs: { get_schedule_tbd: rows } });
+    const result = await loadReportsReference(client, params);
+    expect(result.ok).toBe(true);
+    expect(result.data.tbdGames.map((g) => [g.homeTeamId, g.gameDate])).toEqual([
+      ['t-1', null],
+      ['t-4', '2026-10-17'],
+    ]);
+    expect(client.calls.some((c) => c.table === 'schedule_tbd')).toBe(false);
+  });
+
+  it('F6: with the function before 20261122010000 (no game_date key in its rows) reads the date from the table, by row id, beside an undated game', async () => {
+    // The older `get_schedule_tbd` does not return `game_date`, so it is read from `schedule_tbd` and joined on by id
+    // (the client can be deployed before the migration is applied). The undated game is the control: no date is
+    // invented for it.
     const [undated] = tbdRows();
     const dated = {
       ...undated,

@@ -175,10 +175,18 @@ describe('F9: the Games page lists what an import said, in words', () => {
       'This game takes the place of a game the file moves away: both are written.',
       'The file gives this game a date and no time: it is no longer placed, and stands on the TIME TBD list.',
       'The week is not the week the date falls in.',
+      // 20261122010000: the parse's two warnings are staged flags, said by the apply in these words.
+      'The time could not be read: the game is a TIME TBD game on its date.',
+      'The Week could not be read or stored: the week was taken from the date.',
     ]) {
       expect(sql).toContain(sentence);
     }
     expect(importWarningSubject({ type: 'field-overlap', details: { gameId: 'x' } })).toBe('');
+    for (const type of ['bad-time', 'bad-week']) {
+      expect(importWarningSubject({ type, details: { gameId: 'N-9', date: '2026-09-26' } })).toBe(
+        'Game N-9 on 2026-09-26: '
+      );
+    }
     expect(importWarningSubject({ type: 'week-differs', details: { rowKey: 'row-12' } })).toBe(
       'Row 12 of the file: '
     );

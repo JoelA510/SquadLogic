@@ -111,6 +111,9 @@ export function handleScheduleTbdRpc(db, name, params, ctx) {
       reason: row.reason,
       detail: row.detail ?? {},
       run_id: row.run_id ?? null,
+      // 20261122010000: the date a file gave a TIME TBD game, and its Game ID.
+      game_date: row.game_date ?? null,
+      external_ref: row.external_ref ?? null,
       created_at: row.created_at ?? null,
     }))
     .sort(

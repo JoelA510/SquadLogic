@@ -54,36 +54,12 @@ import { seasonCalendarDate, resolveZonedInstant } from '../timing/seasonClock.j
 import { TIMING_REASON } from '../timing/reasonCodes.js';
 import { scheduleLabelKey } from './mapping.js';
 import { SCHEDULE_IMPORT_LIMITS, SCHEDULE_IMPORT_REASON as R } from './reasonCodes.js';
+import { SCHEDULE_IMPORT_COLUMNS, SCHEDULE_IMPORT_TEMPLATE_HEADER } from './columns.js';
 
-/** The columns of plan 4.3, by the name the template uses. */
-export const SCHEDULE_IMPORT_COLUMNS = Object.freeze({
-  GAME_ID: 'Game ID',
-  DATE: 'Date',
-  START: 'Start Time',
-  END: 'End Time',
-  LENGTH: 'Length',
-  VENUE: 'Venue',
-  FIELD: 'Field',
-  DIVISION: 'Division',
-  HOME: 'Home Team',
-  AWAY: 'Away Team',
-  WEEK: 'Week',
-});
+// The column names and the template's header row live in a module of constants (`columns.js`), so a caller that only
+// needs the header row does not load this parser. They are re-exported here: one list, wherever it is read from.
+export { SCHEDULE_IMPORT_COLUMNS, SCHEDULE_IMPORT_TEMPLATE_HEADER };
 const C = SCHEDULE_IMPORT_COLUMNS;
-
-/** The header row of the downloadable template (PR 6): `Length` is the alternative to `End Time`. */
-export const SCHEDULE_IMPORT_TEMPLATE_HEADER = Object.freeze([
-  C.GAME_ID,
-  C.DATE,
-  C.START,
-  C.END,
-  C.VENUE,
-  C.FIELD,
-  C.DIVISION,
-  C.HOME,
-  C.AWAY,
-  C.WEEK,
-]);
 
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const US_DATE = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;

@@ -6,6 +6,7 @@
  * | module | what it is |
  * | --- | --- |
  * | `reasonCodes.js` | the closed lists: what refuses a file, what lists a row, what is flagged |
+ * | `columns.js` | the column names and the template's header row: constants only (re-exported by `parseRows.js`) |
  * | `parseRows.js` | the CSV rows: dates, times, the week rule, the allowlist, the season clock |
  * | `mapping.js` | the file's labels against the organization's records: proposals, decisions, outside clubs |
  * | `audit.js` | the conflict audit, with what it did not check |

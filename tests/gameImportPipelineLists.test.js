@@ -325,6 +325,32 @@ describe('the code names games where the plan says it does, and not where PR 6 o
     expect(parsed.rows[0]).toMatchObject({ status: 'ok', flags: [] });
   });
 
+  it('R9: the files the Import page loads eagerly do not import the schedule parser (only its constants)', () => {
+    // `ImportPanel.jsx` and `csvTemplates.js` load with the Import page; the parser, the season clock and the mapping
+    // load with the schedule import's own panel (a lazy chunk). A static import of the parser from either would put
+    // it in the page's first load.
+    const eager = ['frontend/src/utils/csvTemplates.js', 'frontend/src/components/ImportPanel.jsx'];
+    for (const file of eager) {
+      const source = readFileSync(path.join(REPO, file), 'utf8');
+      const statics = [...source.matchAll(/^import [^;]*? from '([^']+)';/gms)].map((m) => m[1]);
+      expect(statics.length).toBeGreaterThan(1);
+      const offending = statics.filter(
+        (spec) => /scheduleImport\//.test(spec) && !spec.endsWith('scheduleImport/columns.js')
+      );
+      expect(offending, file).toEqual([]);
+    }
+    // the constants module imports nothing at all
+    const columns = readFileSync(
+      path.join(REPO, 'packages/core/src/scheduleImport/columns.js'),
+      'utf8'
+    );
+    expect(columns).not.toMatch(/^import /m);
+    // and the panel is reached by a dynamic import
+    expect(readFileSync(path.join(REPO, eager[1]), 'utf8')).toContain(
+      "lazy(() => import('./import/ScheduleImportPanel.jsx'))"
+    );
+  });
+
   it('PLANT: a ready file that stops naming games is reported', () => {
     const original = lists.get('frontend/src/lib/mockSupabaseClient.js') ?? '';
     // CONTROL first: the real file names games, so the plant below is what turns it off.

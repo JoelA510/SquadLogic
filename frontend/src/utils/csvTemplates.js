@@ -15,7 +15,8 @@
  */
 
 import { escapeCsvCell } from '@squadlogic/core/csv.js';
-import { SCHEDULE_IMPORT_TEMPLATE_HEADER } from '@squadlogic/core/scheduleImport/parseRows.js';
+// The constants module, not the parser: this file loads with the Import page, the parser only with the schedule panel.
+import { SCHEDULE_IMPORT_TEMPLATE_HEADER } from '@squadlogic/core/scheduleImport/columns.js';
 
 export const CSV_TEMPLATES = {
   players: {

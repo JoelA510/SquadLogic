@@ -30,6 +30,7 @@ import {
 import { composeFullName, normalizeImportRow } from '../utils/importRows.js';
 import { validateEvaluationRow } from '../utils/importEvaluations.js';
 import { useDemo } from '../hooks/useDemo.js';
+import { importFileSizeProblem } from '../utils/importFileLimits.js';
 import EvaluationImportSummary from './EvaluationImportSummary.jsx';
 
 // A demo opens this instead of the file picker (D4). Lazy: only a demo visitor ever needs it.
@@ -266,8 +267,6 @@ export default function ImportPanel({ onImport }) {
     validateAndReadFile(selectedFile);
   };
 
-  const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
-
   const validateAndReadFile = (file) => {
     if (!file) return;
     if (isDemo) {
@@ -278,10 +277,9 @@ export default function ImportPanel({ onImport }) {
       setError('Please upload a valid CSV file.');
       return;
     }
-    if (file.size > MAX_FILE_SIZE_BYTES) {
-      setError(
-        `File is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum size is 10 MB.`
-      );
+    const tooLarge = importFileSizeProblem(file);
+    if (tooLarge) {
+      setError(tooLarge);
       return;
     }
 

@@ -8,6 +8,8 @@ import {
   proposeScheduleMapping,
   resolveScheduleRows,
   scheduleImportConfirmCounts,
+  scheduleLabelKey,
+  SCHEDULE_IMPORT_COLUMNS,
   SCHEDULE_IMPORT_LIMITS,
 } from '@squadlogic/core/scheduleImport/index.js';
 import { supabase } from '../../lib/supabaseClient.js';
@@ -15,6 +17,7 @@ import { logger } from '../../lib/logger.js';
 import { useOrganization } from '../../contexts/OrganizationContext.jsx';
 import Button from '../ui/Button.jsx';
 import { csvBlob, saveFile } from '../../utils/scheduleDownloads.js';
+import { importFileSizeProblem } from '../../utils/importFileLimits.js';
 import {
   confirmGameImport,
   discardGameImport,
@@ -239,12 +242,22 @@ function ScheduleImportWorkflow({
   const [choices, setChoices] = useState(
     /** @type {Record<string, Record<string, string>>} */ ({})
   );
-  const [arrivePublished, setArrivePublished] = useState(true);
+  // The mapping AS IT IS STORED on the job, with what it would create: set only when the save succeeded. The
+  // "Games arrive Published" box and the confirm's list of names read THIS, never what is being edited.
+  const [sent, setSent] = useState(
+    /** @type {{ published: boolean, creations: Record<string, Array<{ name: string }>> } | null} */ (
+      null
+    )
+  );
+  const arrivePublished = sent?.published ?? true;
   const [preview, setPreview] = useState(/** @type {any} */ (null));
   const [stale, setStale] = useState(/** @type {any} */ (null));
   const [createAck, setCreateAck] = useState(false);
   const [result, setResult] = useState(/** @type {any} */ (null));
-  const [rolledBack, setRolledBack] = useState(/** @type {any} */ (null));
+  // What a roll back undid, and of WHICH job: the result screen of another import is not that import's.
+  const [rolledBack, setRolledBack] = useState(
+    /** @type {{ jobId: string, undone: any } | null} */ (null)
+  );
   const [lastImport, setLastImport] = useState(/** @type {any} */ (null));
 
   // The step's heading takes focus when the step changes, so a keyboard or screen-reader user lands on what is new.
@@ -318,7 +331,7 @@ function ScheduleImportWorkflow({
     setRows([]);
     setLeague(null);
     setChoices({});
-    setArrivePublished(true);
+    setSent(null);
     setPreview(null);
     setStale(null);
     setCreateAck(false);
@@ -353,11 +366,19 @@ function ScheduleImportWorkflow({
       setError('Please upload a CSV file.');
       return;
     }
+    const tooLarge = importFileSizeProblem(file);
+    if (tooLarge) {
+      setError(tooLarge);
+      return;
+    }
     if (!organizationId || !seasonSettingsId) {
       setError('Choose an organization and a season first.');
       return;
     }
     setFileName(file.name);
+    // A new file is a new import: what an earlier roll back said is not about this one.
+    setRolledBack(null);
+    setExportNote(null);
     setBusy('Reading the file');
     Papa.parse(file, {
       header: true,
@@ -366,6 +387,22 @@ function ScheduleImportWorkflow({
       complete: async ({ data, meta }) => {
         try {
           const headers = meta.fields ?? [];
+          // The CSV reader renames an exact repeat of a header (`Date`, `Date_1`) and goes on, so the parse below would
+          // never see two columns of one name and the first would be used without a word. A repeat of a column the
+          // import READS refuses the file; a repeat of one it drops is dropped twice.
+          const read = new Set(
+            Object.values(SCHEDULE_IMPORT_COLUMNS).map((name) => scheduleLabelKey(name))
+          );
+          const repeated = Object.values(meta.renamedHeaders ?? {}).find((original) =>
+            read.has(scheduleLabelKey(original))
+          );
+          if (repeated !== undefined) {
+            setError(
+              `The file has the column "${String(repeated).trim()}" more than once. Remove one and import again.`
+            );
+            setBusy(null);
+            return;
+          }
           // The browser's own reading is only the early answer for a file that cannot be imported at all (nothing is
           // created for it). What is imported is what the server reads and stages.
           const local = K.parseFile({
@@ -415,18 +452,35 @@ function ScheduleImportWorkflow({
   };
 
   const runPreview = async (published) => {
-    if (!jobId || !proposal) return;
+    if (!jobId || !proposal || !league) return;
     setError(null);
     setStale(null);
     setCreateAck(false);
     setBusy('Working out what the import would do');
+    // The mapping that is sent, and what IT would create: taken once, here, so a choice changed while the call is in
+    // flight is in neither the stored mapping nor the list the confirm shows.
+    const mapping = mappingForJob(proposal, choices, published);
+    const creations = K.resolve({ rows, league, decisions: mapping, explicitOnly: true }).creations;
     try {
-      await K.saveMapping(client, jobId, mappingForJob(proposal, choices, published));
+      await K.saveMapping(client, jobId, mapping);
+    } catch (err) {
+      // Nothing was stored: the mapping on the job, the box and any preview on screen are as they were.
+      fail(err, 'The choices could not be saved.');
+      return;
+    }
+    if (!alive.current) return;
+    // From here the job holds THIS mapping. A preview of the one before it is no longer the import's.
+    setSent({ published: published === true, creations });
+    setPreview(null);
+    try {
+      const made = await K.preview(client, jobId);
       if (!alive.current) return;
-      setPreview(await K.preview(client, jobId));
+      setPreview(made);
       setBusy(null);
       setStep('preview');
     } catch (err) {
+      // The choices are saved and there is no preview of them: back to the names, where "Preview the import" makes one.
+      setStep('mapping');
       fail(err, 'The preview could not be made.');
     }
   };
@@ -464,7 +518,7 @@ function ScheduleImportWorkflow({
     setBusy('Rolling the import back');
     try {
       const undone = await K.rollback(client, { jobId: id, organizationId, seasonSettingsId });
-      setRolledBack(undone);
+      setRolledBack({ jobId: id, undone });
       setBusy(null);
       refreshLast();
     } catch (err) {
@@ -533,11 +587,37 @@ function ScheduleImportWorkflow({
     });
   };
 
+  // This import's own roll back (the result screen), as against the roll back of an earlier one (the upload screen).
+  const rolledBackHere = rolledBack !== null && rolledBack.jobId === jobId;
+  const undone = rolledBack?.undone ?? null;
+  // Why an import that would write nothing would write nothing, from the counts (the flag alone does not say).
+  const nothingWhy = (() => {
+    if (!counts || counts.nothing_to_apply !== true) return null;
+    const refused = Number(counts['rows.refused'] ?? 0);
+    const skipped = Number(counts['rows.skipped'] ?? 0);
+    const held = Object.entries(counts)
+      .filter(([key]) => key.startsWith('games.skipped.'))
+      .reduce((n, [, value]) => n + Number(value), 0);
+    if (refused === 0 && skipped === 0 && held === 0) {
+      return 'Nothing to apply: the schedule already holds every game of this file as the file has it.';
+    }
+    const parts = [];
+    if (refused > 0) parts.push(`${refused} ${refused === 1 ? 'row is' : 'rows are'} not imported`);
+    if (skipped > 0)
+      parts.push(`${skipped} ${skipped === 1 ? 'row is' : 'rows are'} skipped by your choice`);
+    if (held > 0) {
+      parts.push(
+        `${held} ${held === 1 ? 'game is' : 'games are'} Published and the file would change ${held === 1 ? 'it' : 'them'}`
+      );
+    }
+    return `Nothing will be written: ${parts.join(', ')}; every other game of the file is already as the file has it. Go back to the names to decide the ones that are not imported, or allow changes to a Published game first.`;
+  })();
+
   const stepTitle = {
     upload: `1 of 4: choose the file`,
     mapping: '2 of 4: say what each name in the file is',
     preview: '3 of 4: review and confirm',
-    result: rolledBack ? '4 of 4: the import was rolled back' : '4 of 4: the import is applied',
+    result: rolledBackHere ? '4 of 4: the import was rolled back' : '4 of 4: the import is applied',
   }[step];
 
   return (
@@ -653,8 +733,8 @@ function ScheduleImportWorkflow({
           {rolledBack && (
             <div className="mt-4">
               <Notice tone="success" testId="schedule-import-rolled-back">
-                {`The import was rolled back: ${Number(rolledBack?.games?.deleted ?? 0)} games removed, ${Number(
-                  rolledBack?.games?.restored ?? 0
+                {`The import was rolled back: ${Number(undone?.games?.deleted ?? 0)} games removed, ${Number(
+                  undone?.games?.restored ?? 0
                 )} put back as they were.`}
               </Notice>
             </div>
@@ -707,6 +787,7 @@ function ScheduleImportWorkflow({
                       <Button
                         variant="ghost"
                         size="sm"
+                        disabled={busy !== null}
                         onClick={() => setAllUndecided(group, 'create')}
                       >
                         {`Create every undecided ${noun}`}
@@ -715,6 +796,7 @@ function ScheduleImportWorkflow({
                         <Button
                           variant="ghost"
                           size="sm"
+                          disabled={busy !== null}
                           onClick={() => setAllUndecided(group, 'outside')}
                         >
                           Mark every undecided team an outside club
@@ -723,6 +805,7 @@ function ScheduleImportWorkflow({
                       <Button
                         variant="ghost"
                         size="sm"
+                        disabled={busy !== null}
                         onClick={() => setAllUndecided(group, 'skip')}
                       >
                         {`Skip every undecided ${noun}`}
@@ -767,6 +850,7 @@ function ScheduleImportWorkflow({
                             <td className="px-2 py-2">
                               <select
                                 aria-label={`What ${name} is`}
+                                disabled={busy !== null}
                                 className="w-full max-w-md rounded-md border border-border-subtle bg-bg-surface text-text-primary px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80"
                                 value={options.some((o) => o.value === value) ? value : UNDECIDED}
                                 onChange={(event) =>
@@ -844,11 +928,8 @@ function ScheduleImportWorkflow({
             </div>
           )}
 
-          {counts.nothing_to_apply ? (
-            <Notice testId="schedule-import-nothing">
-              Nothing to apply: the schedule already holds every game of this file as the file has
-              it.
-            </Notice>
+          {nothingWhy ? (
+            <Notice testId="schedule-import-nothing">{nothingWhy}</Notice>
           ) : (
             <p className="text-sm text-text-secondary max-w-prose">
               This is what the import will do. Nothing has been written yet.
@@ -884,7 +965,8 @@ function ScheduleImportWorkflow({
               <ul className="text-sm text-text-secondary space-y-2">
                 {CREATED_ROWS.filter(([key]) => Number(counts[key] ?? 0) > 0).map(
                   ([key, listKey, label]) => {
-                    const names = (resolved?.creations?.[listKey] ?? []).map((c) => c.name);
+                    // the names of the mapping that was SENT and is stored, not of what is being edited
+                    const names = (sent?.creations?.[listKey] ?? []).map((c) => c.name);
                     return (
                       <li key={key} data-testid={`schedule-import-created-${listKey}`}>
                         <span className="font-semibold text-text-primary">{`${label}: ${Number(counts[key])}`}</span>
@@ -962,10 +1044,9 @@ function ScheduleImportWorkflow({
                 className="mt-1"
                 checked={arrivePublished}
                 disabled={busy !== null}
-                onChange={(event) => {
-                  setArrivePublished(event.target.checked);
-                  runPreview(event.target.checked);
-                }}
+                // The box shows the STORED mapping. A change is asked of the database first; the box moves when the
+                // save took, and stays when it did not.
+                onChange={(event) => runPreview(event.target.checked)}
               />
               <span>
                 Games arrive Published
@@ -1017,13 +1098,13 @@ function ScheduleImportWorkflow({
 
       {step === 'result' && result && (
         <div>
-          {rolledBack ? (
+          {rolledBackHere ? (
             <Notice tone="success" testId="schedule-import-rolled-back">
-              {`The import was rolled back: ${Number(rolledBack?.games?.deleted ?? 0)} games removed, ${Number(
-                rolledBack?.games?.restored ?? 0
+              {`The import was rolled back: ${Number(undone?.games?.deleted ?? 0)} games removed, ${Number(
+                undone?.games?.restored ?? 0
               )} put back as they were.${
-                (rolledBack?.kept ?? []).length > 0
-                  ? ` ${(rolledBack.kept ?? []).length} records it created are still in use and were kept.`
+                (undone?.kept ?? []).length > 0
+                  ? ` ${(undone.kept ?? []).length} records it created are still in use and were kept.`
                   : ''
               }`}
             </Notice>
@@ -1064,7 +1145,7 @@ function ScheduleImportWorkflow({
             items={(result.warnings ?? []).map((w) => warningLine(w, league))}
           />
           <div className="flex flex-wrap gap-3 mt-4">
-            {!rolledBack && jobId && (
+            {!rolledBackHere && jobId && (
               <Button
                 variant="danger"
                 disabled={busy !== null}
@@ -1076,7 +1157,7 @@ function ScheduleImportWorkflow({
             <Button variant="secondary" disabled={busy !== null} onClick={reset}>
               Import another file
             </Button>
-            {onDone && !rolledBack && (
+            {onDone && !rolledBackHere && (
               <Button variant="primary" disabled={busy !== null} onClick={onDone}>
                 Continue
               </Button>

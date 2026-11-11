@@ -663,6 +663,205 @@ describe('a switch of organization or season under the panel ends the import on 
   });
 });
 
+describe('the adversarial review of the panel (R1, R2, R3, R4, R8, R10)', () => {
+  const confirmWithAck = async () => {
+    fireEvent.click(screen.getByLabelText('Create the 5 records listed above'));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm and import' }));
+    await waitFor(() => expect(step()).toMatch(/4 of 4/));
+  };
+
+  it('R1: rolling back the LAST import does not mark the NEXT import as rolled back', async () => {
+    const first = render(<ScheduleImportPanel />);
+    await toMapping();
+    decideEverything();
+    await toPreview();
+    await confirmWithAck();
+    first.unmount();
+    render(<ScheduleImportPanel />);
+    const last = await screen.findByTestId('schedule-import-last');
+    fireEvent.click(within(last).getByRole('button', { name: 'Roll back the last import' }));
+    await screen.findByTestId('schedule-import-rolled-back');
+    // the next file, through to its result
+    await toMapping();
+    // the notice of the earlier roll back is gone once a new file is in hand
+    expect(screen.queryByTestId('schedule-import-rolled-back')).toBeNull();
+    // (the division the first import created was kept by its roll back, so it is matched now, not created)
+    expect(select('U07 Girls').value).toMatch(/^map:/);
+    choose('Visiting Club A (U05 Boys)', 'outside');
+    choose('Field 9 (Venue A)', 'create');
+    choose('U07G Team 01 (U07 Girls)', 'create');
+    choose('U07G Team 02 (U07 Girls)', 'create');
+    await toPreview();
+    fireEvent.click(screen.getByLabelText('Create the 4 records listed above'));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm and import' }));
+    await waitFor(() => expect(step()).toMatch(/4 of 4/));
+    expect(step()).toMatch(/the import is applied/);
+    expect(screen.getByTestId('schedule-import-applied')).toBeTruthy();
+    expect(screen.queryByTestId('schedule-import-rolled-back')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Roll back this import' })).toBeTruthy();
+  });
+
+  it('R2: "nothing to apply" says why: already as the file has it, or rows that are not imported', async () => {
+    // (i) every row refused because nobody decided its names: nothing is written, and that is NOT "already there"
+    render(<ScheduleImportPanel />);
+    upload(fileCsv([FILE_ROWS[10]])); // Mystery Team, undecided
+    await waitFor(() => expect(step()).toMatch(/2 of 4/));
+    await toPreview();
+    const nothing = screen.getByTestId('schedule-import-nothing');
+    expect(nothing.textContent).toMatch(/Nothing will be written/);
+    expect(nothing.textContent).toMatch(/1 row is not imported/);
+    expect(nothing.textContent).toMatch(/Go back to the names/);
+    expect(nothing.textContent).not.toMatch(/already holds/);
+    expect(button('Confirm and import').disabled).toBe(true);
+  });
+
+  it('R2 control: a file the schedule already holds says so, and a held game is named as the reason when it is one', async () => {
+    // the saved, unpublished game S-3 exactly as it is saved (08:00 to 09:30 on Field 1, week 2)
+    const same = {
+      ...FILE_ROWS[0],
+      'Game ID': 'S-3',
+      Date: '2026-09-19',
+      'Start Time': '08:00',
+      'End Time': '09:30',
+      'Home Team': 'U05B Team 05',
+      'Away Team': 'U05B Team 06',
+      Week: '2',
+    };
+    const view = render(<ScheduleImportPanel />);
+    upload(fileCsv([same]));
+    await waitFor(() => expect(step()).toMatch(/2 of 4/));
+    await toPreview();
+    expect(screen.getByTestId('schedule-import-nothing').textContent).toMatch(
+      /Nothing to apply: the schedule already holds every game of this file as the file has it\./
+    );
+    view.unmount();
+    // only the Published game the file would move: held, so nothing is written, and that is said
+    render(<ScheduleImportPanel />);
+    upload(fileCsv([FILE_ROWS[1]]));
+    await waitFor(() => expect(step()).toMatch(/2 of 4/));
+    await toPreview();
+    const held = screen.getByTestId('schedule-import-nothing').textContent;
+    expect(held).toMatch(/Nothing will be written/);
+    expect(held).toMatch(/1 game is Published and the file would change it/);
+    expect(held).not.toMatch(/already holds/);
+  });
+
+  it('R3: a failed save of the mapping leaves the Published box as the STORED mapping has it', async () => {
+    render(<ScheduleImportPanel />);
+    await toMapping();
+    decideEverything();
+    await toPreview();
+    expect(checkbox(/Games arrive Published/).checked).toBe(true);
+    const real = mockSupabase.rpc.bind(mockSupabase);
+    vi.spyOn(mockSupabase, 'rpc').mockImplementation(async (name, params) =>
+      name === 'map_game_import_job'
+        ? { data: null, error: { code: '22023', message: 'the mapping was refused' } }
+        : real(name, params)
+    );
+    fireEvent.click(checkbox(/Games arrive Published/));
+    const alert = await screen.findByTestId('schedule-import-error');
+    expect(alert.textContent).toMatch(/the mapping was refused/);
+    // the box shows what is stored (Published), not what was clicked
+    expect(checkbox(/Games arrive Published/).checked).toBe(true);
+    vi.restoreAllMocks();
+    await confirmWithAck();
+    // and the apply did what the box said: the new games are Published
+    const games = await table('game_assignments');
+    expect(games.filter((g) => g.import_job_id && g.published).length).toBe(7);
+  });
+
+  it('R3: when the mapping was saved and its preview failed, there is no confirm until a preview exists for it', async () => {
+    render(<ScheduleImportPanel />);
+    await toMapping();
+    decideEverything();
+    await toPreview();
+    const real = mockSupabase.rpc.bind(mockSupabase);
+    vi.spyOn(mockSupabase, 'rpc').mockImplementation(async (name, params) =>
+      name === 'apply_game_import_job'
+        ? { data: null, error: { code: 'XX000', message: 'the preview failed' } }
+        : real(name, params)
+    );
+    fireEvent.click(checkbox(/Games arrive Published/));
+    await screen.findByTestId('schedule-import-error');
+    // the stored mapping now says "not Published" and the preview on screen was for the other: it is not confirmable
+    expect(screen.queryByRole('button', { name: 'Confirm and import' })).toBeNull();
+    expect(step()).toMatch(/2 of 4/);
+    vi.restoreAllMocks();
+    await toPreview();
+    expect(checkbox(/Games arrive Published/).checked).toBe(false);
+    await confirmWithAck();
+    const games = await table('game_assignments');
+    expect(games.filter((g) => g.import_job_id && g.published)).toHaveLength(0);
+  });
+
+  it('R4: a column the import reads given twice is refused, through the real CSV parse (Papa renames a duplicate)', async () => {
+    for (const twice of ['Date', 'Home Team']) {
+      const view = render(<ScheduleImportPanel />);
+      const headers = [...FILE_HEADERS, twice];
+      const line = headers.map((h) => FILE_ROWS[2][h] ?? '').join(',');
+      upload([headers.join(','), line].join('\n'));
+      const alert = await screen.findByRole('alert');
+      expect(alert.textContent).toMatch(new RegExp(`the column "${twice}" more than once`));
+      expect(step()).toMatch(/1 of 4/);
+      expect(await table('import_jobs')).toHaveLength(0);
+      view.unmount();
+    }
+    // CONTROL: a column the import does not read, twice, is dropped twice and the file imports
+    render(<ScheduleImportPanel />);
+    const headers = [...FILE_HEADERS, 'Notes'];
+    upload([headers.join(','), headers.map((h) => FILE_ROWS[2][h] ?? '').join(',')].join('\n'));
+    await waitFor(() => expect(step()).toMatch(/2 of 4/));
+  });
+
+  it('R8: the names cannot be changed while the preview is being made, and the confirm lists what was SENT', async () => {
+    render(<ScheduleImportPanel />);
+    await toMapping();
+    decideEverything();
+    // hold the preview's answer
+    const real = mockSupabase.rpc.bind(mockSupabase);
+    /** @type {(value?: unknown) => void} */
+    let release = () => {};
+    const gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    vi.spyOn(mockSupabase, 'rpc').mockImplementation(async (name, params) => {
+      if (name === 'apply_game_import_job') await gate;
+      return real(name, params);
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Preview the import' }));
+    await screen.findByTestId('schedule-import-busy');
+    // every select and every bulk button is off while the call is pending
+    for (const control of screen.getAllByRole('combobox')) expect(control.disabled).toBe(true);
+    expect(button('Create every undecided team').disabled).toBe(true);
+    expect(button('Mark every undecided team an outside club').disabled).toBe(true);
+    // a change attempted now does not take
+    fireEvent.change(select('Visiting Club A (U05 Boys)'), { target: { value: 'skip' } });
+    release();
+    await waitFor(() => expect(step()).toMatch(/3 of 4/));
+    expect(screen.getByTestId('schedule-import-created-outsideTeams').textContent).toBe(
+      'Outside clubs: 1Visiting Club A'
+    );
+    expect(screen.getByTestId('schedule-import-creations').textContent).toMatch(
+      /What will be created \(5\)/
+    );
+  });
+
+  it('R10: a file over 10 MB is refused before it is read, in the Import page’s own words', async () => {
+    render(<ScheduleImportPanel />);
+    const big = new File(['x'], 'big.csv', { type: 'text/csv' });
+    Object.defineProperty(big, 'size', { value: 10 * 1024 * 1024 + 1 });
+    fireEvent.change(screen.getByTestId('schedule-import-file'), { target: { files: [big] } });
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe('File is too large (10.0 MB). Maximum size is 10 MB.');
+    expect(await table('import_jobs')).toHaveLength(0);
+    // CONTROL: exactly 10 MB is not refused for its size
+    const edge = new File([fileCsv()], 'edge.csv', { type: 'text/csv' });
+    Object.defineProperty(edge, 'size', { value: 10 * 1024 * 1024 });
+    fireEvent.change(screen.getByTestId('schedule-import-file'), { target: { files: [edge] } });
+    await waitFor(() => expect(step()).toMatch(/2 of 4/));
+  });
+});
+
 describe('G3: the saved schedule as a file the import reads', () => {
   it('downloads the saved games in the template’s columns, and says how many', async () => {
     const { saveFile } = await import('../frontend/src/utils/scheduleDownloads.js');

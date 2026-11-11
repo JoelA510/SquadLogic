@@ -60,7 +60,7 @@ import SeasonReadOnlyNote from '../components/chrome/SeasonReadOnlyNote.jsx';
 import { PERMISSIONS } from '../constants/permissions.js';
 import { persistGameScheduleReview } from '../utils/gamePersistenceClient.js';
 import { parseGameUnscheduled } from '@squadlogic/core/scheduleTbd.js';
-import { carryGameIds, isHeld } from '@squadlogic/core/gameIdentity.js';
+import { carryGameIds, holdReason, isHeld } from '@squadlogic/core/gameIdentity.js';
 import { isUnknownPersistenceOutcome } from '../lib/persistenceRequest.js';
 import { useFieldClosures } from '../hooks/useFieldClosures.js';
 import { toBlackoutWarnings, toClosureInputs, toFieldBookings } from '../utils/fieldBookings.js';
@@ -486,11 +486,30 @@ function compareGamesByTime(a, b) {
   );
 }
 
-/** What a regeneration says about the games it did not touch. */
-function describeKeptPublished(count) {
-  return count === 1
-    ? '1 Published game kept as it is.'
-    : `${count} Published games kept as they are.`;
+/**
+ * What a regeneration says about the games it did not touch: the Published ones, and (since F11-2) the ones held by a
+ * score and not Published, each counted in its own sentence so neither number is a count of something else.
+ *
+ * @param {number} published - held games that are Published
+ * @param {number} [scored] - held games that are not Published (held by their score)
+ */
+export function describeKeptPublished(published, scored = 0) {
+  const parts = [];
+  if (published > 0) {
+    parts.push(
+      published === 1
+        ? '1 Published game kept as it is.'
+        : `${published} Published games kept as they are.`
+    );
+  }
+  if (scored > 0) {
+    parts.push(
+      scored === 1
+        ? '1 game with a score kept as it is.'
+        : `${scored} games with a score kept as they are.`
+    );
+  }
+  return parts.join(' ');
 }
 
 function summarizeGameResult({ assignments, byes, unscheduled }) {
@@ -1434,7 +1453,10 @@ export default function GameSchedulingPage() {
       });
       setSchedulerStatus('completed');
       setApplyStatus('review');
-      if (carried?.length) setStatusMessage(describeKeptPublished(carried.length));
+      if (carried?.length) {
+        const scoredOnly = carried.filter((kept) => holdReason(kept) === 'scored').length;
+        setStatusMessage(describeKeptPublished(carried.length - scoredOnly, scoredOnly));
+      }
     } catch (err) {
       setSchedulerStatus('failed');
       setSchedulerError(err.message || 'Game schedule generation failed.');

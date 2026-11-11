@@ -7,7 +7,7 @@ import { formatTime } from '../../utils/formatters.js';
 import { useFeatures } from '../../hooks/useFeatures.js';
 import { divisionDisplayName } from '../../utils/divisions.js';
 import PublishedControls from './PublishedSwitch.jsx';
-import { isHeld } from '@squadlogic/core/gameIdentity.js';
+import { holdReason, isHeld } from '@squadlogic/core/gameIdentity.js';
 
 /**
  * The grid's move targets and its one move handler, provided by
@@ -211,7 +211,9 @@ export default function GameCard({
 
       {isPublishedGame && (
         <p className="mt-1 text-xs text-text-muted" data-testid="published-hold-note">
-          Published: allow changes to move it.
+          {holdReason(assignment) === 'scored'
+            ? 'Has a score: clear the score to move it.'
+            : 'Published: allow changes to move it.'}
         </p>
       )}
 

@@ -16,6 +16,7 @@
  */
 
 import { GAME_PUBLISH_REASONS } from '@squadlogic/core/gamePublished.js';
+import { holdReason } from '@squadlogic/core/gameIdentity.js';
 import { describeScope } from './gamePublishedScope.js';
 
 const plural = (count, one, many) => (count === 1 ? one : many);
@@ -58,12 +59,18 @@ export function reasonLabel(code) {
 /** Said when a drop or "Move to" meets a Published game. The status line carries it; nothing is staged. */
 export function moveRefusal(game) {
   const { home, away } = matchupOf(game);
+  if (holdReason(game) === 'scored') {
+    return `${home} vs ${away} was not moved: it has a score. Clear its score first.`;
+  }
   return `${home} vs ${away} was not moved: it is Published. Use Allow changes on it first.`;
 }
 
 /** Said when Cancel meets a Published game. Nothing is sent. */
 export function cancelRefusal(game) {
   const { home, away } = matchupOf(game);
+  if (holdReason(game) === 'scored') {
+    return `${home} vs ${away} was not cancelled: it has a score. Clear its score first, then cancel it.`;
+  }
   return `${home} vs ${away} was not cancelled: it is Published. Use Allow changes on it first, then cancel it.`;
 }
 

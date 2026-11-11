@@ -47,8 +47,26 @@ export function useGameAssignments(runId) {
         );
         if (!current) return;
 
+        // 20261122010000 (F11-2): a game with a score is held where it is, like a Published one, so the page has to
+        // know which games are scored before it offers a move, a cancel or a regeneration. One more read, of the ids
+        // alone; a read that fails throws, because a schedule whose holds are unknown is not one to edit.
+        const scoredIds = new Set();
+        if (data.length > 0) {
+          const scores = await fetchAllPages(() =>
+            supabase
+              .from('game_scores')
+              .select('game_id')
+              .eq('organization_id', data[0].organization_id)
+          );
+          for (const row of scores) scoredIds.add(String(row.game_id));
+        }
+        if (!current) return;
+
         // Map snake_case to camelCase using utility
-        const mapped = data.map(mapKeysToCamelCase);
+        const mapped = data.map((row) => ({
+          ...mapKeysToCamelCase(row),
+          scored: scoredIds.has(String(row.id)),
+        }));
 
         setAssignments(mapped);
       } catch (err) {

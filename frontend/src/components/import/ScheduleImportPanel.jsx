@@ -525,9 +525,13 @@ function ScheduleImportWorkflow({
     if (!jobId || !counts || !organizationId) return;
     setError(null);
     setBusy('Importing');
+    // While the confirm is in flight the job is not one to discard on leaving: the admin confirmed it, and a discard
+    // racing the apply could end the job the apply is about to write.
+    pendingJob.current = null;
     try {
       const outcome = await K.confirm(client, { organizationId, jobId, confirmed: counts });
       if (outcome.status === 'stale') {
+        pendingJob.current = jobId;
         // Nothing was written. The new preview replaces the old one, and what changed is said.
         setStale(outcome);
         setPreview(outcome.preview);
@@ -540,6 +544,7 @@ function ScheduleImportWorkflow({
       setStep('result');
       refreshLast();
     } catch (err) {
+      pendingJob.current = jobId;
       fail(err, 'The import could not be applied.');
     }
   };

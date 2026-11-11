@@ -901,6 +901,20 @@ describe('R5: a staged import that is left does not wait for its confirm forever
     expect(status).toMatch(/^completed/);
   });
 
+  it('leaving while the confirm is in flight does not discard the job the admin confirmed', async () => {
+    const view = render(<ScheduleImportPanel />);
+    await toMapping();
+    decideEverything();
+    await toPreview();
+    fireEvent.click(screen.getByLabelText('Create the 5 records listed above'));
+    const rpc = vi.spyOn(mockSupabase, 'rpc');
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm and import' }));
+    view.unmount();
+    await waitFor(async () => expect((await jobs())[0].status).toMatch(/^completed/));
+    expect(rpc.mock.calls.filter(([name]) => name === 'cancel_ready_import_job')).toEqual([]);
+    expect(await table('game_assignments')).toHaveLength(10);
+  });
+
   it('an unfinished import found on the upload step is named, and "Discard it" ends it', async () => {
     // a job staged and then left with no panel to discard it (a closed tab): the calls the panel makes, and no more
     const { startGameImport } = await import('../frontend/src/utils/gameImportClient.js');

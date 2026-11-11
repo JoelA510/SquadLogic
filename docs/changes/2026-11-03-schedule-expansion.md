@@ -1527,8 +1527,11 @@ AGENTS.md section 3). What differs from the text above, each a decision of the b
   the whole job; a value is read by the header as the file wrote it; the schedule CSV writes a game's own start and
   end on the season clock, not its slot's; the Edge handler reads the job's season through the shared module.
 
-**For the next replacement of `apply_game_import_job` and `get_schedule_tbd` (noted 2026-11-10; F11-2 replaces
-neither, so whichever pull request next replaces one takes its line):**
+**For the next replacement of `apply_game_import_job` and `get_schedule_tbd` (noted 2026-11-10). Updated 2026-11-11:
+F11-2 (`20261122010000_game_scores.sql`) did replace both, and took the second and third lines below (the staged
+flags `bad-time` and `bad-week`; `game_date` and `external_ref` returned, with the client reading the table only
+when the older body answers). `c_row_refusals` keeps the two codes, so a job staged before PR 6 still applies. The
+FIRST line, the preview-stale check inside the function, is NOT done (a change of signature) and stays open:**
 
 - `apply_game_import_job` is callable directly by an admin, without the preview-stale check the Edge function makes.
   Moving the comparison into the function (the confirmed counts as a parameter) closes that, and makes the re-run and
@@ -1538,7 +1541,8 @@ neither, so whichever pull request next replaces one takes its line):**
 - `get_schedule_tbd` should return `game_date` and `external_ref`; the client's second read of `schedule_tbd` then
   goes.
 
-**For the next migration, whichever it is (F11-2's or its own; noted 2026-11-11, fix round 3):**
+**For the next migration, whichever it is (F11-2's or its own; noted 2026-11-11, fix round 3). Done in F11-2
+(`20261122010000`): the function refuses such a job (22023, `import_not_ready_to_apply`), and the mock refuses again.**
 `cancel_ready_import_job` must refuse a job that is not `ready_to_apply`. It is a deployed function (PR 5 added
 `games` to it) with no check of the job's status: called for an applied job of any of its six types it marks the job
 `failed` and audits `import.canceled`, while everything the apply wrote stays. PR 6 closes the games panel's way to
@@ -1581,9 +1585,10 @@ clocks skip, and the import refuses a file that names one, so the export has no 
    not the game's own `start` and `end`: an imported game whose end differs from its slot's shows the slot's end.
 3. At the next replacement of `apply_game_import_job` or `get_schedule_tbd` (the three lines above): the staged-flag
    list for `bad-time` and `bad-week`, `game_date` returned by the RPC, the preview-stale check inside the RPC.
+   **Two of the three closed by F11-2 (2026-11-11); the preview-stale check inside the RPC stays open.**
 4. A sweep in SQL for abandoned `ready_to_apply` games jobs, if the panel's client-side discard proves insufficient
    (a closed tab never runs it; the upload step lists what it left).
-5. `cancel_ready_import_job` refuses a job that is not `ready_to_apply` (the note for the next migration, above; fix
+5. **Closed by F11-2 (2026-11-11).** `cancel_ready_import_job` refuses a job that is not `ready_to_apply` (the note for the next migration, above; fix
    round 3). Until then the Import page's own deferred-apply flow can still reach it blind: `ImportContext`'s
    `cancelDeferredImport` (`importDeferredActions.js`, `cancelDeferredImportJob`) is offered again after
    `applyDeferredImport` throws, for the coach, field, field availability, practice preference and evaluation
@@ -2616,8 +2621,11 @@ lifted the hold. The verbatim messages, the nine agreed changes and the answer t
 owner's answers of 2026-11-09 and of 2026-11-09 evening and 2026-11-10 follow them: read them first. **Merged on `main`**
 (statically read from `git log` at `ad18861`; whether each migration is deployed was not checked): PR 4 (#706), PR 1
 (#707), PR 9 (#708), PR 2 (#709), PR 3 (#710), PR 13 (#711), PR 7 (#713), the F11 plan's F11-1 (#712), and PR 5 (#719,
-`ad18861`). **In review:** PR 6 (opened 2026-11-10; no migration; task G5 not built, see "As built" under PR 6 in
-section 7). **Not merged:** PR 8, 10, 11 and 12, and F11-2 to F11-5. PR 14 stays held.
+`ad18861`). **Updated 2026-11-11:** PR 6 is merged (#722, `53c79cc`; task G5 not built, see "As built" under PR 6 in
+section 7). **In review:** the F11 plan's F11-2 (scores, the held rule, standings; migration `20261122010000`; it also
+closes follow-ups 3 (two of its three lines) and 5 of PR 6's review). **Not merged:** PR 8, 10, 11 and 12, and F11-3
+to F11-5. PR 14 stays held. Next after F11-2 deploys: F11-3, which must also make the Scores page list saved games and
+send both scores together (the F11 plan, "As built" under F11-2).
 
 - **Order and the dependency rule.** Section 7 ("Dependencies and order") has the dependency table and the one priority
   rule: at most two PRs in flight; a free slot takes the first PR, in the order PR 1; PR 4; PR 2; PR 5; PR 3; PR 9;

@@ -369,6 +369,12 @@ score table that follows; "held where it is" is one predicate (`game_is_held`). 
 any save. The plan is `docs/changes/2026-11-06-games-table-source-of-truth.md`; `docs/architecture/game-scheduling.md`
 ("Identity") has the rules.
 
+**Update, 2026-11-11 (F11-2, `20261122010000_game_scores.sql`).** A game's score is a row of `game_scores`, keyed by
+the saved game's id and its two sides; `update_game_score` writes it and nothing else does. A scored game is held where
+it is (`game_held_ids`: Published or scored). `view_league_standings` is computed from `game_scores` and leaves outside
+clubs out; `current_game_runs` names each season's current game run. The legacy `games` table is kept, commented as
+legacy, and no longer written; the pages that still read it are repointed by F11-3.
+
 `game_assignments` is what the scheduler writes (§2.5). `games` is the older table, still carrying
 `score_home`/`score_away` and used by the scores path (`admin_update_game_score` RPC,
 `20260504010000_update_game_score_rpc.sql`). **Inferred:** `games` is legacy and

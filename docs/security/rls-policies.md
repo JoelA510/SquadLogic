@@ -146,7 +146,11 @@ subscription links stay, admin-only), `coach_practice_preferences`, `practice_li
 `facility_permits`, `facility_permit_scopes` and the `facility-permits` storage objects. `players` and
 `team_players` are read by admins and staff only (`20261024010000`), and `staging_players` and
 `staging_import_rows` likewise. `update_game_score` admits admins and staff only, and only while the
-organization's `score_entry` setting is on (`20261028010000`). No coach requests anything: the coach
+organization's `score_entry` setting is on (`20261028010000`). Since `20261122010000` a score is a row of
+`game_scores`: members of the organization read it (`game_scores_select_member`, `is_org_member`), and there is no
+insert, update or delete policy and no write grant, so `update_game_score` is its only writer; `anon` has no grant
+on it, so `anon` cannot read `view_league_standings` (security invoker) at all. `current_game_runs` is a
+security-invoker view over `scheduler_runs`: a reader sees the runs that table lets them see. No coach requests anything: the coach
 preference request RPC and the lighting request RPC are dropped; admins record preferences as rules per team
 (`admin_add_practice_preference`, `admin_edit_practice_preference`, `admin_remove_practice_preference`,
 `admin_decide_must_preference`, `admin_accept_all_musts`, and the preference import's

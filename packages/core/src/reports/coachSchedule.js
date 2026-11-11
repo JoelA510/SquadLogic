@@ -133,7 +133,7 @@ export function buildCoachDirectory({ coaches, teams, assignments, asOf }) {
  * @param {Array<Record<string, any>>} input.assignments
  * @param {string} input.asOf
  * @param {Array<Record<string, any>>} input.games - the saved games (camelCase rows of the latest run)
- * @param {Array<{ homeTeamId: string, awayTeamId: string, weekIndex: number, reason: string }>} [input.tbdGames]
+ * @param {Array<{ homeTeamId: string, awayTeamId: string, weekIndex: number, reason: string, gameDate?: string | null }>} [input.tbdGames]
  * @param {Array<import('./practiceClash.js').ReportPractice>} [input.practices]
  * @param {Array<{ id: string, name: string, venueId?: string | null }>} input.fields
  * @param {Array<{ id: string, name: string }>} input.venues
@@ -239,7 +239,8 @@ export function buildCoachSchedule({
     }
   }
 
-  // ---- the games on the TIME TBD list: no date, the reason in the master export's words ----
+  // ---- the games on the TIME TBD list: no time (a date only when an import gave one), the reason in the master
+  // export's words ----
   let tbdCount = 0;
   for (const tbd of tbdGames) {
     for (const role of /** @type {const} */ (['Home', 'Away'])) {
@@ -250,6 +251,9 @@ export function buildCoachSchedule({
         [H.EVENT_TYPE]: 'Game',
         [H.OPPONENT]: names.teamName(role === 'Home' ? tbd.awayTeamId : tbd.homeTeamId),
         [H.HOME_AWAY]: role,
+        // A game an import gave a date and no time holds its date (and still no time), as the master export's note
+        // and the Day Sheet say it.
+        [H.DATE]: tbd.gameDate ?? '',
         [H.STATUS]: TEAM_SCHEDULE_STATUS.TIME_TBD,
         [H.REASON]: scheduleTbdNote({
           kind: 'game',
@@ -257,6 +261,7 @@ export function buildCoachSchedule({
           awayTeamId: idOf(tbd.awayTeamId),
           weekIndex: tbd.weekIndex,
           reason: tbd.reason,
+          ...(tbd.gameDate ? { gameDate: tbd.gameDate } : {}),
         }),
         [H.REASON_CODE]: String(tbd.reason),
       });

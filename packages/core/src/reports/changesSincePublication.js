@@ -40,6 +40,7 @@ export const CHANGE_KIND = Object.freeze({
   ADDED: 'added',
   TBD_CLEARED: 'tbd-cleared',
   TBD_NEW: 'tbd-new',
+  TBD_DATE_CHANGED: 'tbd-date-changed',
 });
 
 /** The words for each kind, as the page and the file say them. */
@@ -49,6 +50,7 @@ export const CHANGE_LABEL = Object.freeze({
   [CHANGE_KIND.ADDED]: 'New since publication',
   [CHANGE_KIND.TBD_CLEARED]: 'No longer on the TIME TBD list',
   [CHANGE_KIND.TBD_NEW]: 'Now on the TIME TBD list',
+  [CHANGE_KIND.TBD_DATE_CHANGED]: 'TIME TBD game: date changed',
 });
 
 /** The file's columns, in order. */
@@ -68,6 +70,7 @@ const KIND_ORDER = Object.freeze([
   CHANGE_KIND.ADDED,
   CHANGE_KIND.TBD_CLEARED,
   CHANGE_KIND.TBD_NEW,
+  CHANGE_KIND.TBD_DATE_CHANGED,
 ]);
 
 const MOVED_NOTE =
@@ -199,6 +202,8 @@ function readBaselineGames(rows, weekOfSlot) {
       homeTeamId: text(home['Team ID']),
       awayTeamId: text(away['Team ID']),
       weekIndex: note.weekIndex,
+      // the date an import gave the game, when the note carries one (`parseGameTbdNote`)
+      gameDate: note.gameDate ?? null,
       why: note.why,
       division: text(home.Division),
       homeName: text(home['Team Name']),
@@ -219,7 +224,7 @@ const reasonLabel = (code) =>
  * @param {{ rows: Array<Record<string, string>>, recordedAt: string, version?: number | null, label?: string | null }} input.baseline
  *   the chosen baseline: the master export's rows as they were published, and when the baseline was recorded
  * @param {Array<Record<string, any>>} input.savedGames - the saved schedule (camelCase rows of the latest run)
- * @param {Array<{ homeTeamId: string, awayTeamId: string, weekIndex: number, reason: string }>} [input.tbdGames] - the TIME TBD games now
+ * @param {Array<{ homeTeamId: string, awayTeamId: string, weekIndex: number, reason: string, gameDate?: string | null }>} [input.tbdGames] - the TIME TBD games now
  * @param {Array<{ id: string, name: string, division?: string | null }>} input.teams - the registry
  * @param {Array<{ id: string, name: string, venueId?: string | null }>} input.fields
  * @param {Array<{ id: string, name: string }>} input.venues
@@ -276,7 +281,8 @@ export function buildChangesSincePublication({
     const until = to.date === from.date ? to.time : `${to.date} ${to.time}`;
     return `${day} ${from.date} ${from.time} to ${until}${place ? `, ${place}` : ''}`;
   };
-  const describeWaiting = (weekIndex, why) => `${PUBLICATION_TBD.TIME} (week ${weekIndex}): ${why}`;
+  const describeWaiting = (weekIndex, why, gameDate = null) =>
+    `${PUBLICATION_TBD.TIME} (week ${weekIndex}${gameDate ? `, on ${gameDate}` : ''}): ${why}`;
 
   // ---- placed games: match baseline and saved by the key; whatever has no partner is listed ----
   const savedByKey = new Map();
@@ -316,11 +322,16 @@ export function buildChangesSincePublication({
     nowWaiting.set(key ?? `unkeyed-${nowWaiting.size}`, [...(nowWaiting.get(key) ?? []), game]);
   }
   const cleared = [];
+  // A game still waiting whose DATE is not the one that was published (given, moved or taken away): the families were
+  // told a day, so it is a change to report. Its teams and week are the same, which is how it is known to be the game.
+  const dateChanged = [];
   let tbdUnchanged = 0;
   for (const then of read.tbdGames) {
     const key = tbdGameKey(then);
     const match = key === null ? undefined : nowWaiting.get(key)?.shift();
     if (match === undefined) cleared.push(then);
+    else if ((then.gameDate ?? null) !== (match.gameDate ?? null))
+      dateChanged.push({ then, now: match });
     else tbdUnchanged += 1;
   }
   const tbdNew = [...nowWaiting.values()].flat();
@@ -423,14 +434,27 @@ export function buildChangesSincePublication({
       sortAt: Number.MAX_SAFE_INTEGER,
     });
   for (const game of cleared) {
-    waitingRow(CHANGE_KIND.TBD_CLEARED, game, describeWaiting(game.weekIndex, game.why), null);
+    waitingRow(
+      CHANGE_KIND.TBD_CLEARED,
+      game,
+      describeWaiting(game.weekIndex, game.why, game.gameDate),
+      null
+    );
   }
   for (const game of tbdNew) {
     waitingRow(
       CHANGE_KIND.TBD_NEW,
       game,
       null,
-      describeWaiting(game.weekIndex, describeScheduleTbdReason('game', game.reason))
+      describeWaiting(game.weekIndex, describeScheduleTbdReason('game', game.reason), game.gameDate)
+    );
+  }
+  for (const { then, now } of dateChanged) {
+    waitingRow(
+      CHANGE_KIND.TBD_DATE_CHANGED,
+      then,
+      describeWaiting(then.weekIndex, then.why, then.gameDate),
+      describeWaiting(now.weekIndex, describeScheduleTbdReason('game', now.reason), now.gameDate)
     );
   }
 
@@ -486,6 +510,7 @@ export function buildChangesSincePublication({
     removed: removed.length,
     added: added.length,
     tbdUnchanged,
+    tbdDateChanged: dateChanged.length,
     tbdCleared: cleared.length,
     tbdNew: tbdNew.length,
     baselineUnreadable: read.unreadable.length,

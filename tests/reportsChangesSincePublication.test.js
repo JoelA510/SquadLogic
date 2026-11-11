@@ -367,6 +367,42 @@ describe('TIME TBD games, then and now', () => {
     expect(result.counts).toMatchObject({ baselineTbd: 1, nowTbd: 2, tbdNew: 1 });
   });
 
+  it('R7: a TIME TBD game whose DATE changed since the publication is a change, and is listed', () => {
+    // The baseline's TIME TBD rows carry the date in their note (`Game not scheduled (week N, on DATE): ...`), as the
+    // master export writes one for a game an import gave a date.
+    const withDate = (date) =>
+      baselineRows(savedGames()).map((row) =>
+        row.Start === 'TIME TBD'
+          ? { ...row, Notes: row.Notes.replace(/\(week (\d+)\)/, `(week $1, on ${date})`) }
+          : row
+      );
+    const baseline = (rows) => ({
+      rows,
+      recordedAt: RECORDED_AT,
+      version: 3,
+      label: 'Week 1 files',
+    });
+    const now = (date) => tbdGames().map((g) => (date ? { ...g, gameDate: date } : g));
+    // CONTROL: the same date then and now is no change
+    expect(
+      view({ baseline: baseline(withDate('2026-10-17')), tbdGames: now('2026-10-17') }).rows
+    ).toEqual([]);
+    // the date moved
+    const moved = view({ baseline: baseline(withDate('2026-10-17')), tbdGames: now('2026-10-24') });
+    expect(kinds(moved)).toEqual([CHANGE_KIND.TBD_DATE_CHANGED]);
+    expect(moved.rows[0]).toMatchObject({
+      label: 'TIME TBD game: date changed',
+      originally: 'TIME TBD (week 2, on 2026-10-17): no game slot was free for it',
+      now: 'TIME TBD (week 2, on 2026-10-24): no game slot was free for it',
+    });
+    expect(moved.counts).toMatchObject({ tbdDateChanged: 1, tbdUnchanged: 0 });
+    // a date given to a game that had none, and a date taken away, are changes too
+    expect(kinds(view({ tbdGames: now('2026-10-24') }))).toEqual([CHANGE_KIND.TBD_DATE_CHANGED]);
+    expect(kinds(view({ baseline: baseline(withDate('2026-10-17')) }))).toEqual([
+      CHANGE_KIND.TBD_DATE_CHANGED,
+    ]);
+  });
+
   it('does not list a game that is still on the TIME TBD list', () => {
     expect(view().rows).toEqual([]);
     // Even with another reason: it is still not scheduled.

@@ -130,6 +130,9 @@ export default function DaySheetView({ games, reference, timeZone }) {
           {venue && elsewhere > 0
             ? ` ${elsewhere} ${plural(elsewhere, 'game', 'games')} on this date ${plural(elsewhere, 'is', 'are')} at another venue.`
             : ''}
+          {sheet.counts.tbdOtherDates > 0
+            ? ` ${sheet.counts.tbdOtherDates} TIME TBD ${plural(sheet.counts.tbdOtherDates, 'game holds', 'games hold')} another date and ${plural(sheet.counts.tbdOtherDates, 'is', 'are')} on that day's sheet.`
+            : ''}
           {venue && sheet.counts.unknownGround > 0
             ? ` ${sheet.counts.unknownGround} ${plural(sheet.counts.unknownGround, 'game is', 'games are')} at a field with no known venue, so no venue shows ${plural(sheet.counts.unknownGround, 'it', 'them')}.`
             : ''}

@@ -76,7 +76,7 @@ function mockOrganization(timezone) {
 const NO_ERRORS = { team: null, practice: null, game: null };
 const NOT_LOADING = { team: false, practice: false, game: false };
 
-function seedWorld({ baselines = [] } = {}) {
+function seedWorld({ baselines = [], tbdDate = null } = {}) {
   sessionStorage.clear();
   delete window.__MOCK_DB__;
   const org = { organization_id: ORG_ID };
@@ -134,6 +134,8 @@ function seedWorld({ baselines = [] } = {}) {
       ...org,
       season_settings_id: SEASON_ID,
       division_id: row.kind === 'game' ? 'd-10' : 'd-12',
+      // the date an import gives a TIME TBD game (`schedule_tbd.game_date`); none for a game the solver left unplaced
+      ...(tbdDate && row.kind === 'game' ? { game_date: tbdDate } : {}),
     })),
     publication_baselines: baselines,
     audit_log: [],
@@ -407,6 +409,22 @@ describe('the Day Sheet', () => {
     expect(tbd).toHaveTextContent('Synthetic Meteors');
     expect(tbd).toHaveTextContent(/no game slot was free for it/);
     expect(tbd).toHaveTextContent(/a game with no date yet is listed whatever date and venue/i);
+  });
+
+  it('R7: a TIME TBD game that holds another date is not listed on this day, and the summary says so', async () => {
+    sessionStorage.clear();
+    delete window.__MOCK_DB__;
+    seedWorld({ tbdDate: '2026-10-03' });
+    await openDay('2026-10-24');
+    expect(await screen.findByTestId('day-sheet-summary')).toHaveTextContent(
+      "1 TIME TBD game holds another date and is on that day's sheet."
+    );
+    expect(screen.queryByTestId('day-sheet-tbd')).not.toBeInTheDocument();
+    // on its own date it is listed, with the date and no time, and the summary has nothing to add
+    fireEvent.change(screen.getByLabelText('Date'), { target: { value: '2026-10-03' } });
+    const tbd = await screen.findByTestId('day-sheet-tbd');
+    expect(tbd).toHaveTextContent('2026-10-03, no time yet.');
+    expect(screen.getByTestId('day-sheet-summary')).not.toHaveTextContent(/holds another date/);
   });
 
   it('downloads the rows it shows, as a CSV named for the date', async () => {

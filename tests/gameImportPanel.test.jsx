@@ -1187,6 +1187,35 @@ describe('G3: the saved schedule as a file the import reads', () => {
       'S-1,2026-09-12,08:00,09:00,Venue A,Field 1,U05 Boys,U05B Team 01,U05B Team 02,1'
     );
   });
+
+  it('G2: on the night the clocks go back, an end in the repeated hour is a Length, and a start the second time round is said to be left out', async () => {
+    const { saveFile } = await import('../frontend/src/utils/scheduleDownloads.js');
+    const move = async (id, start, end) => {
+      const { error } = await mockSupabase
+        .from('game_assignments')
+        .update({ start, end })
+        .eq('id', id);
+      expect(error).toBeNull();
+    };
+    // 2026-11-01 in America/Los_Angeles shows 01:00 to 01:59 twice (-07:00, then -08:00)
+    await move(SAVED.open, '2026-11-01T00:30:00-07:00', '2026-11-01T01:30:00-08:00');
+    await move(SAVED.untouched, '2026-11-01T01:15:00-08:00', '2026-11-01T02:00:00-08:00');
+    render(<ScheduleImportPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'Download the saved schedule as CSV' }));
+    const note = await screen.findByTestId('schedule-import-export-note');
+    expect(note.textContent).toBe(
+      'Downloaded 2 games. 1 saved games start in the hour the clocks repeat when they go back, the second time round; the file cannot tell that from the first, so they are not in the file.'
+    );
+    const [, blob] = /** @type {any} */ (saveFile).mock.calls.at(-1);
+    const lines = (await blob.text()).split('\n');
+    expect(lines[0]).toBe(
+      'Game ID,Date,Start Time,End Time,Length,Venue,Field,Division,Home Team,Away Team,Week'
+    );
+    expect(lines.find((line) => line.startsWith('S-1,'))).toBe(
+      'S-1,2026-11-01,00:30,,120,Venue A,Field 1,U05 Boys,U05B Team 01,U05B Team 02,1'
+    );
+    expect(lines.some((line) => line.startsWith('S-3,'))).toBe(false);
+  });
 });
 
 describe('the file of the world reaches what the tests above name (a check over less would pass)', () => {

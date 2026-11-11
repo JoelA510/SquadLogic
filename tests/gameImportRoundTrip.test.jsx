@@ -168,7 +168,12 @@ describe('the shipped fixture: imported, exported, imported again as a dry run',
     expect(tbd).toBeGreaterThanOrEqual(1);
 
     const exported = await readSavedScheduleCsv(mockSupabase, params);
-    expect(exported.omitted).toEqual({ noPlace: 0, unknownRecord: 0, undatedTbd: 0 });
+    expect(exported.omitted).toEqual({
+      noPlace: 0,
+      unknownRecord: 0,
+      undatedTbd: 0,
+      repeatedHour: 0,
+    });
     expect(exported.rows).toHaveLength(fixture.schedule.rows.length);
     expect(exported.headers).toEqual([...core.SCHEDULE_IMPORT_TEMPLATE_HEADER]);
     const file = parseCsv(exported.csv);
@@ -347,7 +352,12 @@ describe('the every-outcome league: a cancelled game, a TIME TBD game, and a con
         },
       ],
     });
-    expect(built.omitted).toEqual({ noPlace: 1, unknownRecord: 1, undatedTbd: 1 });
+    expect(built.omitted).toEqual({
+      noPlace: 1,
+      unknownRecord: 1,
+      undatedTbd: 1,
+      repeatedHour: 0,
+    });
     expect(built.rows.map((r) => r['Game ID'])).toEqual(['G-1', 'T-1']);
     expect(built.rows[0]).toMatchObject({
       'Start Time': '09:00',

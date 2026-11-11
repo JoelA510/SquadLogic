@@ -652,6 +652,10 @@ function ScheduleImportWorkflow({
             ? ` ${left} saved games could not be written (no readable time, field or team) and are not in the file.`
             : ''
         }${
+          saved.omitted.repeatedHour > 0
+            ? ` ${saved.omitted.repeatedHour} saved games start in the hour the clocks repeat when they go back, the second time round; the file cannot tell that from the first, so they are not in the file.`
+            : ''
+        }${
           saved.omitted.undatedTbd > 0
             ? ` ${saved.omitted.undatedTbd} TIME TBD games have no date and are not in the file (the file needs a date).`
             : ''

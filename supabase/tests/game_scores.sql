@@ -307,7 +307,7 @@ SELECT is(pg_temp.val($$SELECT string_agg(column_name || ' ' || data_type || ' '
     FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'game_scores'$$),
     'game_id uuid NO; organization_id uuid NO; home_team_id uuid NO; away_team_id uuid NO; score_home smallint NO; score_away smallint NO; created_at timestamp with time zone NO; updated_at timestamp with time zone NO; updated_by uuid YES',
     'game_scores: the game, the organization, the two sides as scored, both scores required, when and who');
-SELECT is(pg_temp.val($$SELECT c.confdeltype || c.confupdtype || ' ' || pg_get_constraintdef(c.oid) FROM pg_constraint c
+SELECT is(pg_temp.val($$SELECT c.confdeltype::text || c.confupdtype::text || ' ' || pg_get_constraintdef(c.oid) FROM pg_constraint c
     WHERE c.conrelid = 'public.game_scores'::regclass AND c.contype = 'f' AND c.confrelid = 'public.game_assignments'::regclass$$),
     'aa FOREIGN KEY (game_id, organization_id, home_team_id, away_team_id) REFERENCES game_assignments(id, organization_id, home_team_id, away_team_id)',
     'one foreign key from the score to the saved game AND its sides, NO ACTION on delete and on update');
@@ -419,7 +419,7 @@ SELECT is(pg_temp.errx(format($$SELECT public.admin_cancel_game_assignment(%L)$$
 -- A Published game that is also scored: Published is said first; after changes are allowed, the score still holds it.
 SELECT is(pg_temp.score(pg_temp.e('01'), 1, 1), '1-1 changed=true was=---', 'a Published game can be scored');
 SELECT is(pg_temp.errx(format($$SELECT public.admin_cancel_game_assignment(%L)$$, pg_temp.e('01'))), '22023:game_published', 'Published and scored: refused as Published');
-SELECT is(pg_temp.errx(format($$SELECT public.admin_set_games_published(%L, ARRAY[%L]::uuid[], false, 'a wrong date'); SELECT public.admin_cancel_game_assignment(%L)$$,
+SELECT is(pg_temp.errx(format($$SELECT public.admin_set_games_published(%L, ARRAY[%L]::uuid[], false, 'conflict-fix'); SELECT public.admin_cancel_game_assignment(%L)$$,
     'a1111111-1111-1111-1111-111111111111', pg_temp.e('01'), pg_temp.e('01'))), '22023:game_scored', 'after changes are allowed the score still holds it');
 SELECT is(pg_temp.score(pg_temp.e('01'), NULL, NULL), '--- changed=true was=1-1', '(its score is cleared again)');
 -- Clearing lifts the hold.
@@ -436,15 +436,15 @@ SELECT is(pg_temp.val($$SELECT count(*) FROM public.game_scores$$), '1', 'one sc
 
 -- ── 4. The database is the backstop ────────────────────────────────────────
 SET LOCAL "request.jwt.claims" TO '{}';
-SELECT is(pg_temp.errx(format($$DELETE FROM public.game_assignments WHERE id = %L$$, pg_temp.e('02'))), '23503:',
+SELECT is(left(pg_temp.errx(format($$DELETE FROM public.game_assignments WHERE id = %L$$, pg_temp.e('02'))), 6), '23503:',
     'with no signed-in user the guard passes and the foreign key refuses a delete that skipped the check');
 SELECT is(pg_temp.errx(format($$DELETE FROM public.game_assignments WHERE id = %L$$, pg_temp.e('04'))), 'no error', 'control: an unscored game is deleted');
-SELECT is(pg_temp.errx(format($$ALTER TABLE public.game_assignments DISABLE TRIGGER game_assignments_published_guard;
-    UPDATE public.game_assignments SET home_team_id = %L WHERE id = %L$$, pg_temp.t('05'), pg_temp.e('02'))), '23503:',
+SELECT is(left(pg_temp.errx(format($$ALTER TABLE public.game_assignments DISABLE TRIGGER game_assignments_published_guard;
+    UPDATE public.game_assignments SET home_team_id = %L WHERE id = %L$$, pg_temp.t('05'), pg_temp.e('02'))), 6), '23503:',
     'a team swap under a score is refused by the key even with the guard trigger disabled');
 SELECT is(pg_temp.errx(format($$ALTER TABLE public.game_assignments DISABLE TRIGGER game_assignments_published_guard;
     UPDATE public.game_assignments SET home_team_id = %L WHERE id = %L$$, pg_temp.t('01'), pg_temp.e('04'))), 'no error', 'control: the same swap on an unscored game goes through');
-SELECT is(pg_temp.errx(format($$UPDATE public.game_scores SET home_team_id = %L WHERE game_id = %L$$, pg_temp.t('05'), pg_temp.e('02'))), '23503:',
+SELECT is(left(pg_temp.errx(format($$UPDATE public.game_scores SET home_team_id = %L WHERE game_id = %L$$, pg_temp.t('05'), pg_temp.e('02'))), 6), '23503:',
     'and the score''s own sides cannot drift from the game''s');
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 SET LOCAL ROLE authenticated;

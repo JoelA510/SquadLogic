@@ -862,6 +862,66 @@ describe('the adversarial review of the panel (R1, R2, R3, R4, R8, R10)', () => 
   });
 });
 
+describe('R5: a staged import that is left does not wait for its confirm forever', () => {
+  // A staged games job is `ready_to_apply`, which the stale-job sweep does not touch, and the Import page's own job
+  // screen leaves games jobs alone: nothing would ever end one the admin walked away from.
+  const jobs = () => table('import_jobs');
+
+  it('leaving the flow discards the job: the panel closing (another import tile, a switch of organization or season)', async () => {
+    const view = render(<ScheduleImportPanel />);
+    await toMapping();
+    expect((await jobs())[0].status).toBe('ready_to_apply');
+    view.unmount();
+    await waitFor(async () => expect((await jobs())[0].status).toBe('failed'));
+    expect((await jobs())[0].error_summary.deferred_apply.status).toBe('canceled');
+  });
+
+  it('a switch of organization discards the job of the organization that was left', async () => {
+    const view = render(<ScheduleImportPanel />);
+    await toMapping();
+    scope.organization = { id: '0b000000-0000-4000-8000-000000000001', name: 'Another League' };
+    view.rerender(<ScheduleImportPanel />);
+    await waitFor(async () => expect((await jobs())[0].status).toBe('failed'));
+  });
+
+  it('CONTROL: an applied import is not discarded when the panel closes', async () => {
+    const view = render(<ScheduleImportPanel />);
+    await toMapping();
+    decideEverything();
+    await toPreview();
+    fireEvent.click(screen.getByLabelText('Create the 5 records listed above'));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm and import' }));
+    await waitFor(() => expect(step()).toMatch(/4 of 4/));
+    const status = (await jobs())[0].status;
+    view.unmount();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect((await jobs())[0].status).toBe(status);
+    expect(status).toMatch(/^completed/);
+  });
+
+  it('an unfinished import found on the upload step is named, and "Discard it" ends it', async () => {
+    // a job staged and then left with no panel to discard it (a closed tab): the calls the panel makes, and no more
+    const { startGameImport } = await import('../frontend/src/utils/gameImportClient.js');
+    await startGameImport(mockSupabase, {
+      organizationId: ORG,
+      seasonSettingsId: SEASON,
+      fileName: 'left-behind.csv',
+      headers: FILE_HEADERS,
+      rows: FILE_ROWS,
+    });
+    expect((await jobs())[0].status).toBe('ready_to_apply');
+    render(<ScheduleImportPanel />);
+    const notice = await screen.findByTestId('schedule-import-unfinished');
+    expect(notice.textContent).toMatch(/left-behind\.csv/);
+    expect(notice.textContent).toMatch(/was checked and never confirmed/);
+    fireEvent.click(within(notice).getByRole('button', { name: 'Discard it' }));
+    await waitFor(() => expect(screen.queryByTestId('schedule-import-unfinished')).toBeNull());
+    expect((await jobs())[0].status).toBe('failed');
+    // CONTROL: with none, nothing is drawn; and another season's unfinished job is not this season's
+    expect(screen.queryByRole('button', { name: 'Discard it' })).toBeNull();
+  });
+});
+
 describe('G3: the saved schedule as a file the import reads', () => {
   it('downloads the saved games in the template’s columns, and says how many', async () => {
     const { saveFile } = await import('../frontend/src/utils/scheduleDownloads.js');

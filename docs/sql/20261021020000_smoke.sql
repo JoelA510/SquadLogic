@@ -92,7 +92,8 @@ BEGIN
         (v_job, v_org, 'registration', 'smoke/rpr.csv', 'processing', v_admin);
     INSERT INTO public.staging_players (organization_id, import_job_id, source_row_number, raw_payload, normalized_payload)
         VALUES (v_org, v_job, 1, '{}'::jsonb, '{}'::jsonb);
-    INSERT INTO public.games (organization_id, home_team_id, away_team_id) VALUES (v_org, v_ta, v_tc) RETURNING id INTO v_game;
+    -- Run at head: since 20261122010000 a score names a SAVED game (game_assignments) and is a row of game_scores.
+    INSERT INTO public.game_assignments (organization_id, home_team_id, away_team_id, division, week_index) VALUES (v_org, v_ta, v_tc, 'Smoke', 1) RETURNING id INTO v_game;
 
     -- Calendar tokens: the new teams got theirs from the trigger, and the
     -- column on teams is gone.
@@ -160,7 +161,7 @@ BEGIN
         v_denied := true;
     END;
     RESET ROLE;
-    IF NOT v_denied OR (SELECT score_home FROM public.games WHERE id = v_game) IS DISTINCT FROM 2 THEN
+    IF NOT v_denied OR (SELECT score_home FROM public.game_scores WHERE game_id = v_game) IS DISTINCT FROM 2 THEN
         RAISE EXCEPTION 'a non-member scored the game';
     END IF;
     PERFORM set_config('request.jwt.claim.sub', v_ou::text, true);
@@ -172,7 +173,7 @@ BEGIN
         v_denied := true;
     END;
     RESET ROLE;
-    IF NOT v_denied OR (SELECT score_home FROM public.games WHERE id = v_game) <> 2 THEN
+    IF NOT v_denied OR (SELECT score_home FROM public.game_scores WHERE game_id = v_game) <> 2 THEN
         RAISE EXCEPTION 'a second non-member scored the game';
     END IF;
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
@@ -185,7 +186,7 @@ BEGIN
         RESET ROLE; RAISE EXCEPTION 'an admin no longer reads every player, roster row, coach and staging row';
     END IF;
     RESET ROLE;
-    IF (SELECT score_home FROM public.games WHERE id = v_game) <> 3 THEN
+    IF (SELECT score_home FROM public.game_scores WHERE game_id = v_game) <> 3 THEN
         RAISE EXCEPTION 'an admin could not score the game';
     END IF;
     RAISE NOTICE 'scores: an admin scores, two signed-in non-members are refused; an admin reads every row';

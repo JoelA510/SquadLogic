@@ -1356,7 +1356,7 @@ END;
 $$;
 
 -- ---------------------------------------------------------------------------
--- 7. Delete team, copied whole from 20261120010000. Changed: a game held only by its score goes with the team, its score first, counted (scores_deleted).
+-- 7. Delete team, copied whole from 20261120010000. Changed: a game held only by its score goes with the team, its score first, counted (game_scores_deleted).
 -- ---------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION public.admin_delete_team(p_team_id uuid)
@@ -1528,7 +1528,7 @@ BEGIN
      WHERE gs.game_id IN (SELECT ga.id FROM public.game_assignments ga
                            WHERE ga.home_team_id = p_team_id OR ga.away_team_id = p_team_id);
     GET DIAGNOSTICS v_scores_deleted = ROW_COUNT;
-    v_counts := v_counts || jsonb_build_object('scores_deleted', v_scores_deleted);
+    v_counts := v_counts || jsonb_build_object('game_scores_deleted', v_scores_deleted);
     DELETE FROM public.teams WHERE id = p_team_id;
 
     PERFORM public.record_audit_event(
@@ -3583,7 +3583,7 @@ BEGIN
         RAISE EXCEPTION 'admin_cancel_game_assignment is not the body naming scored games';
     END IF;
     SELECT p.prosrc INTO v_src FROM pg_proc p WHERE p.oid = to_regprocedure('public.admin_delete_team(uuid)');
-    IF v_src !~ 'scores_deleted' OR v_src !~ 'game_published' OR v_src !~ 'schedule_tbd_deleted' OR v_src !~ 'game_held_ids' THEN
+    IF v_src !~ 'game_scores_deleted' OR v_src !~ 'game_published' OR v_src !~ 'schedule_tbd_deleted' OR v_src !~ 'game_held_ids' THEN
         RAISE EXCEPTION 'admin_delete_team is not the body that takes the scores with it';
     END IF;
     SELECT p.prosrc INTO v_src FROM pg_proc p WHERE p.oid = to_regprocedure('public.update_game_score(uuid, uuid, smallint, smallint, jsonb)');

@@ -271,6 +271,15 @@ R69="$REPO/docs/sql/20261120010000_revert.sql"
 # Its smoke holds the plants of its own, below; the pgTAP file (supabase/tests/game_import_apply_rollback.sql) is CI's.
 M70="$REPO/supabase/migrations/20261121010000_game_import.sql"
 R70="$REPO/docs/sql/20261121010000_revert.sql"
+# Scores, the held rule and standings (F11-2): `game_scores`, "held" is Published OR scored, `view_league_standings` over
+# the score table, `current_game_runs`. Plan docs/changes/2026-11-06-games-table-source-of-truth.md, "The score record".
+# It replaces game_held_ids, the guard, persist_game_schedule, admin_cancel_game_assignment, admin_delete_team,
+# update_game_score, apply_game_import_job, rollback_game_import_job, cancel_ready_import_job and get_schedule_tbd whole,
+# so every plant that aimed at one of those bodies in $M69, $M70 or earlier is re-aimed here (lesson 70; the pre-flight
+# refuses a plant aimed at a replaced body). Its smoke holds the plants of its own, below; the pgTAP file
+# (supabase/tests/game_scores.sql) is CI's.
+M71="$REPO/supabase/migrations/20261122010000_game_scores.sql"
+R71="$REPO/docs/sql/20261122010000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -3739,7 +3748,7 @@ plant "M27 P1 the team save writes no audit row" "$M27" \
             v_org_id, 'team.saved'," \
   "smoke 20261018070000"
 
-plant "M27 P2 the game save swallows a failed audit write" "$M69" \
+plant "M27 P2 the game save swallows a failed audit write" "$M71" \
   "                    ELSE jsonb_build_object('unscheduled_count', v_tbd_games) END);
     EXCEPTION WHEN OTHERS THEN
         RAISE EXCEPTION 'audit write failed, nothing was saved: %', SQLERRM
@@ -3755,7 +3764,7 @@ plant "M27 P3 the team save drops the no-actor guard" "$M27" \
   "        NULL;" \
   "smoke 20261018070000"
 
-plant "M27 P6 the game save admits any signed-in user" "$M69" \
+plant "M27 P6 the game save admits any signed-in user" "$M71" \
   "        RAISE EXCEPTION 'organization_id or season_settings_id is required'
             USING ERRCODE = '23502';
     END IF;
@@ -4036,7 +4045,7 @@ plant "R34 the revert restores a drifted rotate body" "$R34" \
 # are aimed at $M69; the three RSVP plants (the
 # opponent's game RSVP, a practice RSVP sharing a game id, the RSVP writer's
 # game lock) went with the RSVP function and table.
-plant "M35 the delete withdraws nothing" "$M69" \
+plant "M35 the delete withdraws nothing" "$M71" \
   "                                         WHERE pa.team_id = p_team_id))
            AND pe.withdrawn_at IS NULL
         RETURNING pe.*" \
@@ -4045,12 +4054,12 @@ plant "M35 the delete withdraws nothing" "$M69" \
         RETURNING pe.*" \
   "smoke 20261021030000"
 
-plant "M35 the delete archives nothing onto the run" "$M69" \
+plant "M35 the delete archives nothing onto the run" "$M71" \
   "     WHERE sr.id IN (SELECT (e.value->>'run_id')::uuid FROM jsonb_array_elements(v_archived) e" \
   "     WHERE false AND sr.id IN (SELECT (e.value->>'run_id')::uuid FROM jsonb_array_elements(v_archived) e" \
   "smoke 20261021030000"
 
-plant "M35 the delete audits no series" "$M69" \
+plant "M35 the delete audits no series" "$M71" \
   "            'practice.cancelled',
             'practice_assignments',
             v_pa.id," \
@@ -4059,19 +4068,19 @@ plant "M35 the delete audits no series" "$M69" \
             v_pa.id," \
   "smoke 20261021030000"
 
-plant "M35 the delete leaves players.team_id" "$M69" \
+plant "M35 the delete leaves players.team_id" "$M71" \
   "    UPDATE public.players SET team_id = NULL WHERE id = ANY (v_player_ids);" \
   "    PERFORM 1;" \
   "smoke 20261021030000"
 
-plant "M35 team.deleted records no counts" "$M69" \
+plant "M35 team.deleted records no counts" "$M71" \
   "            || v_counts
 " \
   "            || '{}'::jsonb
 " \
   "smoke 20261021030000"
 
-plant "M35 the delete lets a coach through" "$M69" \
+plant "M35 the delete lets a coach through" "$M71" \
   "    IF NOT public.is_org_admin(v_team.organization_id) THEN
         -- Production's own text" \
   "    IF false THEN
@@ -4267,7 +4276,7 @@ plant "M39 create_team_message is left behind" "$M39" \
   "" \
   "smoke 20261022030000"
 
-plant "M39 admin_delete_team still counts the RSVP table" "$M69" \
+plant "M39 admin_delete_team still counts the RSVP table" "$M71" \
   "        'team_players_deleted',
             (SELECT count(*) FROM public.team_players WHERE team_id = p_team_id)," \
   "        'team_players_deleted',
@@ -4606,7 +4615,7 @@ plant "R43 the revert restores a drifted finalize_import_job body" "$R43" \
 # lapsed coach, and the preview read admitting a non-admin; the lighting
 # smoke on a withdraw that admits the requester; the revert claim on a read
 # left behind, the request RPC left out and a body that drifted.
-plant "M45 a coach scores their own team's game again" "$M45" \
+plant "M45 a coach scores their own team's game again" "$M71" \
   "    IF v_effective_role <> 'service_role'
        AND NOT public.is_org_admin(p_organization_id) THEN
         RAISE EXCEPTION 'Access denied: only an organization admin enters scores'" \
@@ -4622,19 +4631,19 @@ plant "M45 the request RPC is left in place" "$M45" \
   "" \
   "applying 20261028010000_coach_view.sql"
 
-plant "M45 score entry ignores the setting" "$M45" \
+plant "M45 score entry ignores the setting" "$M71" \
   "       AND NOT public.org_flag(p_organization_id, 'score_entry', false) THEN" \
   "       AND false THEN" \
   "smoke 20261028010000"
 
-plant "M45 score entry is on unless set" "$M45" \
+plant "M45 score entry is on unless set" "$M71" \
   "       AND NOT public.org_flag(p_organization_id, 'score_entry', false) THEN" \
   "       AND NOT public.org_flag(p_organization_id, 'score_entry', true) THEN" \
   "smoke 20261028010000"
 
 # The end-state check reads a coach arm in any of its spellings, not only the
 # helper: here a test of the member's role.
-plant "M45 a coach-role member scores again" "$M45" \
+plant "M45 a coach-role member scores again" "$M71" \
   "    IF v_effective_role <> 'service_role'
        AND NOT public.is_org_admin(p_organization_id) THEN
         RAISE EXCEPTION 'Access denied: only an organization admin enters scores'" \
@@ -4956,7 +4965,7 @@ BEGIN
                     WHERE ss.id = NEW.season_settings_id AND ss.organization_id = NEW.organization_id) THEN" \
   "smoke 20261108020000"
 
-plant "M57 get_schedule_tbd admits any signed-in user" "$M57" \
+plant "M57 get_schedule_tbd admits any signed-in user" "$M71" \
   "    IF v_org IS NULL OR NOT public.is_org_admin(v_org) THEN
         RAISE EXCEPTION 'Access denied: the TIME TBD list is read by an administrator of the season''s organization'" \
   "    IF v_org IS NULL OR false THEN
@@ -5519,7 +5528,7 @@ plant "R67 the revert re-adds the column without its default" "$R67" \
 #   - the guard's column list omits home_team_id, so a team swap on a Published game goes through;
 #   - the omission check is removed, so a save that leaves a Published game out is accepted;
 #   - the switch stops requiring a reason when it turns Published off.
-plant "M69 the guard's column list omits home_team_id" "$M70" \
+plant "M69 the guard's column list omits home_team_id" "$M71" \
   "NEW.field_id, NEW.home_team_id, NEW.away_team_id, NEW.week_index, NEW.start, NEW.\"end\")
        IS NOT DISTINCT FROM
        (OLD.game_slot_id, OLD.slot_id, OLD.field_id, OLD.home_team_id, OLD.away_team_id," \
@@ -5528,7 +5537,7 @@ plant "M69 the guard's column list omits home_team_id" "$M70" \
        (OLD.game_slot_id, OLD.slot_id, OLD.field_id, OLD.away_team_id," \
   "smoke 20261119010000"
 
-plant "M69 the game save no longer refuses an omitted Published game" "$M69" \
+plant "M69 the game save no longer refuses an omitted Published game" "$M71" \
   "    IF v_omitted_count > 0 THEN" \
   "    IF false THEN" \
   "smoke 20261119010000"
@@ -5548,19 +5557,19 @@ plant "M68 the switch no longer needs a reason to allow changes" "$M68" \
 #     being refused by name with both ids;
 #   - the season check is removed, so a game stored in another season of the organization, named by its id, is rewritten
 #     into the save's season instead of being refused (22023 game_identity_season).
-plant "M69 the game save reads no ids, so a moved game is a new row again" "$M69" \
+plant "M69 the game save reads no ids, so a moved game is a new row again" "$M71" \
   "                    assignment_items.ordinality AS assignment_ordinal,
                     NULLIF(value->>'id', '')::uuid AS id," \
   "                    assignment_items.ordinality AS assignment_ordinal,
                     NULL::uuid AS id," \
   "smoke 20261120010000"
 
-plant "M69 the clash check is removed" "$M69" \
+plant "M69 the clash check is removed" "$M71" \
   "    IF v_clash_first IS NOT NULL THEN" \
   "    IF false THEN" \
   "smoke 20261120010000"
 
-plant "M69 the season of a named game is not checked" "$M69" \
+plant "M69 the season of a named game is not checked" "$M71" \
   "        IF v_season_first IS NOT NULL THEN" \
   "        IF false THEN" \
   "smoke 20261120010000"
@@ -5579,7 +5588,7 @@ plant "M69 the season of a named game is not checked" "$M69" \
 #   - the guard's rollback exemption is gone, so the rollback cannot take a Published game back;
 #   - the metrics view counts an outside club as one of the organization's teams (the condition is kept in the text, so the
 #     migration's own end-state check, which wants the view to name the column, does not catch it first).
-plant "M70 a dry run writes" "$M70" \
+plant "M70 a dry run writes" "$M71" \
   "    IF v_dry THEN
         RETURN v_result;
     END IF;" \
@@ -5588,34 +5597,34 @@ plant "M70 a dry run writes" "$M70" \
     END IF;" \
   "smoke 20261121010000"
 
-plant "M70 a Game ID is matched by its tuple, not by (season, Game ID)" "$M70" \
+plant "M70 a Game ID is matched by its tuple, not by (season, Game ID)" "$M71" \
   "                                AND CASE WHEN w.game_id IS NOT NULL
                                          THEN ga.season_settings_id = v_season AND ga.external_ref = w.game_id" \
   "                                AND CASE WHEN false
                                          THEN ga.season_settings_id = v_season AND ga.external_ref = w.game_id" \
   "smoke 20261121010000"
 
-plant "M70 a held game is updated, not skipped" "$M70" \
+plant "M70 a held game is updated, not skipped" "$M71" \
   "            WHEN g.match_id = ANY (v_held) THEN 'skip-held'" \
   "            WHEN false THEN 'skip-held'" \
   "smoke 20261121010000"
 
-plant "M70 the rollback no longer refuses after a change" "$M70" \
+plant "M70 the rollback no longer refuses after a change" "$M71" \
   "    IF cardinality(v_changed) + cardinality(v_changed_tbd) > 0 THEN" \
   "    IF false THEN" \
   "smoke 20261121010000"
 
-plant "M70 the rollback does not judge a TIME TBD game against what the apply left" "$M70" \
+plant "M70 the rollback does not judge a TIME TBD game against what the apply left" "$M71" \
   "                        ELSE s.id IS NULL OR NOT public.game_import_row_unchanged(to_jsonb(s), r.applied_payload) END) x;" \
   "                        ELSE false END) x;" \
   "smoke 20261121010000"
 
-plant "M70 a re-import is never nothing to apply" "$M70" \
+plant "M70 a re-import is never nothing to apply" "$M71" \
   "    v_nothing := (v_work = 0);" \
   "    v_nothing := false;" \
   "smoke 20261121010000"
 
-plant "M70 the guard has no rollback exemption" "$M70" \
+plant "M70 the guard has no rollback exemption" "$M71" \
   "    IF v_job IS NOT NULL AND OLD.import_job_id IS NOT NULL AND OLD.import_job_id::text = v_job THEN" \
   "    IF false THEN" \
   "smoke 20261121010000"
@@ -5634,7 +5643,7 @@ plant "M70 the stored mapping's audit row cites no job" "$M70" \
   "        PERFORM public.record_audit_event(v_job.organization_id, 'import.mapped', 'import_job', gen_random_uuid()," \
   "smoke 20261121010000"
 
-plant "M70 two labels that create one team are two creations" "$M70" \
+plant "M70 two labels that create one team are two creations" "$M71" \
   "               first_value(k3.own_id) OVER (PARTITION BY k3.kind, k3.division_ref, public.normalise_external_label(k3.cname) ORDER BY k3.tkey) AS new_id," \
   "               k3.own_id AS new_id," \
   "smoke 20261121010000"
@@ -5648,43 +5657,43 @@ plant "M70 two labels that create one team are two creations" "$M70" \
 # The pgTAP files (supabase/tests/game_import_round2.sql and game_import_apply_rollback.sql) hold the full table; the plants
 # the smoke does not catch (a venue, a division, an outside club named with a run of spaces; another Game ID on a held TIME
 # TBD tuple; the conversion warning) were run against the pgTAP stand-in only and are in the pull request.
-plant "M70 the shells' team run carries no teamsByDivision" "$M70" \
+plant "M70 the shells' team run carries no teamsByDivision" "$M71" \
   "                'teamsByDivision', v_grouped," \
   "                'teamsByDivisionMissing', v_grouped," \
   "smoke 20261121010000"
 
-plant "M70 a TIME TBD game is not found by its Game ID" "$M70" \
+plant "M70 a TIME TBD game is not found by its Game ID" "$M71" \
   "                            AND ((w.game_id IS NOT NULL AND s.external_ref = w.game_id)" \
   "                            AND ((false AND s.external_ref = w.game_id)" \
   "smoke 20261121010000"
 
-plant "M70 a TIME TBD game's date is not stored" "$M70" \
+plant "M70 a TIME TBD game's date is not stored" "$M71" \
   "v_run_id, t.game_id, t.gdate
           FROM _gi_t t WHERE t.verdict = 'insert';" \
   "v_run_id, t.game_id, NULL
           FROM _gi_t t WHERE t.verdict = 'insert';" \
   "smoke 20261121010000"
 
-plant "M70 a held game's TIME TBD row converts it" "$M70" \
+plant "M70 a held game's TIME TBD row converts it" "$M71" \
   "            WHEN t.ga_id IS NOT NULL AND t.ga_id = ANY (v_held) THEN 'skip-held'" \
   "            WHEN false THEN 'skip-held'" \
   "smoke 20261121010000"
 
-plant "M70 a swap has no step-out" "$M70" \
+plant "M70 a swap has no step-out" "$M71" \
   "         WHERE ga.id IN (SELECT g.match_id FROM _gi_g g WHERE g.verdict = 'update' AND g.leaves)
            AND EXISTS (SELECT 1 FROM _gi_g h" \
   "         WHERE false AND ga.id IN (SELECT g.match_id FROM _gi_g g WHERE g.verdict = 'update' AND g.leaves)
            AND EXISTS (SELECT 1 FROM _gi_g h" \
   "smoke 20261121010000"
 
-plant "M70 a swap is a clash (the games the file moves still hold their places)" "$M70" \
+plant "M70 a swap is a clash (the games the file moves still hold their places)" "$M71" \
   "                          AND g2.id NOT IN (SELECT x.match_id FROM _gi_g x WHERE x.verdict = 'update' AND x.leaves)
                           AND g2.id NOT IN (SELECT t.ga_id FROM _gi_t t WHERE t.conv));" \
   "                          AND g2.id NOT IN (SELECT x.match_id FROM _gi_g x WHERE false)
                           AND g2.id NOT IN (SELECT t.ga_id FROM _gi_t t WHERE t.conv));" \
   "smoke 20261121010000"
 
-plant "M70 the rollback does not step a swapped pair out of the unique place" "$M70" \
+plant "M70 the rollback does not step a swapped pair out of the unique place" "$M71" \
   "       AND r.target_table = 'game_assignments' AND r.operation = 'updated' AND r.rolled_back_at IS NULL
        AND (ga.home_team_id, ga.away_team_id, ga.game_slot_id, ga.week_index)
            IS DISTINCT FROM ((r.previous_payload" \
@@ -5693,19 +5702,19 @@ plant "M70 the rollback does not step a swapped pair out of the unique place" "$
            IS DISTINCT FROM ((r.previous_payload" \
   "smoke 20261121010000"
 
-plant "M70 a team name with a run of spaces is not the name that exists" "$M70" \
+plant "M70 a team name with a run of spaces is not the name that exists" "$M71" \
   "                    WHERE t.division_id = j.division_existing AND public.normalise_external_label(t.name) = public.normalise_external_label(j.cname))) AS name_taken," \
   "                    WHERE t.division_id = j.division_existing AND lower(btrim(t.name)) = lower(btrim(j.cname)))) AS name_taken," \
   "smoke 20261121010000"
 
-plant "M70 the rollback does not stand a converted game up again" "$M70" \
+plant "M70 the rollback does not stand a converted game up again" "$M71" \
   "       AND r.operation = 'deleted' AND r.rolled_back_at IS NULL;
     GET DIAGNOSTICS n_games_reinserted = ROW_COUNT;" \
   "       AND r.operation = 'deleted' AND r.rolled_back_at IS NULL AND false;
     GET DIAGNOSTICS n_games_reinserted = ROW_COUNT;" \
   "smoke 20261121010000"
 
-plant "M70 a placed game made TIME TBD is not warned" "$M70" \
+plant "M70 a placed game made TIME TBD is not warned" "$M71" \
   "              FROM _gi_t t WHERE t.conv) w;" \
   "              FROM _gi_t t WHERE false) w;" \
   "smoke 20261121010000"

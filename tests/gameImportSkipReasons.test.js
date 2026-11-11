@@ -8,9 +8,6 @@
  * - **Row refusals.** The SQL's `c_row_refusals` (the reasons a staged row may carry from the file check, and the ones
  *   the apply adds) equals core's `SCHEDULE_IMPORT_ROW_REFUSALS`.
  */
-import { readFileSync, readdirSync } from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   SCHEDULE_IMPORT_APPLY_WARNINGS,
@@ -25,7 +22,6 @@ import {
 } from '../packages/core/src/scheduleImport/index.js';
 import { GAME_IMPORT_SQL } from './helpers/gameImportSql.js';
 
-const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SQL = GAME_IMPORT_SQL;
 /** The text of the apply function only. */
 const APPLY = SQL.slice(SQL.indexOf('CREATE FUNCTION public.apply_game_import_job'));

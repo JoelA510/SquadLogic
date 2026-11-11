@@ -4,8 +4,6 @@
  * SQL reads), for a placed row and a TIME TBD row alike; a refused row has no payload and its reason; and every row of
  * the shipped fixture stages in the shape the SQL's own shape check accepts.
  */
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { GAME_IMPORT_KEYS } from '../frontend/src/utils/importAllowlist.js';
 import {

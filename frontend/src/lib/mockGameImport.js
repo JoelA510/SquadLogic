@@ -1124,8 +1124,9 @@ function applyJob(db, job, dry, ctx, env) {
       repointed: carry.length,
       skipped: Object.fromEntries(
         ['skipped-published', 'skipped-scored']
-          .map((reason) => [reason, heldSkips.filter((h) => h.reason === reason).length])
-          .filter(([, count]) => count > 0)
+          .map((reason) => ({ reason, count: heldSkips.filter((h) => h.reason === reason).length }))
+          .filter(({ count }) => count > 0)
+          .map(({ reason, count }) => [reason, count])
       ),
     },
     time_tbd: {

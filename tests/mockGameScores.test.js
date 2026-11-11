@@ -97,7 +97,7 @@ function world() {
     name,
     ...extra,
   });
-  return {
+  return /** @type {any} */ ({
     organizations: [
       { id: ORG, feature_flags: { score_entry: true } },
       { id: ORG_B, feature_flags: { score_entry: true } },
@@ -162,7 +162,7 @@ function world() {
     game_scores: [],
     games: [{ id: 'legacy-1', organization_id: ORG }],
     audit_log: [],
-  };
+  });
 }
 
 const ctxOf = (db, user = ADMIN) => ({

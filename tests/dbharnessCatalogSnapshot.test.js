@@ -148,7 +148,7 @@ describe('the committed snapshot', () => {
       /^view_org_metrics\|v\|security_invoker=true\|organization_id uuid, /
     );
     expect(byName.view_league_standings).toMatch(
-      /^view_league_standings\|v\|security_invoker=true\|.*, division text, season_settings_id uuid$/
+      /^view_league_standings\|v\|security_invoker=true\|.*, division text, season_settings_id uuid, results_not_counted bigint$/
     );
     // view_compliance_stats went with R1 (20261022020000).
     expect(byName).not.toHaveProperty('view_compliance_stats');

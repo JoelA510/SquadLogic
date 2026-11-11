@@ -157,7 +157,7 @@ describe('LeagueStandings :: results against outside clubs', () => {
   it('says the plural for more than one', async () => {
     await seedLeague({});
     // A second team's result against the club: entered on a saved game of its own.
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') ?? 'null') ?? window.__MOCK_DB__;
+    const db = /** @type {any} */ (window.__MOCK_DB__);
     expect(db, 'the mock database is readable').toBeTruthy();
     db.game_assignments.push(game('g-outside-2', 't-wanderers', 't-club'));
     db.game_scores.push({
@@ -169,8 +169,7 @@ describe('LeagueStandings :: results against outside clubs', () => {
       score_home: 0,
       score_away: 0,
     });
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-    window.__MOCK_DB__ = db;
+    window.__saveMockDB__(db);
     await renderPage();
     expect(await screen.findByTestId('standings-outside-not-counted')).toHaveTextContent(
       '2 results against outside clubs are not counted.'

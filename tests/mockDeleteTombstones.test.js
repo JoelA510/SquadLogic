@@ -859,7 +859,11 @@ describe('mock admin_delete_team :: removes every dependant the cascade removes'
     expect(unrecorded).toEqual([]);
     // And no counter for a table the migrations no longer have (R2 dropped
     // event_rsvps and team_messages; the database's team.deleted names neither).
-    const tables = new Set(cascades.map(({ table }) => table));
+    // One counter is of a table the function empties ITSELF, before the cascade (20261122010000, F11 decision D5):
+    // the scores of the team's games, which no foreign key to `teams` would take (the key from a score to its game
+    // is NO ACTION and would refuse the cascade).
+    const tables = new Set([...cascades.map(({ table }) => table), 'game_scores']);
+    expect(audit?.metadata?.game_scores_deleted).toBe(0);
     const stale = Object.keys(audit?.metadata ?? {}).filter(
       (key) => key.endsWith('_deleted') && !tables.has(key.replace(/_deleted$/, ''))
     );

@@ -21,7 +21,9 @@ import { importFileSizeProblem } from '../../utils/importFileLimits.js';
 import {
   confirmGameImport,
   discardGameImport,
+  GAME_IMPORT_DISCARDABLE_STATUS,
   previewGameImport,
+  readGameImportJobState,
   readGameImportLeague,
   readLatestGameImportJob,
   readSavedScheduleCsv,
@@ -79,6 +81,7 @@ const KINDS = Object.freeze({
     confirm: confirmGameImport,
     rollback: rollbackGameImport,
     discard: discardGameImport,
+    jobState: readGameImportJobState,
     latest: readLatestGameImportJob,
     unfinished: readUnfinishedGameImportJobs,
     exportSaved: readSavedScheduleCsv,
@@ -87,6 +90,9 @@ const KINDS = Object.freeze({
 });
 
 /** How many rows of a list are named on screen; the rest are counted. */
+/** A job the apply finished: its result is stored on it, and it can be rolled back. */
+const APPLIED_STATUSES = new Set(['completed', 'completed_with_warnings']);
+const DISCARDABLE_STATUS = GAME_IMPORT_DISCARDABLE_STATUS;
 const NAMED = 25;
 
 /** The counts of a preview, in the order and the words the confirm screen shows them. */
@@ -255,6 +261,9 @@ function ScheduleImportWorkflow({
   const [preview, setPreview] = useState(/** @type {any} */ (null));
   const [stale, setStale] = useState(/** @type {any} */ (null));
   const [createAck, setCreateAck] = useState(false);
+  // True while a confirm was sent and it is not known whether it was applied (its answer was lost and the job could
+  // not be read): nothing is sent again and nothing is discarded until the job has been read.
+  const [unknown, setUnknown] = useState(false);
   const [result, setResult] = useState(/** @type {any} */ (null));
   // What a roll back undid, and of WHICH job: the result screen of another import is not that import's.
   const [rolledBack, setRolledBack] = useState(
@@ -350,6 +359,7 @@ function ScheduleImportWorkflow({
     setPreview(null);
     setStale(null);
     setCreateAck(false);
+    setUnknown(false);
     setResult(null);
     setRolledBack(null);
   }, []);
@@ -358,7 +368,8 @@ function ScheduleImportWorkflow({
   // to start the next one for a scope nobody is looking at.
   const alive = useRef(true);
   // The staged job this workflow would leave behind if it went away now: set while a job waits for its confirm,
-  // cleared once it is applied or discarded.
+  // cleared once it is applied or discarded, and while a confirm is in flight or its outcome is not known. Naming a
+  // job here is not enough to discard it: `K.discard` reads the job and ends it only if it is still waiting.
   const pendingJob = useRef(/** @type {string | null} */ (null));
   useEffect(() => {
     pendingJob.current = jobId !== null && result === null ? jobId : null;
@@ -521,8 +532,55 @@ function ScheduleImportWorkflow({
     ? CREATED_ROWS.reduce((n, [key]) => n + Number(counts[key] ?? 0), 0)
     : 0;
 
+  // What became of a confirm, read from the job itself. The apply's answer can be lost after the database committed
+  // it (a dropped connection, a gateway timeout), so a failed confirm says nothing about the schedule: the job does.
+  const settleConfirm = async (cause) => {
+    if (!jobId || !alive.current) return;
+    let state;
+    try {
+      state = await K.jobState(client, jobId);
+    } catch (err) {
+      logger.error('The import could not be read after its confirm failed:', cause, err);
+      if (!alive.current) return;
+      // Nothing is known. The job is not offered for a second confirm and is not discarded (`pendingJob` stays
+      // empty): "Check again" reads it once more.
+      setUnknown(true);
+      setBusy(null);
+      return;
+    }
+    if (!alive.current) return;
+    setUnknown(false);
+    if (APPLIED_STATUSES.has(String(state.status)) && state.result) {
+      // It was applied: the same screen as if the answer had arrived, with its roll back.
+      if (cause) logger.warn('The import was applied and its answer was lost:', cause);
+      setError(null);
+      setResult(state.result);
+      setBusy(null);
+      setStep('result');
+      refreshLast();
+      return;
+    }
+    if (state.status === DISCARDABLE_STATUS) {
+      // Read as still waiting: nothing was written, so it can be confirmed again, or discarded.
+      pendingJob.current = jobId;
+      const why = cause?.message ? ` ${cause.message}` : '';
+      logger.error('The import was not applied:', cause);
+      setError(`The import was not applied: nothing was saved.${why}`);
+      setBusy(null);
+      return;
+    }
+    // Neither applied with a result this page can show nor waiting (ended or rolled back from somewhere else): not
+    // this workflow's to confirm or discard any more. The upload step lists what the season holds.
+    logger.error('The import is no longer waiting for its confirm:', state.status, cause);
+    reset();
+    setError(
+      `This import is no longer waiting to be confirmed (its status is "${String(state.status ?? 'not found')}"), so nothing was sent again. The last import and any unfinished one are listed below.`
+    );
+    refreshLast();
+  };
+
   const handleConfirm = async () => {
-    if (!jobId || !counts || !organizationId) return;
+    if (!jobId || !counts || !organizationId || unknown) return;
     setError(null);
     setBusy('Importing');
     // While the confirm is in flight the job is not one to discard on leaving: the admin confirmed it, and a discard
@@ -544,9 +602,15 @@ function ScheduleImportWorkflow({
       setStep('result');
       refreshLast();
     } catch (err) {
-      pendingJob.current = jobId;
-      fail(err, 'The import could not be applied.');
+      // No answer, or a refusal: either way the job says what happened, and it is read before anything else.
+      await settleConfirm(err);
     }
+  };
+
+  const handleCheckAgain = async () => {
+    setError(null);
+    setBusy('Checking the import');
+    await settleConfirm(null);
   };
 
   const handleRollback = async (id) => {
@@ -598,11 +662,21 @@ function ScheduleImportWorkflow({
     }
   };
 
+  /** What is said when a discard found the job was not one to discard (no call was made for it). */
+  const notDiscarded = (status) =>
+    APPLIED_STATUSES.has(String(status))
+      ? 'That import was applied in the meantime, so it was not discarded. It is listed as the last import, where it can be rolled back.'
+      : 'That import was no longer waiting to be confirmed, so there was nothing to discard.';
+
   const handleDiscard = async () => {
+    // With the outcome of a confirm unknown, the job is not this button's to end ("Check again" first).
+    if (unknown) return;
+    let said = null;
     if (jobId) {
       pendingJob.current = null;
       try {
-        await K.discard(client, jobId);
+        const ended = await K.discard(client, jobId);
+        if (!ended.discarded) said = notDiscarded(ended.status);
       } catch (err) {
         // A staged import wrote nothing. Its job stays `ready_to_apply` (nothing expires it): the upload step lists
         // it as unfinished, where it can be discarded again. The reason is logged.
@@ -610,6 +684,7 @@ function ScheduleImportWorkflow({
       }
     }
     reset();
+    if (said) setError(said);
     refreshLast();
   };
 
@@ -617,7 +692,8 @@ function ScheduleImportWorkflow({
     setError(null);
     setBusy('Discarding the unfinished import');
     try {
-      await K.discard(client, id);
+      const ended = await K.discard(client, id);
+      if (!ended.discarded) setError(notDiscarded(ended.status));
       setBusy(null);
       refreshLast();
     } catch (err) {
@@ -696,6 +772,25 @@ function ScheduleImportWorkflow({
         {error && (
           <Notice tone="error" testId="schedule-import-error">
             {error}
+          </Notice>
+        )}
+        {unknown && (
+          <Notice tone="error" testId="schedule-import-unknown">
+            <p>
+              It is not known whether the import was applied: its answer did not arrive, and the
+              import could not be read. Nothing is sent again and nothing is discarded until it has
+              been read.
+            </p>
+            <div className="mt-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={busy !== null}
+                onClick={handleCheckAgain}
+              >
+                Check again
+              </Button>
+            </div>
           </Notice>
         )}
       </div>
@@ -1166,6 +1261,7 @@ function ScheduleImportWorkflow({
               variant="primary"
               disabled={
                 busy !== null ||
+                unknown ||
                 counts.nothing_to_apply === true ||
                 (createdTotal > 0 && !createAck)
               }
@@ -1173,10 +1269,14 @@ function ScheduleImportWorkflow({
             >
               Confirm and import
             </Button>
-            <Button variant="secondary" disabled={busy !== null} onClick={() => setStep('mapping')}>
+            <Button
+              variant="secondary"
+              disabled={busy !== null || unknown}
+              onClick={() => setStep('mapping')}
+            >
               Back to the names
             </Button>
-            <Button variant="ghost" disabled={busy !== null} onClick={handleDiscard}>
+            <Button variant="ghost" disabled={busy !== null || unknown} onClick={handleDiscard}>
               Cancel this import
             </Button>
           </div>

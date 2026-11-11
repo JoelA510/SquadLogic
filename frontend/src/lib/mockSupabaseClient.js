@@ -5103,9 +5103,11 @@ export const mockSupabase = {
       if (importType === 'games' && job.job_type !== 'games') {
         return { data: null, error: { message: 'Import job is not games' } };
       }
-      if (job.status !== 'ready_to_apply') {
-        return { data: null, error: { message: `Import job is ${job.status}` } };
-      }
+      // No check of `job.status`, as the deployed SQL has none (20261121010000_game_import.sql): the function marks
+      // ANY job of the right type `failed`, an applied one too. The mock once refused a job that was not
+      // `ready_to_apply`, which hid a caller that cancels blind. The SQL is to refuse such a job in the next
+      // migration (docs/changes/2026-11-03-schedule-expansion.md, "Follow-ups found in PR 6's review"); this check
+      // comes back then, with it.
 
       const stagedRows = (db.staging_import_rows || []).filter(
         (row) =>

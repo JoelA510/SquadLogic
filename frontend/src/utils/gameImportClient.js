@@ -355,20 +355,59 @@ export async function rollbackGameImport(client, { jobId, organizationId, season
 }
 
 /**
+ * Where a games import job stands, read from the job itself: its status and, once applied, the result the apply
+ * stored on it. This is how a confirm whose answer never arrived is settled, and what a discard is decided on.
+ *
+ * @param {any} client
+ * @param {string} jobId
+ * @returns {Promise<{ status: string | null, result: any }>} `status` null when the job cannot be seen
+ */
+export async function readGameImportJobState(client, jobId) {
+  requireClient(client);
+  const { data, error } = await client
+    .from('import_jobs')
+    .select('id, status, warning_summary')
+    .eq('id', jobId)
+    .maybeSingle();
+  if (error) throw fromRpc(error, 'The import could not be read.');
+  if (!data) return { status: null, result: null };
+  const stored = data.warning_summary?.game_import;
+  return {
+    status: String(data.status ?? ''),
+    result: stored && typeof stored === 'object' ? stored : null,
+  };
+}
+
+/** The one status a games job may be discarded in: staged, and not applied. */
+export const GAME_IMPORT_DISCARDABLE_STATUS = 'ready_to_apply';
+
+/**
  * Discard a staged import that was never applied: `cancel_ready_import_job` marks the job `failed` (audited
  * `import.canceled`), so it can no longer be mapped or applied. Its staged rows stay with the failed job (they hold
  * labels, dates and times, no person's data) and go when the job does.
  *
+ * The discard is never sent blind. `cancel_ready_import_job` as deployed does not check the job's status: sent for a
+ * job that was APPLIED it marks it `failed`, which leaves the games saved, takes the job out of the roll back and
+ * audits an `import.canceled` that did not happen. So the job is read first, here, for every caller, and the call is
+ * made only for a job read as `ready_to_apply`; a job that cannot be read is not discarded (the read's error is
+ * thrown). The time between this read and the call is the database's to close: the function is to refuse such a job
+ * itself in the next migration (docs/changes/2026-11-03-schedule-expansion.md).
+ *
  * @param {any} client
  * @param {string} jobId
+ * @returns {Promise<{ discarded: boolean, status: string | null }>} `discarded` false, with the status that was
+ *   read, when the job was not one to discard: no call was made
  */
 export async function discardGameImport(client, jobId) {
   requireClient(client);
+  const { status } = await readGameImportJobState(client, jobId);
+  if (status !== GAME_IMPORT_DISCARDABLE_STATUS) return { discarded: false, status };
   const { error } = await client.rpc('cancel_ready_import_job', {
     p_import_job_id: jobId,
     p_import_type: 'games',
   });
   if (error) throw fromRpc(error, 'The staged import could not be discarded.');
+  return { discarded: true, status };
 }
 
 /**

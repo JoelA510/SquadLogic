@@ -29,6 +29,10 @@ import {
 import { COLLISION_MESSAGE, handleGameImportRpc } from '../frontend/src/lib/mockGameImport.js';
 import { loadScheduleFixture, outsideDecisionsFor } from './helpers/scheduleFixtureLoad.js';
 import { GAME_IMPORT_SQL } from './helpers/gameImportSql.js';
+import {
+  computeScoredStandings,
+  mockUpdateSavedGameScore,
+} from '../frontend/src/lib/mockGameScores.js';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PGTAP = readFileSync(
@@ -852,6 +856,111 @@ describe('the mock refuses as the database does', () => {
     expect(call().data.created).toBe(false);
     expect(db.game_slots.filter((s) => s.slot_date === '2026-06-20')).toHaveLength(1);
     expect(db.audit_log.filter((a) => a.action === 'game.slot_created')).toHaveLength(1);
+  });
+});
+
+describe('a scored game and the import (20261122010000): the mock answers as the database does', () => {
+  // The database's own case is section 7b of supabase/tests/game_import_apply_rollback.sql; each expectation here is
+  // first required to be text of that file (Codex on #725, P2: the mock rolled an import back over a scored game and
+  // left its score behind, counted by the standings).
+  const PGTAP = readFileSync(
+    path.join(REPO, 'supabase/tests/game_import_apply_rollback.sql'),
+    'utf8'
+  );
+  const inPgtap = (text) => {
+    expect(PGTAP.includes(text), `the pgTAP file asserts ${text}`).toBe(true);
+    return text;
+  };
+  const scoring = (db) => {
+    db.organizations = [{ id: ORG, feature_flags: { score_entry: true } }];
+    db.organization_members = [{ organization_id: ORG, profile_id: ADMIN, role: 'admin' }];
+    return (game, home, away) =>
+      mockUpdateSavedGameScore(
+        db,
+        { p_organization_id: ORG, p_game_id: game, p_score_home: home, p_score_away: away },
+        {
+          currentUserId: ADMIN,
+          isOrgAdmin: () => true,
+          isOrgMember: () => true,
+          seasonRefusal: () => null,
+        }
+      );
+  };
+
+  it('the rollback is refused after a score, naming the game, and deletes nothing; with the score cleared it restores', () => {
+    const db = world();
+    const id = addJob(db, FILE(), MAPPING());
+    expect(
+      rpc(db, 'apply_game_import_job', { p_import_job_id: id, p_dry_run: false }).error
+    ).toBeNull();
+    const imported = db.game_assignments.find((g) => g.external_ref === 'G-101');
+    const score = scoring(db);
+    expect(score(imported.id, 2, 0).error).toBeNull();
+    const games = db.game_assignments.length;
+
+    const refused = rpc(db, 'rollback_game_import_job', { p_import_job_id: id });
+    expect(
+      `${refused.error?.code}:${String(refused.error?.details).replace(imported.id, '<G-101>')}`
+    ).toBe(inPgtap('22023:game_import_changed count=1 ids=<G-101>'));
+    expect(refused.error.message).toMatch(/given a score/);
+    // Nothing was taken back: the game, its score and the records stand, and the standings count one result.
+    expect(db.game_assignments).toHaveLength(games);
+    expect(db.game_scores.map((row) => row.game_id)).toEqual([imported.id]);
+    expect(db.import_application_records.every((r) => !r.rolled_back_at)).toBe(true);
+    expect(computeScoredStandings(db).reduce((n, row) => n + row.games_played, 0)).toBe(2);
+
+    // CONTROL: the score cleared, the same rollback goes through and leaves no score behind.
+    expect(score(imported.id, null, null).error).toBeNull();
+    expect(rpc(db, 'rollback_game_import_job', { p_import_job_id: id }).error).toBeNull();
+    expect(db.game_assignments.some((g) => g.id === imported.id)).toBe(false);
+    expect(db.game_scores).toEqual([]);
+    // No score names a game that is gone (the orphan the defect left).
+    const ids = new Set(db.game_assignments.map((g) => g.id));
+    expect(db.game_scores.filter((row) => !ids.has(row.game_id))).toEqual([]);
+  });
+
+  it('a changed row for a scored game is skipped: as Published while it is, as scored once changes are allowed', () => {
+    const db = world();
+    const id = addJob(db, FILE(), MAPPING());
+    expect(
+      rpc(db, 'apply_game_import_job', { p_import_job_id: id, p_dry_run: false }).error
+    ).toBeNull();
+    const imported = db.game_assignments.find((g) => g.external_ref === 'G-101');
+    const score = scoring(db);
+    expect(score(imported.id, 2, 0).error).toBeNull();
+    // A file of one row, as the pgTAP case's: G-101 at another time of its day (Bears against Wolves, Field 2).
+    const moved = [
+      stage(
+        1,
+        'ok',
+        'G-101',
+        'Org A U10',
+        'Park One',
+        'Field 2',
+        'Bears',
+        'Wolves',
+        '2026-05-02',
+        '13:00',
+        '14:00',
+        1
+      ),
+    ];
+    const again = addJob(db, moved, MAPPING());
+    const published = rpc(db, 'apply_game_import_job', { p_import_job_id: again, p_dry_run: true });
+    expect(JSON.stringify(published.data.games.skipped).replace(':', ': ')).toBe(
+      inPgtap('{"skipped-published": 1}')
+    );
+    imported.published = false;
+    const scored = rpc(db, 'apply_game_import_job', { p_import_job_id: again, p_dry_run: true });
+    expect(JSON.stringify(scored.data.games.skipped).replace(':', ': ')).toBe(
+      inPgtap('{"skipped-scored": 1}')
+    );
+    expect(scored.data.games.updated).toBe(0);
+    // CONTROL: the score cleared, the same row is an ordinary update.
+    expect(score(imported.id, null, null).error).toBeNull();
+    const cleared = rpc(db, 'apply_game_import_job', { p_import_job_id: again, p_dry_run: true });
+    expect(cleared.data.games.skipped).toEqual({});
+    expect(cleared.data.games.updated).toBe(1);
   });
 });
 

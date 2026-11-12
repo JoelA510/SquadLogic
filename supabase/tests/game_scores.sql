@@ -29,7 +29,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(113);
+SELECT plan(115);
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
 -- err: SQLSTATE:DETAIL of the first error, or 'no error' (the statement's effect stays).
@@ -462,7 +462,13 @@ SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"
 -- e02 T3 3-1 T4 stands. e0a: T1 2-0 Outside One. e0b: Outside One 5-0 Outside Two. e05: T5 1-1 T6.
 SELECT is(pg_temp.score(pg_temp.e('0a'), 2, 0), '2-0 changed=true was=---', 'a game against an outside club is scored');
 SELECT is(pg_temp.score(pg_temp.e('0b'), 5, 0), '5-0 changed=true was=---', 'and so is a fixture of two outside clubs');
+-- Deleting a field (confirmed) removes its slots and their games by the cascade, where the guard is the backstop: allowed
+-- while no game of the field is held, refused once one has a score. Field 2 holds e05 and no Published game.
+SELECT is(pg_temp.errx($$SELECT public.admin_delete_field('a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-0000000d00f2', true)$$), 'no error',
+    'control: a confirmed delete of a field none of whose games is held goes through');
 SELECT is(pg_temp.score(pg_temp.e('05'), 1, 1), '1-1 changed=true was=---', 'and a draw');
+SELECT is(pg_temp.errx($$SELECT public.admin_delete_field('a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-0000000d00f2', true)$$), '22023:game_scored',
+    'a confirmed delete of a field with a scored game is refused by the guard at the cascade');
 SELECT is(pg_temp.standing(pg_temp.t('03')), '1 1-0-0 3:1 3 nc=0', 'the winner: one played, one win, three points');
 SELECT is(pg_temp.standing(pg_temp.t('04')), '1 0-1-0 1:3 0 nc=0', 'the loser');
 SELECT is(pg_temp.standing(pg_temp.t('05')) || ' / ' || pg_temp.standing(pg_temp.t('06')), '1 0-0-1 1:1 1 nc=0 / 1 0-0-1 1:1 1 nc=0', 'a draw is a point each');

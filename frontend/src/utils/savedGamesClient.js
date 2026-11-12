@@ -68,6 +68,31 @@ export async function fetchCurrentSavedGames({ organizationId, seasonId = null, 
 }
 
 /**
+ * One team's games in the saved schedule: the games it plays in whose run is its season's current one. The team's
+ * games are read first (they name their runs), then `current_game_runs` says which of those runs is a schedule; a
+ * game left behind in an older run is not returned. Either read failing throws.
+ *
+ * @param {string} teamId
+ */
+export async function fetchTeamSavedGames(teamId) {
+  const rows = await fetchAllPages(() =>
+    supabase
+      .from('game_assignments')
+      .select(SAVED_GAME_SELECT)
+      .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`)
+  );
+  const runIds = [...new Set(rows.map((row) => row.run_id).filter(Boolean))];
+  if (runIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from('current_game_runs')
+    .select('run_id')
+    .in('run_id', runIds);
+  if (error) throw error;
+  const current = new Set((data ?? []).map((row) => String(row.run_id)));
+  return rows.filter((row) => current.has(String(row.run_id))).map(withScore);
+}
+
+/**
  * The row with its score as two fields. `game_scores` points at the game by a key PostgREST reads as one-to-many, so
  * the embed is a list of at most one row (an object, were the key ever read as one-to-one): both shapes are read, and
  * the embed is not carried under another name.

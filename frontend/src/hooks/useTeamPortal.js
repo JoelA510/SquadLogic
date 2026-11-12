@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient.js';
 import { logger } from '../lib/logger.js';
 import { fetchAllPages } from '../lib/pagedFetch.js';
+import { fetchTeamSavedGames, savedGameWallTimes } from '../utils/savedGamesClient.js';
 import { PRACTICE_TBD_CAUSES } from '@squadlogic/core/utils/practiceOccurrences.js';
 import { applyPracticeExceptions } from '@squadlogic/core/utils/practiceExceptions.js';
 import {
@@ -183,8 +184,8 @@ export function useTeamPortal(teamId) {
  * `practiceChangesUnread` true. The team page (`useTeamPortal`), the coach
  * home (admin focus R6) and the schedule exports (R7) all read a schedule
  * through this one function. `rows` are the three reads as returned, which
- * the calendar download renders through the feed's own builder; the slot's
- * `start` and `end` instants are asked for because the feed prefers them.
+ * the calendar download renders through the feed's own builder; a game carries
+ * its own `start` and `end` instants, which the feed places before its slot's.
  *
  * @param {string} teamId
  * @param {string | null} timeZone
@@ -193,49 +194,32 @@ export function useTeamPortal(teamId) {
  *   exceptions: Array<Record<string, any>> } }>}
  */
 export async function fetchTeamEvents(teamId, timeZone) {
-  // 3. Fetch Games
-  const { data: gamesData, error: gamesError } = await supabase
-    .from('games')
-    .select(
-      `
-      *,
-      game_slot:game_slots (
-        slot_date,
-        start_time,
-        end_time,
-        start,
-        end,
-        field:fields (
-          name,
-          location:locations (name)
-        )
-      ),
-      home_team:teams!home_team_id (name),
-      away_team:teams!away_team_id (name)
-    `
-    )
-    .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`);
+  // 3. The team's games in the saved schedule (`game_assignments` of its season's current game run; F11-3).
+  const gamesData = await fetchTeamSavedGames(teamId);
 
-  if (gamesError) throw gamesError;
-
-  const mappedGames = gamesData.map((g) => ({
-    id: g.id,
-    type: 'game',
-    date: g.game_slot?.slot_date,
-    startTime: g.game_slot?.start_time,
-    endTime: g.game_slot?.end_time,
-    // A game with no slot yet has no ground: null, which the pages show as
-    // "Location TBD" (it read "undefined - undefined" before R6).
-    location: g.game_slot ? locationOf(g.game_slot) : null,
-    homeTeam: g.home_team?.name,
-    awayTeam: g.away_team?.name,
-    opponent: g.home_team_id === teamId ? g.away_team?.name : g.home_team?.name,
-    // For the schedule export (R7): which side the team is on, and whether the
-    // game has a slot at all (a slot can lack the wall date and time).
-    role: g.home_team_id === teamId ? 'Home' : 'Away',
-    hasSlot: Boolean(g.game_slot),
-    description: `vs ${g.home_team_id === teamId ? g.away_team?.name : g.home_team?.name}`,
-  }));
+  const mappedGames = gamesData.map((g) => {
+    // The game's own start and end on the season clock; its slot's wall reading when there is no clock.
+    const when = savedGameWallTimes(g, timeZone);
+    return {
+      id: g.id,
+      type: 'game',
+      date: when.date,
+      startTime: when.startTime,
+      endTime: when.endTime,
+      // A game with no slot has no ground: null, which the pages show as
+      // "Location TBD" (it read "undefined - undefined" before R6).
+      location: g.game_slot ? locationOf(g.game_slot) : null,
+      homeTeam: g.home_team?.name,
+      awayTeam: g.away_team?.name,
+      opponent: g.home_team_id === teamId ? g.away_team?.name : g.home_team?.name,
+      // For the schedule export (R7): which side the team is on, and whether the
+      // game has a day at all (a saved game has its own start; a row with neither
+      // a readable start nor a slot is said as having no slot).
+      role: g.home_team_id === teamId ? 'Home' : 'Away',
+      hasSlot: Boolean(g.game_slot) || when.date !== null,
+      description: `vs ${g.home_team_id === teamId ? g.away_team?.name : g.home_team?.name}`,
+    };
+  });
 
   // 4. Fetch Practices and Expand
   const { data: practiceAssignments, error: practiceError } = await supabase

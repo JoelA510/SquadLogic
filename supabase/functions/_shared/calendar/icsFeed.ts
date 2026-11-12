@@ -283,6 +283,12 @@ interface FieldRef {
 
 export interface GameRow {
   id: string;
+  /**
+   * The saved game's own instants (`game_assignments.start` and `"end"`). They are when the game is played: an
+   * imported game can end at another time than its slot, so they are placed before the slot's.
+   */
+  start?: string | null;
+  end?: string | null;
   game_slots?: {
     slot_date?: string | null;
     start_time?: string | null;
@@ -592,9 +598,10 @@ export function buildFeedEvents(input: {
     const location = locationOf(slot?.fields);
     const title = `Game: ${teamName}`;
 
-    if (!slot) {
+    const hasOwn = (value: unknown) => value !== null && value !== undefined && value !== '';
+    if (!slot && !(hasOwn(g.start) && hasOwn(g.end))) {
       // Reported, not dropped -- see `refuseAssignment` above. A game with no
-      // `game_slots` row is a game nobody can attend, and silence about it is
+      // `game_slots` row and no instants of its own is a game nobody can attend, and silence about it is
       // how a family learns of a fixture from someone else's parent.
       events.push({
         kind: 'unplaceable',
@@ -608,19 +615,20 @@ export function buildFeedEvents(input: {
       return;
     }
 
+    // The game's own instant first, then the slot's, then the slot's wall reading (`placeSlotTime`'s order).
     const start = placeSlotTime(
-      slot.start,
-      slot.slot_date,
-      slot.start_time,
+      hasOwn(g.start) ? g.start : slot?.start,
+      slot?.slot_date,
+      slot?.start_time,
       timezone,
       'game start'
     );
     // The pre-existing fallback `end_time || start_time` is kept: a slot with
     // no end is a zero-length event, not a dropped one.
     const end = placeSlotTime(
-      slot.end,
-      slot.slot_date,
-      slot.end_time || slot.start_time,
+      hasOwn(g.end) ? g.end : slot?.end,
+      slot?.slot_date,
+      slot?.end_time || slot?.start_time,
       timezone,
       'game end'
     );
@@ -646,7 +654,7 @@ export function buildFeedEvents(input: {
         title,
         // The wall date is usually still known -- what is missing is the
         // season's zone, not the slot's date.
-        date: typeof slot.slot_date === 'string' && slot.slot_date ? slot.slot_date : null,
+        date: typeof slot?.slot_date === 'string' && slot.slot_date ? slot.slot_date : null,
         code: blocking?.code ?? SLOT_TIME_MISSING,
         reason: blocking?.message ?? 'game time could not be placed',
         location,

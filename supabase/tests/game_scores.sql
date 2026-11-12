@@ -29,7 +29,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(115);
+SELECT plan(143);
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
 -- err: SQLSTATE:DETAIL of the first error, or 'no error' (the statement's effect stays).
@@ -250,6 +250,14 @@ INSERT INTO public.game_assignments (id, organization_id, run_id, game_slot_id, 
     ('a1111111-1111-1111-1111-0000000d0e0b', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-0000000d0a01', 'a1111111-1111-1111-1111-0000000d00da', 'a1111111-1111-1111-1111-0000000d00da', 'a1111111-1111-1111-1111-0000000d00f1',
      'a1111111-1111-1111-1111-0000000d00e1', 'a1111111-1111-1111-1111-0000000d00e2', 'Org A U10', 4, '2026-04-25T08:00:00Z', '2026-04-25T09:00:00Z', 'auto');
 
+-- A score is entered only on a game of its season's current run (review of #725, R3), so the completed season's game
+-- and Org B's game are each given the run their season shows.
+INSERT INTO public.scheduler_runs (id, organization_id, season_id, season_settings_id, run_type, status, completed_at) VALUES
+    ('a1111111-1111-1111-1111-0000000d0ac1', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-1111111100c1', 'a1111111-1111-1111-1111-1111111100c1', 'game', 'completed', '2025-03-01T00:00:00Z'),
+    ('b2222222-2222-2222-2222-0000000d0ab1', 'b2222222-2222-2222-2222-222222222222', 'b2222222-2222-2222-2222-222222222bbb', 'b2222222-2222-2222-2222-222222222bbb', 'game', 'completed', '2026-03-01T00:00:00Z');
+UPDATE public.game_assignments SET run_id = 'a1111111-1111-1111-1111-0000000d0ac1' WHERE id = 'a1111111-1111-1111-1111-0000000d0e09';
+UPDATE public.game_assignments SET run_id = 'b2222222-2222-2222-2222-0000000d0ab1' WHERE id = 'b2222222-2222-2222-2222-0000000d0e01';
+
 -- e: a game's id by its last two characters; t: a team's; d: a slot's.
 CREATE FUNCTION pg_temp.e(p text) RETURNS uuid LANGUAGE sql AS $f$ SELECT ('a1111111-1111-1111-1111-0000000d0e' || p)::uuid $f$;
 CREATE FUNCTION pg_temp.t(p text) RETURNS uuid LANGUAGE sql AS $f$ SELECT ('a1111111-1111-1111-1111-0000000d00' || p)::uuid $f$;
@@ -369,10 +377,21 @@ SELECT is(pg_temp.val($$SELECT COALESCE(score_home::text, 'null') FROM public.ga
     'and the legacy row is not written');
 SELECT is(pg_temp.score(pg_temp.e('09'), 1, 0), '22023:season_completed', 'a completed season refuses a score');
 SELECT is(pg_temp.stored(pg_temp.e('09')), 'none', 'with nothing written');
+-- R3: a score is SET only on a game of its season's current run. e08 is the older, hidden row: a score there would hold a
+-- game no screen shows, and every later save would be refused for leaving it out. Clearing is never refused for that.
+SELECT is(pg_temp.score(pg_temp.e('08'), 1, 0), '22023:game_not_current', 'a game that is not in its season''s current run takes no score');
+SELECT is(pg_temp.stored(pg_temp.e('08')), 'none', 'and nothing was written');
+SELECT is(pg_temp.score(pg_temp.e('08'), NULL, NULL), '--- changed=false was=---', 'clearing is not refused for it (a clear releases a hold, it never makes one)');
+-- R4: with score entry turned off a score can still be CLEARED (or scored games would be held with no way to release
+-- them); entering stays off.
+SELECT is(pg_temp.score(pg_temp.e('02'), 4, 0), '4-0 changed=true was=---', '(e02 is scored while score entry is on)');
 SET LOCAL "request.jwt.claims" TO '{}';
 UPDATE public.organizations SET feature_flags = feature_flags - 'score_entry' WHERE id = 'a1111111-1111-1111-1111-111111111111';
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
-SELECT is(pg_temp.score(pg_temp.e('02'), 1, 0), '55000:', 'score entry off refuses as before (55000)');
+SELECT is(pg_temp.score(pg_temp.e('03'), 1, 0), '55000:', 'score entry off refuses as before (55000)');
+SELECT is(pg_temp.score(pg_temp.e('02'), 5, 0), '55000:', 'and refuses an edit');
+SELECT is(pg_temp.score(pg_temp.e('02'), NULL, NULL), '--- changed=true was=4-0', 'but a score can be cleared with score entry off');
+SELECT is(pg_temp.val($$SELECT public.game_is_held(pg_temp.e('02'))::text$$), 'false', 'which releases the game');
 SET LOCAL "request.jwt.claims" TO '{}';
 UPDATE public.organizations SET feature_flags = feature_flags || '{"score_entry": true}'::jsonb WHERE id = 'a1111111-1111-1111-1111-111111111111';
 SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
@@ -515,6 +534,66 @@ SELECT is(pg_temp.val($$SELECT count(*) FROM public.current_game_runs WHERE orga
     'another organization''s admin reads none of Org A''s runs through the view');
 RESET ROLE;
 
+-- ── 6b. Everything this migration grants to a signed-in user, used AS one (review of #725, R1) ──
+-- The sections above set the JWT claims and stay the test's own role, which reads past every grant. A signed-in reader is
+-- the role `authenticated`. What it is granted is read from the catalogue: the score table, every view over it, and every
+-- function of this migration it may execute. A new grant joins the list here, and then has to be used below.
+SELECT is(pg_temp.val($$SELECT string_agg(x, ',' ORDER BY x) FROM (
+        SELECT c.relname::text AS x FROM pg_class c
+         WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r', 'v') AND has_table_privilege('authenticated', c.oid, 'SELECT')
+           AND (c.relname = 'game_scores'
+                OR (c.relkind = 'v' AND (COALESCE(obj_description(c.oid), '') LIKE '%20261122010000%'
+                     OR EXISTS (SELECT 1 FROM pg_depend d JOIN pg_rewrite r ON r.oid = d.objid
+                                 WHERE r.ev_class = c.oid AND d.refobjid = 'public.game_scores'::regclass))))
+        UNION ALL
+        SELECT p.proname::text FROM pg_proc p
+         WHERE p.pronamespace = 'public'::regnamespace AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
+           AND (p.prosrc ~ '20261122010000' OR COALESCE(obj_description(p.oid), '') LIKE '%20261122010000%')) q$$),
+    'admin_cancel_game_assignment,admin_delete_team,apply_game_import_job,cancel_ready_import_job,current_game_runs,game_scores,get_schedule_tbd,persist_game_schedule,rollback_game_import_job,standings_counts_outside,update_game_score,view_league_standings',
+    'what this migration grants to a signed-in user, from the catalogue: three relations and nine functions, each used below');
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+-- The standings, with a result against an outside club in them (e0a) and the setting off: the branch that calls the setting.
+SELECT is(pg_temp.val($$SELECT games_played || ' ' || points || ' nc=' || results_not_counted FROM public.view_league_standings WHERE team_id = pg_temp.t('01')$$),
+    '0 0 nc=1', 'a signed-in member reads the standings of a team with a result against an outside club (the setting off)');
+SELECT is(pg_temp.val($$SELECT games_played || ' ' || points || ' nc=' || results_not_counted FROM public.view_league_standings WHERE team_id = pg_temp.t('03')$$),
+    '1 3 nc=0', 'and of a team whose results are all against own teams');
+SELECT is(pg_temp.val($$SELECT count(*) FROM public.view_league_standings WHERE team_id IN (pg_temp.t('e1'), pg_temp.t('e2'))$$), '0', 'no outside club has a row for them either');
+SELECT is(pg_temp.val($$SELECT public.standings_counts_outside('a1111111-1111-1111-1111-11111111abcd')::text$$), 'false', 'the setting reads as off');
+RESET ROLE;
+SET LOCAL "request.jwt.claims" TO '{}';
+UPDATE public.organizations SET feature_flags = feature_flags || '{"standings_count_outside_results": true}'::jsonb WHERE id = 'a1111111-1111-1111-1111-111111111111';
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SELECT is(pg_temp.val($$SELECT games_played || ' ' || points || ' nc=' || results_not_counted FROM public.view_league_standings WHERE team_id = pg_temp.t('01')$$),
+    '1 3 nc=0', 'with the setting on the same reader sees the result counted');
+SELECT is(pg_temp.val($$SELECT public.standings_counts_outside('a1111111-1111-1111-1111-11111111abcd')::text$$), 'true', 'and the setting reads as on');
+SELECT is(pg_temp.val($$SELECT count(*) FROM public.game_scores$$), '4', 'the member reads the organization''s four scores');
+SELECT is(pg_temp.val($$SELECT count(*) FROM public.current_game_runs WHERE organization_id = 'a1111111-1111-1111-1111-111111111111'$$) ~ '^[1-9]', true, 'and its current runs');
+-- Another organization's admin: nothing of Org A, and the setting of Org A's division is not an oracle (it is on, and reads false).
+SET LOCAL "request.jwt.claims" TO '{"sub":"22222222-2222-2222-2222-222222222222"}';
+SELECT is(pg_temp.val($$SELECT (SELECT count(*) FROM public.view_league_standings WHERE organization_id = 'a1111111-1111-1111-1111-111111111111')
+        || ' ' || (SELECT count(*) FROM public.game_scores) || ' ' || (SELECT count(*) FROM public.current_game_runs WHERE organization_id = 'a1111111-1111-1111-1111-111111111111')$$),
+    '0 0 0', 'a member of another organization sees no standings row, no score and no run of this one');
+SELECT is(pg_temp.val($$SELECT public.standings_counts_outside('a1111111-1111-1111-1111-11111111abcd')::text$$), 'false',
+    'and cannot read this organization''s setting through the helper (it answers false for a division the caller cannot read)');
+SELECT is(pg_temp.val($$SELECT count(*) FROM public.view_league_standings$$) ~ '^[0-9]+$', true, 'their own standings read does not fail');
+-- The nine functions, called as the role: none is refused for a privilege it does not hold (each answers by its own rules).
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SELECT is(pg_temp.errx(format($$SELECT public.update_game_score('a1111111-1111-1111-1111-111111111111', %L, 2::smallint, 2::smallint); SELECT public.update_game_score('a1111111-1111-1111-1111-111111111111', %L, NULL, NULL)$$, pg_temp.e('03'), pg_temp.e('03'))),
+    'no error', 'update_game_score: an admin enters and clears a score as the role');
+SELECT is(pg_temp.errx($$SELECT pg_temp.save(pg_temp.sched())$$), 'no error', 'persist_game_schedule: a save that carries the scored games is accepted');
+SELECT is(pg_temp.errx(format($$SELECT public.admin_cancel_game_assignment(%L)$$, pg_temp.e('02'))), '22023:game_scored', 'admin_cancel_game_assignment: refused for the scored game, by its own rule');
+SELECT is(pg_temp.errx(format($$SELECT public.admin_delete_team(%L)$$, pg_temp.t('01'))), '22023:game_published', 'admin_delete_team: refused for the Published game, by its own rule');
+SELECT is(pg_temp.val($$SELECT jsonb_typeof(public.get_schedule_tbd('a1111111-1111-1111-1111-111111111aaa'))$$), 'array', 'get_schedule_tbd answers');
+SELECT is(pg_temp.msg(format($$SELECT public.cancel_ready_import_job(%L, 'games')$$, gen_random_uuid())) ~ 'not found', true, 'cancel_ready_import_job answers by its own rule (no such job)');
+SELECT is(pg_temp.msg(format($$SELECT public.apply_game_import_job(%L, true)$$, gen_random_uuid())) !~ 'permission denied', true, 'apply_game_import_job is not refused for a privilege');
+SELECT is(pg_temp.msg(format($$SELECT public.rollback_game_import_job(%L)$$, gen_random_uuid())) !~ 'permission denied', true, 'nor is rollback_game_import_job');
+RESET ROLE;
+SET LOCAL "request.jwt.claims" TO '{}';
+UPDATE public.organizations SET feature_flags = feature_flags - 'standings_count_outside_results' WHERE id = 'a1111111-1111-1111-1111-111111111111';
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+
 -- ── 7. Delete team (D5) and the organization cascade (U5) ──────────────────
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 SELECT is(pg_temp.errx(format($$SELECT public.admin_delete_team(%L)$$, pg_temp.t('01'))), '22023:game_published', 'a team with a Published game is still refused');
@@ -541,6 +620,14 @@ UPDATE public.games SET home_team_id = pg_temp.t('01'), away_team_id = pg_temp.t
 SELECT is(pg_temp.val($$SELECT public.copy_legacy_game_scores()::text$$), '{"copied": 1, "scored": 1, "already": 0}', 'one that matches exactly one saved game (home, away, slot) is copied');
 SELECT is(pg_temp.stored(pg_temp.e('03')), '9-8 by nobody', 'onto that game');
 SELECT is(pg_temp.val($$SELECT public.copy_legacy_game_scores()::text$$), '{"copied": 0, "scored": 1, "already": 1}', 'and a second run copies nothing twice');
+-- R3: a legacy result is matched only with a game of a current run. e08 (T2 against T4 on slot d8) is the older, hidden row.
+INSERT INTO public.games (id, organization_id, season_id, game_slot_id, home_team_id, away_team_id, score_home, score_away)
+VALUES ('a1111111-1111-1111-1111-0000000d0f02', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111aaa', NULL, pg_temp.t('02'), pg_temp.t('04'), 1, 0);
+SELECT is(pg_temp.errx($$DELETE FROM public.games WHERE id = 'a1111111-1111-1111-1111-0000000d0f01';
+        UPDATE public.games SET game_slot_id = (SELECT game_slot_id FROM public.game_assignments WHERE id = pg_temp.e('08')) WHERE id = 'a1111111-1111-1111-1111-0000000d0f02';
+        SELECT public.copy_legacy_game_scores()$$), '55000:legacy_score_unmatched count=1 ids=a1111111-1111-1111-1111-0000000d0f02',
+    'a scored legacy row whose only match is a game outside its season''s current run is unmatched: it would make a hold nobody sees');
+DELETE FROM public.games WHERE id = 'a1111111-1111-1111-1111-0000000d0f02';
 UPDATE public.games SET score_away = NULL WHERE id = 'a1111111-1111-1111-1111-0000000d0f01';
 SELECT is(pg_temp.val($$SELECT public.copy_legacy_game_scores()::text$$), '{"copied": 0, "scored": 0, "already": 0}', 'a one-sided legacy entry was never a result (the old view ignored it) and is not one now');
 

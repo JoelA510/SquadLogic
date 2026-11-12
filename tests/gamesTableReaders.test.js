@@ -124,10 +124,6 @@ const REGISTRY = {
     class: 'test-seed',
     why: "vitest of the mock's field delete cascade over a legacy game",
   },
-  'tests/mockReadPolicies.test.js': {
-    class: 'test-seed',
-    why: "vitest of the mock's read of the table, which it does not restrict",
-  },
 };
 
 // ---------------------------------------------------------------------------------------------------------------

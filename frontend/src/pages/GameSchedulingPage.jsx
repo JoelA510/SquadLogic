@@ -1580,12 +1580,20 @@ export default function GameSchedulingPage() {
   // read, may still have been written (the message says the outcome is not
   // known). The schedule on screen would then be the one from before it, so
   // the saved schedule is read again; the staged review is left as it was.
+  //
+  // A save refused for a game's identity (409 `GAME_IDENTITY`: a game removed, of another season, named twice, or
+  // colliding with another) is refused because the page's saved schedule is older than the database's: it is read
+  // again too, so the next Apply starts from what is saved (owner, 2026-11-09; F11-3 task C6).
   const refetchGame = game?.refetch;
   const rereadAfterUnknownOutcome = useCallback(
     (err) => {
       if (isUnknownPersistenceOutcome(err)) refetchGame?.();
+      else if (err?.code === 'GAME_IDENTITY') {
+        markSavedStale();
+        refetchSaved?.();
+      }
     },
-    [refetchGame]
+    [refetchGame, markSavedStale, refetchSaved]
   );
 
   const handleApplySchedule = useCallback(async () => {

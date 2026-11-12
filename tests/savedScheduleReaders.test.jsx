@@ -16,6 +16,7 @@ import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as world from './helpers/savedScheduleWorld.js';
 import * as importWorld from './helpers/gameImportWorld.js';
+import { relationColumns } from './helpers/sqlColumns.js';
 
 vi.mock('../frontend/src/lib/supabaseClient.js', async () => {
   const { mockSupabase } = await import('../frontend/src/lib/mockSupabaseClient.js');
@@ -217,5 +218,27 @@ describe('after an import is applied and rolled back', () => {
     expect((await oracle(ORG, SEASON)).map((game) => [game.id, game.start, game.end])).toEqual(
       before.map((game) => [game.id, game.start, game.end])
     );
+  });
+});
+
+describe("the rows the mock's writers store are the tables' rows (lessons 104 and 108)", () => {
+  it('a saved game and its score have only the columns of game_assignments and game_scores', async () => {
+    const { ORG, SEASON, assignment, save, score, gameId } = world;
+    world.seedLeague();
+    const run = await save([assignment('comets', 'rockets', 'slot-1')]);
+    await score(await gameId(run, 'comets', 'rockets'), 1, 1);
+    const columns = relationColumns();
+    const raw = await db();
+    const extra = (table, rows) =>
+      [...new Set(rows.flatMap((row) => Object.keys(row)))].filter(
+        (key) => !columns.get(table).includes(key)
+      );
+    expect(raw.game_assignments.length).toBe(1);
+    expect(extra('game_assignments', raw.game_assignments)).toEqual([]);
+    expect(extra('game_scores', raw.game_scores)).toEqual([]);
+    expect(raw.game_assignments[0]).toMatchObject({
+      organization_id: ORG,
+      season_settings_id: SEASON,
+    });
   });
 });

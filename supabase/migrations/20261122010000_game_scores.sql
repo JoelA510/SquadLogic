@@ -23,7 +23,8 @@
 --   * `view_league_standings` rebuilt over `teams` and `game_scores`: the same columns in the same order, and one more,
 --     last (`results_not_counted`). A row for every own team (an outside club, `teams.is_external`, never has one); a
 --     result against an outside club counts for the own team only when `standings_counts_outside(division)` says so
---     (today: the organization's `standings_count_outside_results` setting, off unless turned on; the settings cascade
+--     (a definer that reads the one setting for a member of the division's organization, because the view runs as its
+--     reader and `org_flag` is closed to client roles; today: the organization's `standings_count_outside_results` setting, off unless turned on; the settings cascade
 --     of F11-4 replaces that one body); a fixture of two outside clubs counts for nobody.
 --   * `current_game_runs` (security invoker): per organization and season, the latest completed game run. The single SQL
 --     definition of "the schedule" for the readers F11-3 repoints; it is `useSchedulerRun`'s rule.
@@ -50,8 +51,11 @@
 -- check inside `apply_game_import_job` is NOT here (a change of signature; it stays recorded in that plan).
 --
 -- `update_game_score` keeps its name, arguments, result keys, authorization and audit action. What a caller sees
--- change: the id it passes names a saved game (a legacy `games` id is "not found"), and one score without the other is
--- refused (22023, score_one_sided). The Scores page still lists the legacy table until F11-3 repoints it.
+-- change: the id it passes names a saved game (a legacy `games` id is "not found"); one score without the other is
+-- refused (22023, score_one_sided); a score is SET only on a game of its season's current run (22023, game_not_current:
+-- a score on a game left in an older run would hold a game no screen shows); and a CLEAR is allowed whatever the
+-- `score_entry` setting says (entering stays gated), so turning the setting off cannot leave games held. The Scores
+-- page still lists the legacy table until F11-3 repoints it.
 --
 -- Reversible: docs/sql/20261122010000_revert.sql (it refuses while `game_scores` holds a row: a revert never discards a
 -- recorded score). Smoke: docs/sql/20261122010000_smoke.sql. pgTAP: supabase/tests/game_scores.sql (CI's).
@@ -3563,6 +3567,14 @@ BEGIN
     END LOOP;
     IF (SELECT p.prosrc FROM pg_proc p WHERE p.oid = to_regprocedure('public.game_held_ids(uuid[])')) !~ 'game_scores' THEN
         RAISE EXCEPTION 'game_held_ids does not read game_scores';
+    END IF;
+    -- The setting read the standings view makes as its reader: a definer with a pinned search path (org_flag is closed
+    -- to client roles), open to a signed-in user and to nobody anonymous.
+    IF NOT (SELECT p.prosecdef AND p.provolatile = 's' AND p.proconfig @> ARRAY['search_path=public']
+              FROM pg_proc p WHERE p.oid = to_regprocedure('public.standings_counts_outside(uuid)'))
+       OR NOT has_function_privilege('authenticated', 'public.standings_counts_outside(uuid)', 'EXECUTE')
+       OR (SELECT p.prosrc FROM pg_proc p WHERE p.oid = to_regprocedure('public.standings_counts_outside(uuid)')) !~ 'is_org_member' THEN
+        RAISE EXCEPTION 'standings_counts_outside is not the member-checked definer the standings view needs';
     END IF;
     IF has_function_privilege('anon', 'public.copy_legacy_game_scores()', 'EXECUTE')
        OR has_function_privilege('authenticated', 'public.copy_legacy_game_scores()', 'EXECUTE')

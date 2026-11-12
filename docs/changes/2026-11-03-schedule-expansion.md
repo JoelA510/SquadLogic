@@ -1588,7 +1588,10 @@ clocks skip, and the import refuses a file that names one, so the export has no 
    **Two of the three closed by F11-2 (2026-11-11); the preview-stale check inside the RPC stays open.**
 4. A sweep in SQL for abandoned `ready_to_apply` games jobs, if the panel's client-side discard proves insufficient
    (a closed tab never runs it; the upload step lists what it left).
-5. **Closed by F11-2 (2026-11-11).** `cancel_ready_import_job` refuses a job that is not `ready_to_apply` (the note for the next migration, above; fix
+5. **Closed by F11-2 (2026-11-11; and, 2026-11-12, the Import page's shared cancel path settles from the job when the
+   function refuses it: `cancelDeferredImportJob` reads the job on `import_not_ready_to_apply` and the page clears its
+   state and says what happened, instead of failing until a reload. `discardGameImport`'s read-before-cancel may be
+   dropped once `20261122010000` is deployed; it is the only check against the older body).** `cancel_ready_import_job` refuses a job that is not `ready_to_apply` (the note for the next migration, above; fix
    round 3). Until then the Import page's own deferred-apply flow can still reach it blind: `ImportContext`'s
    `cancelDeferredImport` (`importDeferredActions.js`, `cancelDeferredImportJob`) is offered again after
    `applyDeferredImport` throws, for the coach, field, field availability, practice preference and evaluation
@@ -2627,7 +2630,8 @@ closes follow-ups 3 (two of its three lines) and 5 of PR 6's review). **Not merg
 to F11-5. PR 14 stays held. Next after F11-2 deploys: F11-3, whose task C3 is **BLOCKING for turning score entry on**:
 it must make the Scores page list saved games and send both scores together (the F11 plan, "As built" under F11-2).
 Until then the page refuses in words and no league is to be told to turn `score_entry` on. Also after F11-2 deploys:
-remove the `game_date` fallback in `readScheduleTbd` (noted 2026-11-12).
+remove the `game_date` fallback in `readScheduleTbd` and the no-`game_scores` fallback in `useGameAssignments` (both
+noted 2026-11-12).
 
 - **Order and the dependency rule.** Section 7 ("Dependencies and order") has the dependency table and the one priority
   rule: at most two PRs in flight; a free slot takes the first PR, in the order PR 1; PR 4; PR 2; PR 5; PR 3; PR 9;

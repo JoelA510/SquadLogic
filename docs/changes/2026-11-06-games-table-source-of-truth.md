@@ -626,6 +626,23 @@ done. What differs from the text above, each a decision of the build:
   delete team and the game save already matched; a confirmed `admin_delete_field` did not (it took a held game, a
   Published one too) and now asks the guard first; the field-import rollback and slot removal stay unmirrored, said in
   `mockGamePublished.js`.
+- **Review round (2026-11-12, the one adversarial review of #725, ten findings, all taken).**
+  R1: `standings_counts_outside` ran as its caller, who may not execute `org_flag`, so every member's read of the
+  standings failed (42501) once a result against an outside club existed; it is a definer that answers only for a
+  member of the division's organization, and `game_scores.sql` now uses everything the migration grants AS the role
+  `authenticated`, the list read from the catalogue. R3: a score is SET only on a game of its season's current run
+  (22023 `game_not_current`: a score on a hidden game would hold a game no screen shows); a clear is never refused
+  for it, and the legacy copy matches only current-run games. R4: a score is CLEARED whatever `score_entry` says
+  (entering stays gated), so turning the feature off cannot leave games held. R2 and R7: the Games page reads a run's
+  games with their score in ONE bounded read (`game_assignments` selecting `game_scores(game_id)`), and reads the
+  games alone when the database has no `game_scores` yet. R5: the Standings page's score entry shows the Scores page's
+  alert (no `window.alert`) and says its list is of the earlier table. R6: the import preview lists a kept-and-changed
+  row once. R8 and R10: a cancel refused for a job that is no longer waiting settles from the job, in words.
+  R9: `isHeld` and `holdReason` take the game alone.
+- **To remove after this migration is deployed (noted 2026-11-12), beside the `readScheduleTbd` fallback above:** the
+  fallback in `useGameAssignments` (`fetchRunGames`) that reads the games without scores when PostgREST answers
+  PGRST200, PGRST205 or 42P01 for the embed (the client is deployed at merge, the migration applied later). The
+  Standings page needs none (`results_not_counted` missing reads as 0), `current_game_runs` has no reader yet.
 - The plan's parity test for `current_game_runs` against `useSchedulerRun` stays C5 of F11-3; F11-2 holds the view
   and the mock's copy to the same cases (`supabase/tests/game_scores.sql`, `tests/mockGameScores.test.js`).
 

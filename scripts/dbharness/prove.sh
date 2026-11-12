@@ -5758,7 +5758,8 @@ plant "M71 the standings count an outside opponent" "$M71" \
 
 # The review of #725 (R1): the helper the standings view calls ran as its caller, and its caller (a signed-in reader) may
 # not execute org_flag, so every member's read of the standings failed once a result against an outside club existed.
-# The smoke reads the view as the role `authenticated` and goes red when the helper is an invoker again.
+# The migration's own end-state check refuses to commit when the helper is an invoker again (so the plant stops at the
+# apply); without that check the smoke, which reads the view as the role `authenticated`, fails with 42501 (run by hand).
 plant "M71 the standings helper runs as its caller" "$M71" \
   "STABLE
 SECURITY DEFINER
@@ -5769,7 +5770,7 @@ AS \$\$
 SET search_path = public
 AS \$\$
     SELECT COALESCE((SELECT public.org_flag(d.organization_id, 'standings_count_outside_results', false)" \
-  "smoke 20261122010000"
+  "applying 20261122010000_game_scores.sql"
 
 # The revert (docs/sql/20261122010000_revert.sql) refuses while a score is recorded. The harness plants one, requires the
 # first run to refuse in its words and change nothing, removes the score, and runs it again.

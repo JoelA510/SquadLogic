@@ -11,6 +11,8 @@ import { useFeatures } from '../hooks/useFeatures.js';
 import { divisionDisplayName } from '../utils/divisions.js';
 import { logger } from '../lib/logger.js';
 import LoadingScreen from '../components/LoadingScreen.jsx';
+import ScoreNotSavedAlert from '../components/ScoreNotSavedAlert.jsx';
+import { SCORE_NOT_SAVED_HERE, isScoreNotSavableHere } from '../utils/scoreSaveRefusal.js';
 
 /**
  * Scores & Results — spreadsheet-style score entry over past games,
@@ -19,18 +21,6 @@ import LoadingScreen from '../components/LoadingScreen.jsx';
  * league turns on (`score_entry`; the route checks it, and the RPC refuses
  * every caller while it is off).
  */
-/**
- * Whether a refused save is one this page cannot ever make as it stands: the database does not find the game (the id
- * is a legacy `games` row, and a score names a saved game), or was sent one score without the other.
- * @param {any} err
- */
-function isNotSavableFromThisPage(err) {
-  return (
-    err?.details === 'score_one_sided' ||
-    (err?.code === '42501' && /^Game not found/.test(String(err?.message ?? '')))
-  );
-}
-
 export default function ScoresPage() {
   const { currentOrganization, availableSeasons } = useOrganization();
   const { genderModel } = useFeatures();
@@ -115,7 +105,7 @@ export default function ScoresPage() {
         // while this page still lists the earlier games table and saves one cell at a time (it is repointed by F11-3
         // of docs/changes/2026-11-06-games-table-source-of-truth.md). The database then answers "not found" or "one
         // score without the other": said here in words that stay on the page, because trying again cannot work.
-        if (isNotSavableFromThisPage(err)) setCannotSave(true);
+        if (isScoreNotSavableHere(err)) setCannotSave(true);
         else toast('Failed to save score', 'warning');
       }
     },
@@ -185,16 +175,6 @@ export default function ScoresPage() {
   );
 
   const hasReadOnlyGames = games.some(isCompletedSeasonGame);
-  const cannotSaveNote = cannotSave && (
-    <p
-      role="alert"
-      data-testid="scores-cannot-save"
-      className="mx-4 mt-3 rounded-lg border border-status-error/30 bg-status-error-bg px-4 py-2 text-sm font-medium text-status-error"
-    >
-      The score was not saved. Scores are now kept against the saved schedule, and this page still
-      lists games from the earlier games table, so it cannot save a score yet. Nothing was changed.
-    </p>
-  );
 
   if (loading) return <LoadingScreen />;
 
@@ -213,7 +193,10 @@ export default function ScoresPage() {
         />
       }
     >
-      {cannotSaveNote}
+      <ScoreNotSavedAlert
+        message={cannotSave ? SCORE_NOT_SAVED_HERE : null}
+        className="mx-4 mt-3"
+      />
       {hasReadOnlyGames && (
         <p
           role="note"

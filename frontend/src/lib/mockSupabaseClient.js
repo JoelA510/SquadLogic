@@ -58,6 +58,12 @@ import {
   publishedWriteRefusal,
 } from './mockGamePublished.js';
 import { mockPersistGameSchedule } from './mockGameIdentity.js';
+import {
+  deriveCurrentGameRuns,
+  deriveLeagueStandings,
+  isSavedGame,
+  mockUpdateSavedGameScore,
+} from './mockGameScores.js';
 import { handleServerSideReadRpc } from './mockServerSideReads.js';
 import { applyMockReadPolicy, RESTRICTED_TABLES } from './mockReadPolicies.js';
 import { handleAdminWriteRpc, unmockedRpcError } from './mockAdminWrites.js';
@@ -691,6 +697,7 @@ const mergeSource = (db, source) => {
               String(r.player_id) === String(record.player_id)
             );
           if (key === 'team_calendar_tokens') return String(r.team_id) === String(record.team_id);
+          if (key === 'game_scores') return String(r.game_id) === String(record.game_id);
           if (key === 'view_org_metrics')
             return String(r.organization_id) === String(record.organization_id);
           if (key === 'view_league_standings') return String(r.team_id) === String(record.team_id);
@@ -758,6 +765,8 @@ const TOMBSTONE_KEY_FNS = {
   team_players: (row) => `${row.team_id}:${row.player_id}`,
   player_buddies: (row) => `${row.player_id}:${row.buddy_player_id}`,
   team_calendar_tokens: (row) => String(row.team_id),
+  // 20261122010000: a score's key is its game (the table has no `id`).
+  game_scores: (row) => String(row.game_id),
 };
 const tombstoneKey = (table, row) =>
   TOMBSTONE_KEY_FNS[table] ? TOMBSTONE_KEY_FNS[table](row) : String(row.id);
@@ -1635,7 +1644,15 @@ const mockSetTeamCoaches = async (
 
 export const getMockData = (table, col, val) => {
   const db = getDB();
-  let results = table === 'field_closures' ? deriveFieldClosures(db) : db[table] || [];
+  // 20261122010000: the standings and "the schedule" are views, computed on every read (mockGameScores.js).
+  let results =
+    table === 'field_closures'
+      ? deriveFieldClosures(db)
+      : table === 'view_league_standings'
+        ? deriveLeagueStandings(db)
+        : table === 'current_game_runs'
+          ? deriveCurrentGameRuns(db)
+          : db[table] || [];
 
   if (col && val) {
     results = results.filter((item) => {
@@ -1820,6 +1837,18 @@ const createMockQuery = (table, data = null) => {
               : null;
             return { ...item, division: division ? { ...division, season: season || null } : null };
           });
+        }
+        if (table === 'game_assignments' && /\bgame_scores\s*\(/.test(queryContent)) {
+          // `game_scores(game_id)`, as `useGameAssignments` reads a run's games with their score (20261122010000). The
+          // foreign key is from the score's four columns to the game, and they are not a unique key of `game_scores`
+          // by themselves, so PostgREST answers the embed as a to-many list: one row for a scored game, none otherwise.
+          const scores = getMockData('game_scores');
+          results = results.map((item) => ({
+            ...item,
+            game_scores: scores
+              .filter((score) => String(score.game_id) === String(item.id))
+              .map((score) => ({ game_id: score.game_id })),
+          }));
         }
         if (table === 'games' && queryContent.includes('game_slot:game_slots')) {
           // `game_slot:game_slots (slot_date, ..., field:fields (name, location:locations (name)))`,
@@ -2337,7 +2366,8 @@ export const mockSupabase = {
               after: r,
             }))
             .filter((pair) => pair.before)
-            .map((pair) => ({ before: pair.before, after: { ...pair.before, ...pair.after } }))
+            .map((pair) => ({ before: pair.before, after: { ...pair.before, ...pair.after } })),
+          db
         );
         if (publishedUpsertRefused) return refusedWrite(publishedUpsertRefused);
         const newRecords = (Array.isArray(records) ? records : [records]).map((r) => ({
@@ -2425,7 +2455,8 @@ export const mockSupabase = {
             // The Published guard (migration 20261119010000), judged on the row as it stands.
             const publishedRefused = publishedWriteRefusal(
               table,
-              matching.map((item) => ({ before: item, after: { ...item, ...updates } }))
+              matching.map((item) => ({ before: item, after: { ...item, ...updates } })),
+              db
             );
             if (publishedRefused) return refusedWrite(publishedRefused);
             if (db[table]) {
@@ -2540,7 +2571,8 @@ export const mockSupabase = {
               // The Published guard (migration 20261119010000): a Published row is not deleted.
               const publishedDeleteRefused = publishedWriteRefusal(
                 table,
-                doomed.map((item) => ({ before: item, after: null }))
+                doomed.map((item) => ({ before: item, after: null })),
+                db
               );
               if (publishedDeleteRefused) return Promise.resolve(publishedDeleteRefused);
               // A hard delete with no tombstone resurrects: `getDB()` rebuilds
@@ -4348,6 +4380,30 @@ export const mockSupabase = {
           };
         }
 
+        // **The guard at the cascade** (20261122010000; it was unmirrored for a Published game too). The database
+        // deletes the field's slots and, by the cascade, their games, and nulls the field of a game that keeps its
+        // slot; the guard trigger refuses either for a held game (Published or scored) of a signed-in caller, and the
+        // whole call fails with nothing written. Asked before the first write here, in the guard's own words.
+        const guardedByDelete = publishedWriteRefusal(
+          'game_assignments',
+          (db.game_assignments || [])
+            .map((before) => {
+              const deleted = affected.some(
+                (row) =>
+                  row.kind === 'game_assignment' &&
+                  row.disposition === 'deleted' &&
+                  String(row.id) === String(before.id)
+              );
+              if (deleted) return { before, after: null };
+              return String(before.field_id) === String(p.p_field_id)
+                ? { before, after: { ...before, field_id: null } }
+                : null;
+            })
+            .filter(Boolean),
+          db
+        );
+        if (guardedByDelete) return guardedByDelete;
+
         const previous = { ...field };
         audit('field', field.id, 'deleted', {
           operation: 'admin_delete_field',
@@ -4500,6 +4556,26 @@ export const mockSupabase = {
     }
 
     if (MOCK_CAPABLE_BUILD && name === 'update_game_score') {
+      // 20261122010000 (F11-2): an id that names a SAVED game is the database's arm, in mockGameScores.js. What follows
+      // it is the mock's own legacy arm, for an id that names only a row of the legacy `games` table (the database
+      // answers "Game not found" for it): the Scores page reads that table until F11-3 repoints it, and this arm goes
+      // then (declared in mockGameScores.js and pinned by tests/mockGameScores.test.js).
+      if (isSavedGame(db, params?.p_game_id)) {
+        const scored = mockUpdateSavedGameScore(db, params, {
+          currentUserId: storedSession ? currentUserId : null,
+          isOrgAdmin,
+          isOrgMember: (org) =>
+            (db.organization_members || []).some(
+              (item) =>
+                String(item.organization_id) === String(org) &&
+                String(item.profile_id) === String(currentUserId)
+            ),
+          seasonRefusal: (rows) => scheduleWriteRefusal(db, 'game_scores', rows),
+          newId: () => mockId('audit-score-'),
+        });
+        if (!scored.error) saveDB(db);
+        return scored;
+      }
       // As 20261028010000 (admin focus R6): an admin or staff member only,
       // and only while the organization's `score_entry` setting is a boolean
       // true (`org_flag(org, 'score_entry', false)`); 55000 while it is off.
@@ -5103,11 +5179,18 @@ export const mockSupabase = {
       if (importType === 'games' && job.job_type !== 'games') {
         return { data: null, error: { message: 'Import job is not games' } };
       }
-      // No check of `job.status`, as the deployed SQL has none (20261121010000_game_import.sql): the function marks
-      // ANY job of the right type `failed`, an applied one too. The mock once refused a job that was not
-      // `ready_to_apply`, which hid a caller that cancels blind. The SQL is to refuse such a job in the next
-      // migration (docs/changes/2026-11-03-schedule-expansion.md, "Follow-ups found in PR 6's review"); this check
-      // comes back then, with it.
+      // 20261122010000: only a staged import that has not been applied is cancelled, as the SQL now says (it marked
+      // ANY job of the right type `failed`, an applied one too, and the mock mirrored that while it did).
+      if (job.status !== 'ready_to_apply') {
+        return {
+          data: null,
+          error: {
+            code: '22023',
+            message: `Import job ${p_import_job_id} is ${job.status}, not ready_to_apply: only a staged import that has not been applied can be cancelled`,
+            details: 'import_not_ready_to_apply',
+          },
+        };
+      }
 
       const stagedRows = (db.staging_import_rows || []).filter(
         (row) =>
@@ -8051,6 +8134,15 @@ export const mockSupabase = {
         practice_exceptions_deleted: archived.length,
         practice_assignments_deleted: series.length,
         games_deleted: games.length,
+        // 20261122010000 (F11 decision D5): the scores of the team's games go first and are counted. A property before
+        // the games' own, so it reads them while they still stand.
+        game_scores_deleted: cascadeDoomed('game_scores', (score) =>
+          (db.game_assignments || []).some(
+            (a) =>
+              String(a.id) === String(score.game_id) &&
+              (sameTeam(a.home_team_id) || sameTeam(a.away_team_id))
+          )
+        ).length,
         game_assignments_deleted: cascadeDoomed(
           'game_assignments',
           (a) => sameTeam(a.home_team_id) || sameTeam(a.away_team_id)

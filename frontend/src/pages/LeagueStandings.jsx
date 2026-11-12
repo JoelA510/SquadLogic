@@ -7,6 +7,8 @@ import { logger } from '../lib/logger.js';
 import { useFeatures } from '../hooks/useFeatures.js';
 import { FEATURE_FLAGS } from '../constants/featureFlags.js';
 import { divisionDisplayName } from '../utils/divisions.js';
+import ScoreNotSavedAlert from '../components/ScoreNotSavedAlert.jsx';
+import { SCORE_NOT_SAVED_HERE, isScoreNotSavableHere } from '../utils/scoreSaveRefusal.js';
 
 const parseScoreInput = (score) => {
   if (score === '' || score === null || score === undefined) return null;
@@ -41,6 +43,7 @@ export default function LeagueStandings() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [updatingGameId, setUpdatingGameId] = useState(null);
+  const [scoreNotSaved, setScoreNotSaved] = useState(/** @type {string | null} */ (null));
 
   const { genderModel, isEnabled } = useFeatures();
   // Score entry is an admin function the league turns on (20261028010000, R6):
@@ -109,6 +112,7 @@ export default function LeagueStandings() {
       });
 
       if (error) throw error;
+      setScoreNotSaved(null);
 
       const persistedHomeScore = getRpcScore(data, 'score_home', hScore);
       const persistedAwayScore = getRpcScore(data, 'score_away', aScore);
@@ -128,7 +132,11 @@ export default function LeagueStandings() {
       if (standingsData) setStandings(standingsData);
     } catch (err) {
       logger.error(err);
-      alert('Failed to update score.');
+      // Said on the page, and in the same words as the Scores page when the save is one this list cannot make (it
+      // reads the earlier games table: utils/scoreSaveRefusal.js).
+      setScoreNotSaved(
+        isScoreNotSavableHere(err) ? SCORE_NOT_SAVED_HERE : 'The score was not saved. Try again.'
+      );
     } finally {
       setUpdatingGameId(null);
     }
@@ -146,6 +154,12 @@ export default function LeagueStandings() {
       </div>
     );
 
+  // One result against an outside club is one game of one own team, so the sum over teams is a count of results.
+  const outsideResultsNotCounted = standings.reduce(
+    (sum, row) => sum + (Number(row.results_not_counted) || 0),
+    0
+  );
+
   return (
     <div className="max-w-7xl mx-auto space-y-8 animate-fadeIn">
       <div className="flex items-center gap-3 mb-6">
@@ -160,6 +174,17 @@ export default function LeagueStandings() {
         <div className="p-4 bg-status-error-bg border border-status-error/30 text-status-error rounded-xl text-sm font-medium">
           {error}
         </div>
+      )}
+
+      {/* What the numbers below leave out (lesson 92: say what a number is a count of). The view counts a result
+          against an outside club only when the organization says so, and says per team how many it left out. */}
+      {outsideResultsNotCounted > 0 && (
+        <p className="text-sm text-text-secondary" data-testid="standings-outside-not-counted">
+          {outsideResultsNotCounted === 1
+            ? '1 result against an outside club is not counted.'
+            : `${outsideResultsNotCounted} results against outside clubs are not counted.`}{' '}
+          An admin can count them in Settings, under Features.
+        </p>
       )}
 
       {/* Standings Tables by Division */}
@@ -242,6 +267,13 @@ export default function LeagueStandings() {
           {canEditScores && '- Score Entry'}
         </h2>
 
+        {/* The list below is still the earlier games table (F11-3 repoints it), so it can differ from the saved
+            schedule the standings above are computed from: said where the list is. */}
+        <p className="mb-4 text-sm text-text-secondary" data-testid="recent-games-source-note">
+          These games are read from the earlier games table, not from the saved schedule, until this
+          page is updated.
+        </p>
+        <ScoreNotSavedAlert message={scoreNotSaved} className="mb-4" />
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {games.map((game) => (
             <div

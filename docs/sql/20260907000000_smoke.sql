@@ -141,7 +141,7 @@ DECLARE
     'field_availability_profile_formats','field_availability_profiles',
     'field_availability_scenario_members','field_blackout_windows',
     'field_blackouts','field_equipment_requirements','field_subunits',
-    'game_assignments','game_slots','games',
+    'game_assignments','game_scores','game_slots','games',
     'practice_assignments','practice_exceptions','practice_lighting_overrides',
     'practice_slots'
   ];
@@ -181,7 +181,13 @@ DECLARE
     -- use of it: the permit, a document that outlives the ground, stays, so the
     -- delete lists the permits it unlinks apart from the bookings (kind 'permit',
     -- disposition 'unlinked') and field_bookings never reads the table.
-    'facility_permit_scopes'
+    'facility_permit_scopes',
+    -- 20261122010000 (F11-2): game_scores joins by its one key into the closure,
+    -- the composite foreign key to game_assignments (NO ACTION, the
+    -- practice_exceptions contract). A field delete cannot destroy a score -- it
+    -- fails with 23503 -- and every score points at a game_assignments row,
+    -- which is read as a booking above.
+    'game_scores'
   ];
   v_def text;
   t text;

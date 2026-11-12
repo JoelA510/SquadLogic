@@ -10,6 +10,8 @@
  * |----------|------------------------------------------------------------|---------------------------------------|
  * | 22023    | `game_published`                                           | 409 `GAME_PUBLISHED`, the game's id   |
  * | 22023    | `game_published_omitted count=<n> ids=<first 50 ids>`      | 409 `GAME_PUBLISHED`, the ids, count  |
+ * | 22023    | `game_scored` (20261122010000: held by its score)          | 409 `GAME_PUBLISHED`, reason `game_scored` |
+ * | 22023    | `game_scored_omitted count=<n> ids=<first 50 ids>`         | 409 `GAME_PUBLISHED`, reason `game_scored_omitted` |
  *
  * The first is the guard trigger refusing a save that moves a Published game in place (the message names the game);
  * the second is the save refusing to leave a Published game out. The database's message is always kept.
@@ -37,7 +39,8 @@ export interface GamePublishedErrorResponse {
   body: {
     status: 'error';
     code: 'GAME_PUBLISHED';
-    reason: 'game_published' | 'game_published_omitted';
+    /** `game_scored` and `game_scored_omitted` since 20261122010000 (F11-2): a game held by its score, the same 409. */
+    reason: 'game_published' | 'game_published_omitted' | 'game_scored' | 'game_scored_omitted';
     message: string;
     /** The games named: the one the trigger refused, or the first 50 the save left out. */
     ids: string[];
@@ -47,7 +50,7 @@ export interface GamePublishedErrorResponse {
 }
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
-const OMITTED = /^game_published_omitted count=(\d+) ids=([0-9a-fA-F,-]*)$/;
+const OMITTED = /^(game_published_omitted|game_scored_omitted) count=(\d+) ids=([0-9a-fA-F,-]*)$/;
 
 export function gamePublishedErrorResponse(error: unknown): GamePublishedErrorResponse | null {
   const e = error as { code?: unknown; details?: unknown; message?: unknown } | null;
@@ -55,31 +58,31 @@ export function gamePublishedErrorResponse(error: unknown): GamePublishedErrorRe
   const message =
     typeof e.message === 'string' && e.message
       ? e.message
-      : 'The save was refused: a game is Published.';
+      : 'The save was refused: a game is Published or has a score.';
 
   const omitted = OMITTED.exec(e.details);
   if (omitted) {
-    const ids = omitted[2] === '' ? [] : omitted[2].split(',');
+    const ids = omitted[3] === '' ? [] : omitted[3].split(',');
     return {
       status: 409,
       body: {
         status: 'error',
         code: 'GAME_PUBLISHED',
-        reason: 'game_published_omitted',
+        reason: omitted[1] as 'game_published_omitted' | 'game_scored_omitted',
         message,
         ids,
-        count: Number(omitted[1]),
+        count: Number(omitted[2]),
       },
     };
   }
-  if (e.details === 'game_published') {
+  if (e.details === 'game_published' || e.details === 'game_scored') {
     const ids = [...new Set((message.match(UUID) ?? []).map((id) => id.toLowerCase()))];
     return {
       status: 409,
       body: {
         status: 'error',
         code: 'GAME_PUBLISHED',
-        reason: 'game_published',
+        reason: e.details,
         message,
         ids,
         count: Math.max(ids.length, 1),

@@ -33,7 +33,7 @@
  * Pure over `db`; `mockSupabaseClient.js` wires {@link mockPersistGameSchedule} into `rpc('persist_game_schedule')`.
  */
 
-import { isRowHeld, publishedWriteRefusal } from './mockGamePublished.js';
+import { isRowHeld, mockGameHoldCode, publishedWriteRefusal } from './mockGamePublished.js';
 import { scheduleWriteRefusal } from './mockSeasons.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -69,7 +69,7 @@ export function mockGameHeldIds(db, ids) {
       .map((id) => String(id).toLowerCase())
   );
   return (db.game_assignments || [])
-    .filter((row) => wanted.has(String(row.id).toLowerCase()) && isRowHeld(row))
+    .filter((row) => wanted.has(String(row.id).toLowerCase()) && isRowHeld(row, db))
     .map((row) => row.id);
 }
 
@@ -276,7 +276,17 @@ export function mockPersistGameSchedule(db, runData, assignments, ctx) {
   };
   const tuples = new Set(rows.map(tupleOf));
   const omitted = [...mineById.values()]
-    .filter((game) => isRowHeld(game) && tupleOf(game) !== null)
+    .filter((game) => isRowHeld(game, db) && tupleOf(game) !== null)
+    .filter((game) => seasonOfGame(game)?.status !== 'completed')
+    .filter((game) => !seasonId || same(seasonOfGame(game)?.id ?? '', seasonId))
+    .filter((game) => !named.includes(String(game.id).toLowerCase()) && !tuples.has(tupleOf(game)))
+    .filter((game) => mockGameHoldCode(game, db) !== 'game_scored')
+    .map((game) => game.id)
+    .sort();
+  // 20261122010000: the held games the save leaves out that are held by a score and not Published, said after the
+  // Published ones, in their own words.
+  const scoredOmitted = [...mineById.values()]
+    .filter((game) => mockGameHoldCode(game, db) === 'game_scored' && tupleOf(game) !== null)
     .filter((game) => seasonOfGame(game)?.status !== 'completed')
     .filter((game) => !seasonId || same(seasonOfGame(game)?.id ?? '', seasonId))
     .filter((game) => !named.includes(String(game.id).toLowerCase()) && !tuples.has(tupleOf(game)))
@@ -287,6 +297,13 @@ export function mockPersistGameSchedule(db, runData, assignments, ctx) {
       '22023',
       `this save leaves out ${omitted.length} Published game(s): a save carries every Published game of its season, unchanged (allow changes to a game first to move or drop it)`,
       `game_published_omitted count=${omitted.length} ids=${omitted.slice(0, 50).join(',')}`
+    );
+  }
+  if (scoredOmitted.length > 0) {
+    return fail(
+      '22023',
+      `this save leaves out ${scoredOmitted.length} game(s) that have a score: a save carries every scored game of its season, unchanged (clear a game's score first to move or drop it)`,
+      `game_scored_omitted count=${scoredOmitted.length} ids=${scoredOmitted.slice(0, 50).join(',')}`
     );
   }
 
@@ -372,7 +389,8 @@ export function mockPersistGameSchedule(db, runData, assignments, ctx) {
   if (completed) return completed;
   const held = publishedWriteRefusal(
     'game_assignments',
-    written.filter(({ before }) => before).map(({ before, after }) => ({ before, after }))
+    written.filter(({ before }) => before).map(({ before, after }) => ({ before, after })),
+    db
   );
   if (held) return held;
 

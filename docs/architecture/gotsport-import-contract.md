@@ -355,7 +355,8 @@ template's names, and nothing else. The season's clock places the times (the job
 
 **A time or a week that cannot be read does not lose the game** (owner, 2026-11-10). A malformed time makes the row a dated
 TIME TBD game (`bad-time`); a Week that cannot be stored is derived from the date (`bad-week`). Both are warnings said at
-the upload and in the preview; they are not staged, because the apply takes only the flags it knows.
+the upload and in the preview, and since `20261122010000` they are staged flags too (the apply's list took them), so
+the saved result and the Games page's banner carry them.
 
 | Staged key(s)                                                            | Becomes                                           | Rule                                                                                        |
 | ------------------------------------------------------------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------- |

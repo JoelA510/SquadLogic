@@ -260,6 +260,27 @@ export async function cancelDeferredImportJob({ supabase, type, importJobId }) {
   });
 
   if (error) {
+    // 20261122010000: the function refuses a job that is not `ready_to_apply` (one applied or cancelled in another
+    // tab). That is not a failure to retry: the job is read, and the answer says what it IS, so the caller can settle
+    // its own state from it. Anything else, and a job that cannot be read, throws as before.
+    if (error.details === 'import_not_ready_to_apply') {
+      const { data: job, error: readError } = await supabase
+        .from('import_jobs')
+        .select('id, status')
+        .eq('id', importJobId)
+        .maybeSingle();
+      if (!readError && job?.status) {
+        const applied = String(job.status).startsWith('completed');
+        return {
+          status: 'not_cancelled',
+          job_status: job.status,
+          applied,
+          message: applied
+            ? 'This import was already applied, in another tab or by someone else, so there was nothing to cancel. It is listed with the finished imports.'
+            : 'This import is no longer waiting to be applied (it was cancelled or closed elsewhere), so there was nothing to cancel. The form has been cleared.',
+        };
+      }
+    }
     throw new Error(error.message || `${type} import cancellation failed`);
   }
   return data;

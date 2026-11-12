@@ -636,7 +636,10 @@ SELECT is(
         'admin_set_games_published', 'get_schedule_audit_log',
         -- 20261121010000: the games import (map, preview and apply, roll back) and the slot a game is placed in: admin RPCs gated
         -- by is_org_admin, so allowed; the import types a demo visitor may start are fenced where every import is (isDemo).
-        'apply_game_import_job', 'ensure_game_slot', 'map_game_import_job', 'rollback_game_import_job'
+        'apply_game_import_job', 'ensure_game_slot', 'map_game_import_job', 'rollback_game_import_job',
+        -- 20261122010000: the standings view's setting read (a boolean of the division's organization; the view calls it as
+        -- its reader): allowed.
+        'standings_counts_outside'
       ])),
     NULL,
     'every function a signed-in caller may execute is on the anonymous list: refused, required, or allowed'
@@ -683,7 +686,10 @@ SELECT is(
         'admin_set_games_published', 'get_schedule_audit_log',
         -- 20261121010000: the games import (map, preview and apply, roll back) and the slot a game is placed in: admin RPCs gated
         -- by is_org_admin, so allowed; the import types a demo visitor may start are fenced where every import is (isDemo).
-        'apply_game_import_job', 'ensure_game_slot', 'map_game_import_job', 'rollback_game_import_job'
+        'apply_game_import_job', 'ensure_game_slot', 'map_game_import_job', 'rollback_game_import_job',
+        -- 20261122010000: the standings view's setting read (a boolean of the division's organization; the view calls it as
+        -- its reader): allowed.
+        'standings_counts_outside'
       ]) n WHERE n NOT IN (SELECT name FROM t_client_fns)),
     NULL,
     'control: every name on the list is still a function a signed-in caller may execute'

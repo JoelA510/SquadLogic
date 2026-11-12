@@ -4,8 +4,6 @@
  * SQL reads), for a placed row and a TIME TBD row alike; a refused row has no payload and its reason; and every row of
  * the shipped fixture stages in the shape the SQL's own shape check accepts.
  */
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { GAME_IMPORT_KEYS } from '../frontend/src/utils/importAllowlist.js';
 import {
@@ -21,6 +19,7 @@ import { stageScheduleChunk } from '../packages/core/src/scheduleImport/index.js
 import { sanitizeImportText } from '../frontend/src/utils/importRows.js';
 import * as edge from '../supabase/functions/_shared/schedule-import.ts';
 import { loadScheduleFixture } from './helpers/scheduleFixtureLoad.js';
+import { GAME_IMPORT_SQL } from './helpers/gameImportSql.js';
 
 const fixture = loadScheduleFixture();
 const parsed = parseScheduleRows({
@@ -105,7 +104,9 @@ describe('a staged games row carries the allowlisted keys and nothing else', () 
         expect(p.start === null && p.end === null, row.rowKey).toBe(true);
       }
       expect(
-        p.flags.every((f) => ['time-ambiguous', 'week-differs'].includes(f)),
+        p.flags.every((f) =>
+          ['time-ambiguous', 'week-differs', 'bad-time', 'bad-week'].includes(f)
+        ),
         row.rowKey
       ).toBe(true);
       expect((p.game_id ?? '').length <= 40, row.rowKey).toBe(true);
@@ -193,7 +194,7 @@ describe('a row with a time and no field is staged as a TIME TBD game with no in
 // instants by their ISO text and not by `timestamptz`'s own parse; it does not twin the refusal codes the SQL accepts for a
 // refused row beyond membership in core's list, nor anything after the shape check (mapping, matching, the plan). What
 // holds the copy to the SQL is the static test below, which reads the migration for the clauses this twin states.
-const TWIN_FLAGS = ['time-ambiguous', 'week-differs'];
+const TWIN_FLAGS = ['time-ambiguous', 'week-differs', 'bad-time', 'bad-week'];
 /** @param {{ source_row_number: number, normalized_payload: any, validation_errors: Array<{ code: string }> }} staged */
 function shapeProblem(staged) {
   const p = staged.normalized_payload;
@@ -305,7 +306,7 @@ describe('every parse outcome stages in a shape the SQL accepts (a JS twin of it
     }
   });
 
-  it('F5: a bad-time row stages as a dated TIME TBD game and a bad-week row with its derived week; the warning is not staged', () => {
+  it('F5: a bad-time row stages as a dated TIME TBD game and a bad-week row with its derived week; each carries its warning as a staged flag (20261122010000)', () => {
     const [badTime] = parseFile([fileRow({ 'Start Time': '25:99' })]);
     const [badWeek] = parseFile([fileRow({ Week: 'abc' })]);
     const t = /** @type {any} */ (toStagedGameRow(/** @type {any} */ (badTime)));
@@ -318,16 +319,23 @@ describe('every parse outcome stages in a shape the SQL accepts (a JS twin of it
       end: null,
       start_time: null,
       end_time: null,
-      flags: [],
+      flags: ['bad-time'],
     });
     const w = /** @type {any} */ (toStagedGameRow(/** @type {any} */ (badWeek)));
-    expect(w.normalized_payload).toMatchObject({ status: 'ok', week_index: 1, flags: [] });
-    // CONTROL: a flag the SQL knows IS staged, and staging the parse's warning would be refused by the SQL's shape check.
+    expect(w.normalized_payload).toMatchObject({
+      status: 'ok',
+      week_index: 1,
+      flags: ['bad-week'],
+    });
+    // CONTROL: another flag the SQL knows is staged the same way, and one it does not know is refused by its shape check.
     const [differs] = parseFile([fileRow({ Week: '3' })]);
     const d = /** @type {any} */ (toStagedGameRow(/** @type {any} */ (differs)));
     expect(d.normalized_payload.flags).toEqual(['week-differs']);
     expect(
-      shapeProblem({ ...t, normalized_payload: { ...t.normalized_payload, flags: ['bad-time'] } })
+      shapeProblem({
+        ...t,
+        normalized_payload: { ...t.normalized_payload, flags: ['games-swapped'] },
+      })
     ).toBe('flags');
   });
 
@@ -386,10 +394,7 @@ describe('every parse outcome stages in a shape the SQL accepts (a JS twin of it
   });
 
   it('the SQL still states the clauses the twin copies (so the twin cannot drift from it)', () => {
-    const migration = readFileSync(
-      path.join(process.cwd(), 'supabase/migrations/20261121010000_game_import.sql'),
-      'utf8'
-    );
+    const migration = GAME_IMPORT_SQL;
     const at = migration.indexOf("NOT (r.status IN ('ok', 'tbd') AND r.gdate IS NOT NULL");
     expect(at).toBeGreaterThan(0);
     const check = migration.slice(at, migration.indexOf('LIMIT 1', at));
@@ -399,7 +404,7 @@ describe('every parse outcome stages in a shape the SQL accepts (a JS twin of it
       'r.start_time IS NOT NULL AND r.end_time IS NOT NULL AND r.start_ts IS NOT NULL AND r.end_ts IS NOT NULL',
       'r.end_ts > r.start_ts',
       'ELSE r.start_ts IS NULL AND r.end_ts IS NULL END',
-      "r.flags <@ ARRAY['time-ambiguous', 'week-differs']",
+      "r.flags <@ ARRAY['time-ambiguous', 'week-differs', 'bad-time', 'bad-week']",
       // the labels and keys a blank cell would leave empty (PR 6 fix round 1, Codex P2)
       "COALESCE(r.division_key, '') <> '' AND COALESCE(r.home_key, '') <> '' AND COALESCE(r.away_key, '') <> ''",
       "COALESCE(r.division_label, '') <> '' AND COALESCE(r.home_label, '') <> '' AND COALESCE(r.away_label, '') <> ''",

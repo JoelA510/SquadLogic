@@ -565,7 +565,7 @@ row of another.
 
 Depends on: F11-1 and PR 5, deployed (PR 5 adds `teams.is_external` and `apply_game_import_job`).
 
-- [ ] B1 (L) Migration: `game_scores` with the composite key, RLS and the completed-season trigger; `update_game_score`
+- [x] B1 (L) Migration: `game_scores` with the composite key, RLS and the completed-season trigger; `update_game_score`
       replaced; `game_is_held` gains scores; `game_scored` and `game_scored_omitted`; `admin_cancel_game_assignment` and
       `admin_delete_team` (deletes the team's scores first and counts them, `scores_deleted` in the audit metadata); `rollback_game_import_job` names scored
       games; `apply_game_import_job` skips them (`skipped-scored`); `view_league_standings` rebuilt (excludes outside clubs;
@@ -578,13 +578,73 @@ Depends on: F11-1 and PR 5, deployed (PR 5 adds `teams.is_external` and `apply_g
       includes it, and an outside club has no row (each paired with its control); the legacy copy matches, refuses, and does
       nothing on an empty table. Rewritten existing files: `game_score_rpc.sql` (seeded through the save),
       `season_schedule_readonly.sql` (adds the score table).
-- [ ] B2 (S) Mock client mirrors `game_scores`, the hold and the standings. Test `tests/mockGameScores.test.js`: the pgTAP's
+- [x] B2 (S) Mock client mirrors `game_scores`, the hold and the standings. Test `tests/mockGameScores.test.js`: the pgTAP's
       expected rows through the mock equal the SQL's (lesson 77).
-- [ ] B3 (S) Page: `moveGameTo`, the cancel handler and the pin set refuse and carry scored games, with the sentence. Test
+- [x] B3 (S) Page: `moveGameTo`, the cancel handler and the pin set refuse and carry scored games, with the sentence. Test
       `tests/gameGridScoredGuards.test.jsx` beside PR 3's published guards.
-- [ ] B4 (S) The organization toggle in the flag registry (`standings_count_outside_results`, off unless turned on) and the
+- [x] B4 (S) The organization toggle in the flag registry (`standings_count_outside_results`, off unless turned on) and the
       page's "N results against outside clubs are not counted" sentence. Test `tests/standingsOutsideClubs.test.jsx`.
-- [ ] B5 (S) Docs: `docs/security/rls-policies.md`, `docs/architecture/persistence-rpc-layer.md`, `CHANGELOG.md`, the lesson.
+- [x] B5 (S) Docs: `docs/security/rls-policies.md`, `docs/architecture/persistence-rpc-layer.md`, `CHANGELOG.md`, the lesson.
+
+**As built (2026-11-11; migration `20261122010000_game_scores.sql`; the pull request has the detail).** B1 to B5 are
+done. What differs from the text above, each a decision of the build:
+
+- The audit key of a deleted team's scores is `game_scores_deleted`, not `scores_deleted`: the repository's census
+  (`supabase/tests/admin_delete_team_exceptions.sql`) requires every `*_deleted` counter to name a table.
+- `game_hold_code(uuid)` is added (internal). It asks the one predicate and then says why a game is held, so each
+  refusal can say `game_scored` without a second place deciding "held". A held game that is Published is always
+  refused as Published first, whether or not it also has a score.
+- Ten functions are replaced whole, not three: `game_held_ids`, the guard, `persist_game_schedule` (the omission
+  check's `game_scored_omitted`), `admin_cancel_game_assignment`, `admin_delete_team`, `update_game_score`,
+  `apply_game_import_job`, `rollback_game_import_job`, and with them `cancel_ready_import_job` and
+  `get_schedule_tbd` (the expansion plan's notes for the next migration). 37 harness plants were re-aimed.
+- `view_league_standings` gains one column, last: `results_not_counted`, which the Standings page sums for its
+  sentence. `anon` can no longer read the view at all (it reads `game_scores`, which `anon` has no grant on).
+- `copy_legacy_game_scores()` stays in the catalogue as an internal function (no client role may call it), so the
+  legacy copy can be tested after the migration has run; F11-5 drops it with the legacy table.
+- `update_game_score` takes the organization's `game_published` advisory lock, so a save that leaves a game out and
+  a score entered on it cannot both succeed.
+- The mock keeps a declared legacy arm (`mockGameScores.js`): an id that names only a row of the legacy `games`
+  table is scored as before, and a stored standings row stands for a team with no result in `game_scores`, because
+  the Scores and Standings pages read the legacy table until F11-3. **On a real database the Scores page can score
+  nothing between F11-2 and F11-3** (it lists legacy rows, and it saves one cell at a time, which D10 refuses):
+  F11-3's C3 must make it list saved games and send both scores together.
+- **F11-3's C3 is BLOCKING for turning score entry on (2026-11-12).** No league may be told to turn `score_entry`
+  on until F11-3 has made the Scores page list saved games and send both scores together. Until then the page says so
+  itself: a save the database refuses for either reason shows an alert in words ("The score was not saved. Scores are
+  now kept against the saved schedule ... it cannot save a score yet. Nothing was changed."), `tests/scoresPage.test.jsx`.
+- **To remove after this migration is deployed (noted 2026-11-12):** the fallback in `readScheduleTbd`
+  (`frontend/src/utils/scheduleTbdClient.js`), which reads `game_date` from the table when `get_schedule_tbd` answers
+  rows without that key (the body before `20261122010000`). Once production runs the new body it is dead code.
+- **Fix round 1 (2026-11-12, Codex on #725, two findings, both taken).** (1) `useGameAssignments` paged `game_scores`
+  with the helper's default order, `id`, a column the table does not have: PostgREST refuses it, so a saved schedule
+  would not have loaded on a real database. It orders by `game_id`; the mock's score rows no longer carry an `id` of
+  their own; and `tests/pagedReadOrderColumns.test.js` holds every paged read's order column, every read of the three
+  score relations, and the mock's row keys for them, to the columns the migrations and the catalogue snapshot give.
+  (2) The mock rolled an import back over a scored game and left its score behind; it refuses as the SQL does. Its
+  siblings were run against a scored game (`tests/mockScoredGameDeleters.test.js`): cancel, a direct delete or move,
+  delete team and the game save already matched; a confirmed `admin_delete_field` did not (it took a held game, a
+  Published one too) and now asks the guard first; the field-import rollback and slot removal stay unmirrored, said in
+  `mockGamePublished.js`.
+- **Review round (2026-11-12, the one adversarial review of #725, ten findings, all taken).**
+  R1: `standings_counts_outside` ran as its caller, who may not execute `org_flag`, so every member's read of the
+  standings failed (42501) once a result against an outside club existed; it is a definer that answers only for a
+  member of the division's organization, and `game_scores.sql` now uses everything the migration grants AS the role
+  `authenticated`, the list read from the catalogue. R3: a score is SET only on a game of its season's current run
+  (22023 `game_not_current`: a score on a hidden game would hold a game no screen shows); a clear is never refused
+  for it, and the legacy copy matches only current-run games. R4: a score is CLEARED whatever `score_entry` says
+  (entering stays gated), so turning the feature off cannot leave games held. R2 and R7: the Games page reads a run's
+  games with their score in ONE bounded read (`game_assignments` selecting `game_scores(game_id)`), and reads the
+  games alone when the database has no `game_scores` yet. R5: the Standings page's score entry shows the Scores page's
+  alert (no `window.alert`) and says its list is of the earlier table. R6: the import preview lists a kept-and-changed
+  row once. R8 and R10: a cancel refused for a job that is no longer waiting settles from the job, in words.
+  R9: `isHeld` and `holdReason` take the game alone.
+- **To remove after this migration is deployed (noted 2026-11-12), beside the `readScheduleTbd` fallback above:** the
+  fallback in `useGameAssignments` (`fetchRunGames`) that reads the games without scores when PostgREST answers
+  PGRST200, PGRST205 or 42P01 for the embed (the client is deployed at merge, the migration applied later). The
+  Standings page needs none (`results_not_counted` missing reads as 0), `current_game_runs` has no reader yet.
+- The plan's parity test for `current_game_runs` against `useSchedulerRun` stays C5 of F11-3; F11-2 holds the view
+  and the mock's copy to the same cases (`supabase/tests/game_scores.sql`, `tests/mockGameScores.test.js`).
 
 Plants: the carry removed from the save (the "score survives" case); `game_is_held` ignoring scores (the "scored game cannot
 be moved" case); the standings view counting an outside opponent (the "excluded by default" case). Stop and report if
@@ -601,7 +661,9 @@ becomes "create the `games` view" and is smaller.
       the file, a team in two games sees two, a moved game appears once at its new time.
 - [ ] C2 (M) The feed (`teamFeed.ts`) reads the same. Test: the existing `ics-feed_test.ts` suite plus a case from a saved
       schedule; a failed read is still reported, not swallowed.
-- [ ] C3 (M) Dashboard, Player record, Scores and Standings read the saved schedule and scores. Tests: the existing
+- [ ] C3 (M) **BLOCKING for turning score entry on (2026-11-12; see "As built" under F11-2):** the Scores page lists
+      saved games and sends both scores of a game together (it saves one cell at a time today, which the database
+      refuses), and the mock's legacy score arm and stored standings rows go. Dashboard, Player record, Scores and Standings read the saved schedule and scores. Tests: the existing
       `tests/scoresPage.test.jsx`, `tests/leagueStandingsSeason.test.jsx` (re-seeded through the save), plus a Dashboard case
       (count and list from a saved schedule).
 - [ ] C4 (S) The census `tests/gamesTableReaders.test.js` (from the code); it is red while any reader names `games`.

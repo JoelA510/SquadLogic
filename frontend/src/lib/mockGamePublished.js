@@ -29,13 +29,13 @@
  *     its test oracle (`tests/helpers/gameIdentityRefusal.js`), not by this file;
  *   - the exemptions of the trigger (a job with no signed-in user, the cascade of a deleted organization): the
  *     mock's direct writes are always the signed-in app's;
- *   - the mock's OWN cascades: `admin_delete_field` (confirmed), the field-import rollback and slot removal delete
- *     or null the field of `game_assignments` without asking the guard, where the database raises 22023
- *     `game_published` from the cascade (after its booking check refuses a booked field first). A screen built or
- *     E2E-tested in mock mode on a Published game must not rely on those deletes succeeding (code review, #707;
- *     not mirrored: the Games page (PR 3) shows Published games but offers no way to delete a field, venue or
- *     slot, and its E2E feature deletes none, so it does not depend on them; the cascades stay unmirrored, statically
- *     reviewed);
+ *   - two of the mock's OWN cascades: the field-import rollback and slot removal delete or null the field of
+ *     `game_assignments` without asking the guard, where the database raises 22023 `game_published` (or, since
+ *     20261122010000, `game_scored`) from the cascade. A screen built or E2E-tested in mock mode on a held game must
+ *     not rely on those deletes succeeding (code review, #707; not mirrored: no screen that shows a schedule offers
+ *     either, and no E2E feature runs one over a held game; statically reviewed). The third, a confirmed
+ *     `admin_delete_field`, IS mirrored since 20261122010000: it asks the guard before its first write
+ *     (`tests/mockScoredGameDeleters.test.js`);
  *   - row locking and the per-organization lock, and the SLA01 rollback of a failed audit write.
  *
  * Pure over `db` so a test can drive it directly; `mockSupabaseClient.js` wires it into `rpc()` and the write paths.
@@ -106,17 +106,43 @@ function sameInstantOrText(field, a, b) {
   return same(a, b);
 }
 
-const refusal = (message) => fail('22023', message, 'game_published');
+const refusal = (message, detail = 'game_published') => fail('22023', message, detail);
 
 /**
- * Whether a stored game is held where it is: the mock's copy of `game_held_ids` (today: Published). Every refusal in
- * this file asks it, and `mockGameIdentity.js` imports it, so the mock has one place to change when a score also holds a
- * game (F11-2).
+ * Whether a stored game has a score: a row of `game_scores` exists exactly when it does (20261122010000).
  *
  * @param {Record<string, any> | null | undefined} row
+ * @param {any} db
  */
-export function isRowHeld(row) {
-  return row?.published === true;
+export function isRowScored(row, db) {
+  return Boolean(row) && (db?.game_scores || []).some((score) => same(score.game_id, row?.id));
+}
+
+/**
+ * Whether a stored game is held where it is: the mock's copy of `game_held_ids`, Published OR scored since
+ * 20261122010000 (F11-2). Every refusal in this file asks it, and `mockGameIdentity.js` and `mockGameScores.js` import
+ * it, so the mock has one place that decides. `db` is needed for the score: a caller that leaves it out is asking
+ * about a row with no database around it, and gets Published alone.
+ *
+ * @param {Record<string, any> | null | undefined} row
+ * @param {any} [db]
+ */
+export function isRowHeld(row, db) {
+  return row?.published === true || isRowScored(row, db);
+}
+
+/**
+ * The words for a held game: the database's `game_hold_code`. A held game that is Published is `game_published`
+ * (changes to it must be allowed first, whether or not it also has a score); a held game that is not is held by its
+ * score. Null for a game that is not held: it never decides whether a game is held.
+ *
+ * @param {Record<string, any> | null | undefined} row
+ * @param {any} db
+ * @returns {'game_published' | 'game_scored' | null}
+ */
+export function mockGameHoldCode(row, db) {
+  if (!isRowHeld(row, db)) return null;
+  return row?.published === true ? 'game_published' : 'game_scored';
 }
 
 /**
@@ -125,13 +151,21 @@ export function isRowHeld(row) {
  *
  * @param {string} table
  * @param {Array<{ before: Record<string, any>, after: Record<string, any> | null }>} pairs
+ * @param {any} [db] - the database the rows are of (for the score of a row; see {@link isRowHeld})
  * @returns {{ data: null, error: object } | null}
  */
-export function publishedWriteRefusal(table, pairs) {
+export function publishedWriteRefusal(table, pairs, db) {
   if (table !== 'game_assignments') return null;
   for (const { before, after } of pairs || []) {
-    if (!isRowHeld(before)) continue;
+    if (!isRowHeld(before, db)) continue;
+    const scoredOnly = mockGameHoldCode(before, db) === 'game_scored';
     if (after == null) {
+      if (scoredOnly) {
+        return refusal(
+          `Game ${before.id} has a score and cannot be deleted: clear its score first`,
+          'game_scored'
+        );
+      }
       return refusal(
         `Game ${before.id} is Published and cannot be deleted: allow changes to it first`
       );
@@ -141,6 +175,12 @@ export function publishedWriteRefusal(table, pairs) {
         (field) => !sameInstantOrText(field, before[field] ?? null, after[field] ?? null)
       )
     ) {
+      if (scoredOnly) {
+        return refusal(
+          `Game ${before.id} has a score and cannot be moved: clear its score first`,
+          'game_scored'
+        );
+      }
       return refusal(
         `Game ${before.id} is Published and cannot be moved: allow changes to it first`
       );
@@ -159,15 +199,26 @@ export function publishedWriteRefusal(table, pairs) {
 export function publishedRpcRefusal(db, what) {
   if (what.kind === 'cancel') {
     const game = (db.game_assignments || []).find((row) => same(row.id, what.id));
-    if (isRowHeld(game)) {
+    if (isRowHeld(game, db)) {
+      if (mockGameHoldCode(game, db) === 'game_scored') {
+        return refusal(
+          `game ${game.id} has a score and cannot be cancelled: clear its score first`,
+          'game_scored'
+        );
+      }
       return refusal(
         `game ${game.id} is Published and cannot be cancelled: allow changes to it first`
       );
     }
     return null;
   }
+  // 20261122010000 (F11 decision D5): a game held ONLY by its score does not refuse the delete (it goes with the team,
+  // its score first); the count is of the held games whose hold is Published.
   const count = (db.game_assignments || []).filter(
-    (row) => isRowHeld(row) && (same(row.home_team_id, what.id) || same(row.away_team_id, what.id))
+    (row) =>
+      isRowHeld(row, db) &&
+      mockGameHoldCode(row, db) !== 'game_scored' &&
+      (same(row.home_team_id, what.id) || same(row.away_team_id, what.id))
   ).length;
   if (count > 0) {
     return refusal(

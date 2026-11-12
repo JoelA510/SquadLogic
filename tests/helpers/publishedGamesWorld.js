@@ -124,9 +124,10 @@ export function savedGames(overrides = {}) {
  * Seed the mock database from nothing: the club, its admin, two venues and two fields,
  * the slots, one completed game run and its games.
  *
- * @param {{ games?: Array<Record<string, any>>, members?: boolean }} [options]
+ * @param {{ games?: Array<Record<string, any>>, members?: boolean, scoredIds?: string[] }} [options] - `scoredIds`:
+ *   the games that have a score (a row of `game_scores` each, 2-1)
  */
-export function seedWorld({ games = savedGames(), members = true } = {}) {
+export function seedWorld({ games = savedGames(), members = true, scoredIds = [] } = {}) {
   // The mock keeps the state its last write saved on `window`, and merges it over whatever is stored: a game a
   // previous test published would still be published here. Dropping it leaves the seed and nothing else.
   sessionStorage.clear();
@@ -170,6 +171,16 @@ export function seedWorld({ games = savedGames(), members = true } = {}) {
       },
     ],
     game_assignments: games,
+    game_scores: games
+      .filter((game) => scoredIds.includes(game.id))
+      .map((game) => ({
+        game_id: game.id,
+        organization_id: ORG,
+        home_team_id: game.home_team_id,
+        away_team_id: game.away_team_id,
+        score_home: 2,
+        score_away: 1,
+      })),
     audit_log: [],
   });
   sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify({ user: { id: ADMIN_ID } }));

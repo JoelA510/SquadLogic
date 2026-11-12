@@ -146,9 +146,8 @@ const REGISTRY = {
     why: "total_teams counts the organization's own teams of the season (latest definition 20261108010000:2118)",
   },
   'sql:view:view_league_standings': {
-    class: 'pending',
-    pr: 'F11-2',
-    why: "DEFERRED to the F11 plan (policy ii of 4.6; its F11-2 rebuilds the view over game_scores and excludes outside clubs). Left alone here by the F11 plan's binding amendment: it still reads the empty legacy games, so no path feeds an outside club's result into it today (pinned below)",
+    class: 'exclude',
+    why: "20261122010000 (F11-2) rebuilt it over game_scores: a row for every own team and none for an outside club, and a result against an outside club counts for the own team only when standings_counts_outside(division) says so (the organization's setting, off unless turned on)",
   },
   'sql:fn:sync_schedule_tbd_practices': {
     class: 'exclude',
@@ -710,16 +709,33 @@ describe('not applicable: an outside club in two games at once is legal', () => 
   });
 });
 
-describe('standings: deferred to the F11 plan, and nothing feeds an outside club into them today', () => {
+describe('standings: computed from scores since F11-2, and an outside club is never in them', () => {
   const files = migrationFiles();
   const latest = latestSqlDefinitions(files);
 
-  it('the standings view is not rebuilt by this change and still reads the legacy games table', () => {
+  it('the standings view is the one 20261122010000 rebuilt: over game_scores, own teams only, no legacy table', () => {
     const view = latest.get('sql:view:view_league_standings');
     expect(view, 'the view exists').toBeTruthy();
-    expect(view?.file.startsWith('20261023010000')).toBe(true);
-    expect(view?.text).toMatch(/\bgame_results\b|\bgames\b/);
-    expect(view?.text).not.toMatch(/\bis_external\b/);
+    expect(view?.file.startsWith('20261122010000')).toBe(true);
+    expect(view?.text).toMatch(/\bpublic\.game_scores\b/);
+    expect(view?.text).not.toMatch(/\bpublic\.games\b/);
+    // Both halves of the policy: no row for an outside club, and its results counted only by the setting.
+    expect(view?.text).toMatch(/WHERE NOT t\.is_external/);
+    expect(view?.text).toMatch(
+      /NOT opp\.is_external OR public\.standings_counts_outside\(own\.division_id\)/
+    );
+  });
+
+  it('CONTROL: the view before it read the legacy table and excluded nobody', () => {
+    const before = files
+      .filter((f) => f.name < '20261122010000')
+      .map(
+        (f) => f.sql.match(/CREATE OR REPLACE VIEW public\.view_league_standings[\s\S]*?;/g) ?? []
+      )
+      .flat()
+      .pop();
+    expect(before).toMatch(/\bgames\b/);
+    expect(before).not.toMatch(/\bis_external\b/);
   });
 
   it('no function of the import writes a score, a legacy game or a result', () => {
@@ -732,7 +748,7 @@ describe('standings: deferred to the F11 plan, and nothing feeds an outside club
       const body = latest.get(`sql:fn:${name}`)?.text ?? '';
       expect(body.length, `${name} exists`).toBeGreaterThan(200);
       expect(body, name).not.toMatch(
-        /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:public\.)?(?:games|game_results)\b/i
+        /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:public\.)?(?:games|game_results|game_scores)\b/i
       );
       expect(body, name).not.toMatch(/\bscore_(?:home|away)\b|update_game_score/i);
     }

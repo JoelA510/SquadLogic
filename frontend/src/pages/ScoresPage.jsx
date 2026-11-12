@@ -11,6 +11,8 @@ import { useFeatures } from '../hooks/useFeatures.js';
 import { divisionDisplayName } from '../utils/divisions.js';
 import { logger } from '../lib/logger.js';
 import LoadingScreen from '../components/LoadingScreen.jsx';
+import ScoreNotSavedAlert from '../components/ScoreNotSavedAlert.jsx';
+import { SCORE_NOT_SAVED_HERE, isScoreNotSavableHere } from '../utils/scoreSaveRefusal.js';
 
 /**
  * Scores & Results — spreadsheet-style score entry over past games,
@@ -24,6 +26,7 @@ export default function ScoresPage() {
   const { genderModel } = useFeatures();
   const toast = useToast();
   const [games, setGames] = useState([]);
+  const [cannotSave, setCannotSave] = useState(false);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const orgId = currentOrganization?.id;
@@ -93,11 +96,17 @@ export default function ScoresPage() {
           p_score_away: scoreAway,
         });
         if (error) throw error;
+        setCannotSave(false);
         toast('Score saved', 'success');
       } catch (err) {
         logger.error('[ScoresPage] score update failed:', err);
         setGames((current) => current.map((game) => (game.id === gameId ? previous : game)));
-        toast('Failed to save score', 'warning');
+        // Since 20261122010000 a score is kept against the SAVED schedule and both scores are entered together,
+        // while this page still lists the earlier games table and saves one cell at a time (it is repointed by F11-3
+        // of docs/changes/2026-11-06-games-table-source-of-truth.md). The database then answers "not found" or "one
+        // score without the other": said here in words that stay on the page, because trying again cannot work.
+        if (isScoreNotSavableHere(err)) setCannotSave(true);
+        else toast('Failed to save score', 'warning');
       }
     },
     [games, orgId, toast, isCompletedSeasonGame]
@@ -184,6 +193,10 @@ export default function ScoresPage() {
         />
       }
     >
+      <ScoreNotSavedAlert
+        message={cannotSave ? SCORE_NOT_SAVED_HERE : null}
+        className="mx-4 mt-3"
+      />
       {hasReadOnlyGames && (
         <p
           role="note"

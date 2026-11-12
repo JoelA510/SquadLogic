@@ -24,13 +24,11 @@ import {
   DUPLICATE_TARGET_MESSAGE,
   handleGameImportRpc,
 } from '../frontend/src/lib/mockGameImport.js';
+import { GAME_IMPORT_SQL } from './helpers/gameImportSql.js';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PGTAP = readFileSync(path.join(REPO, 'supabase/tests/game_import_round4.sql'), 'utf8');
-const MIGRATION = readFileSync(
-  path.join(REPO, 'supabase/migrations/20261121010000_game_import.sql'),
-  'utf8'
-);
+const MIGRATION = GAME_IMPORT_SQL;
 /** A number asserted here must be asserted, the same, by the pgTAP file. */
 const inPgtap = (text) => expect(PGTAP).toContain(text);
 

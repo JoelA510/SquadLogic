@@ -50,6 +50,7 @@ import {
 } from '../frontend/src/utils/schedulerRunFilters.js';
 import { summarizeTeamSizeReview } from '../frontend/src/utils/teamSizeReview.js';
 import { summarizePlacementReview } from '../frontend/src/utils/placementReview.js';
+import { GAME_IMPORT_SQL } from './helpers/gameImportSql.js';
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({ supabase: { from: vi.fn() } }));
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({ useOrganization: vi.fn() }));
@@ -60,10 +61,7 @@ const { useOrganization } = await import('../frontend/src/contexts/OrganizationC
 const { useTeamSummary } = await import('../frontend/src/hooks/useTeamSummary.js');
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const MIGRATION = readFileSync(
-  path.join(REPO, 'supabase/migrations/20261121010000_game_import.sql'),
-  'utf8'
-);
+const MIGRATION = GAME_IMPORT_SQL;
 
 const ORG = 'org-a';
 const SEASON = 'season-a';

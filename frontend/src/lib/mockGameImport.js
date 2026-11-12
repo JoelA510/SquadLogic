@@ -46,6 +46,7 @@ import {
 import { carryTeamRunResults } from '@squadlogic/core/utils/teamRunResults.js';
 import { sanitizeImportText } from '../utils/importRows.js';
 import { mockGameHeldIds } from './mockGameIdentity.js';
+import { mockGameHoldCode } from './mockGamePublished.js';
 
 export const GAME_IMPORT_RPCS = Object.freeze([
   'map_game_import_job',
@@ -235,7 +236,11 @@ function ensureGameSlot(db, params, ctx, env) {
 const FLAG_MESSAGE = (code) =>
   code === 'time-ambiguous'
     ? 'The clocks repeat this time on its date; the first occurrence was taken.'
-    : 'The week is not the week the date falls in.';
+    : code === 'bad-time'
+      ? 'The time could not be read: the game is a TIME TBD game on its date.'
+      : code === 'bad-week'
+        ? 'The Week could not be read or stored: the week was taken from the date.'
+        : 'The week is not the week the date falls in.';
 
 export const COLLISION_MESSAGE =
   "A game this file does not move already stands on this place, and this row's Game ID (or the lack of one) does not name it. Nothing is written for the row.";
@@ -1078,6 +1083,9 @@ function applyJob(db, job, dry, ctx, env) {
   for (const r of refusedRows) reasons[r.reason] = (reasons[r.reason] ?? 0) + 1;
   const skippedRows = rows.filter((r) => r.outcome === 'skipped');
   // The held games a row would have changed or taken out: a placed row that moves one, a TIME TBD row for one.
+  // 20261122010000: a held game that is not Published is held by its score (the database's game_hold_code).
+  const skipReasonOf = (game) =>
+    mockGameHoldCode(game, db) === 'game_scored' ? 'skipped-scored' : 'skipped-published';
   const heldSkips = [
     ...placed
       .filter((p) => p.verdict === 'skip-held')
@@ -1086,12 +1094,14 @@ function applyJob(db, job, dry, ctx, env) {
         rowKey: p.r.rowKey,
         gameId: p.r.gameId,
         game: p.match.id,
+        reason: skipReasonOf(p.match),
       })),
     ...heldSkipTbd.map((t) => ({
       rowNumber: t.r.rowNumber,
       rowKey: t.r.rowKey,
       gameId: t.r.gameId,
       game: t.ga.id,
+      reason: skipReasonOf(t.ga),
     })),
   ].sort((a, b) => a.rowNumber - b.rowNumber);
   const result = {
@@ -1112,7 +1122,12 @@ function applyJob(db, job, dry, ctx, env) {
       updated: updates.length,
       unchanged: placed.filter((p) => p.verdict === 'unchanged').length,
       repointed: carry.length,
-      skipped: heldSkips.length > 0 ? { 'skipped-published': heldSkips.length } : {},
+      skipped: Object.fromEntries(
+        ['skipped-published', 'skipped-scored']
+          .map((reason) => ({ reason, count: heldSkips.filter((h) => h.reason === reason).length }))
+          .filter(({ count }) => count > 0)
+          .map(({ reason, count }) => [reason, count])
+      ),
     },
     time_tbd: {
       inserted: tbdIns.length,
@@ -1173,7 +1188,7 @@ function applyJob(db, job, dry, ctx, env) {
         row_key: h.rowKey,
         game_id: h.gameId,
         game: h.game,
-        reason: 'skipped-published',
+        reason: h.reason,
       })),
     },
     ids: { run_id: null, team_run_ids: [] },
@@ -1585,7 +1600,10 @@ function rollbackJob(db, job, ctx, env) {
         !now ||
         imageOf(now) !== imageOf(r.applied_payload) ||
         !run ||
-        !same(now.run_id ?? '', run.id)
+        !same(now.run_id ?? '', run.id) ||
+        // 20261122010000: a score entered on a game the import wrote is a change since (the SQL's EXISTS over
+        // game_scores). The rollback never deletes a score, and never moves a game under one.
+        (db.game_scores || []).some((score) => same(score.game_id, now.id))
       );
     })
     .map((r) => r.target_id)
@@ -1606,7 +1624,7 @@ function rollbackJob(db, job, ctx, env) {
   if (changed.length + changedTbd.length > 0) {
     return fail(
       '22023',
-      `The import cannot be rolled back: ${changed.length + changedTbd.length} game(s) (placed or TIME TBD) it wrote were changed, cancelled, had changes allowed or were saved into a later run since`,
+      `The import cannot be rolled back: ${changed.length + changedTbd.length} game(s) (placed or TIME TBD) it wrote were changed, cancelled, given a score, had changes allowed or were saved into a later run since`,
       `game_import_changed count=${changed.length + changedTbd.length} ids=${changed.slice(0, LISTED_IDS).join(',')}` +
         (changedTbd.length > 0 ? ` tbd_ids=${changedTbd.slice(0, LISTED_IDS).join(',')}` : '')
     );

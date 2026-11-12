@@ -1223,7 +1223,9 @@
               "start": null,
               "end": null,
               "week_index": 1,
-              "flags": [],
+              "flags": [
+                "bad-time"
+              ],
               "division": "U05 Boys",
               "division_key": "u05 boys",
               "venue": "Venue A",
@@ -1262,7 +1264,9 @@
               "start": null,
               "end": null,
               "week_index": 1,
-              "flags": [],
+              "flags": [
+                "bad-time"
+              ],
               "division": "U05 Boys",
               "division_key": "u05 boys",
               "venue": "Venue A",
@@ -1301,7 +1305,9 @@
               "start": "2026-10-24T09:00:00-07:00",
               "end": "2026-10-24T10:00:00-07:00",
               "week_index": 7,
-              "flags": [],
+              "flags": [
+                "bad-week"
+              ],
               "division": "U05 Boys",
               "division_key": "u05 boys",
               "venue": "Venue A",

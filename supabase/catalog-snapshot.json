@@ -62,6 +62,7 @@
     "check_password_length_on_auth_users() returns trigger",
     "coach_practice_preferences_enforce_tenancy() returns trigger",
     "coach_team_requests_same_season() returns trigger",
+    "copy_legacy_game_scores() returns jsonb",
     "create_import_job(p_organization_id uuid, p_import_type text, p_file_name text, p_season_settings_id uuid) returns import_jobs",
     "create_org_invite(p_org_id uuid, p_role text, p_expires_in interval) returns TABLE(code text, expires_at timestamp with time zone)",
     "create_team_calendar_token() returns trigger",
@@ -103,6 +104,7 @@
     "finalize_practice_preference_import_job(p_import_job_id uuid, p_validation_errors jsonb) returns jsonb",
     "game_assignments_published_guard() returns trigger",
     "game_held_ids(p_game_ids uuid[]) returns SETOF uuid",
+    "game_hold_code(p_game_id uuid) returns text",
     "game_import_image(p_row jsonb) returns jsonb",
     "game_import_row_unchanged(p_now jsonb, p_applied jsonb) returns boolean",
     "game_is_held(p_game_id uuid) returns boolean",
@@ -193,6 +195,7 @@
     "season_settings_cutoff_guard() returns trigger",
     "season_settings_default_program() returns trigger",
     "set_team_coaches(p_team_id uuid, p_lead_coach_id uuid, p_assistant_coach_ids uuid[], p_effective_on date, p_via text) returns jsonb",
+    "standings_counts_outside(p_division_id uuid) returns boolean",
     "start_demo_session() returns jsonb",
     "start_demo_session(p_season text) returns jsonb",
     "sync_player_team_id() returns trigger",
@@ -256,6 +259,7 @@
     "field_subunits|Field Subunits: members select|SELECT|PERMISSIVE|authenticated|329e2d3f55431b537449fa86bf6fcc97",
     "fields|Fields: members select|SELECT|PERMISSIVE|authenticated|329e2d3f55431b537449fa86bf6fcc97",
     "game_assignments|Game Assignments: members access|SELECT|PERMISSIVE|authenticated|329e2d3f55431b537449fa86bf6fcc97",
+    "game_scores|game_scores_select_member|SELECT|PERMISSIVE|authenticated|329e2d3f55431b537449fa86bf6fcc97",
     "game_slots|game_slots_delete_admin|DELETE|PERMISSIVE|authenticated|7a94d7e552748f3f10fa047fe9031f19",
     "game_slots|game_slots_insert_admin|INSERT|PERMISSIVE|authenticated|406e9d29003a31f9c703e7433aa37532",
     "game_slots|game_slots_select_member|SELECT|PERMISSIVE|authenticated|329e2d3f55431b537449fa86bf6fcc97",
@@ -356,6 +360,7 @@
     "CREATE TRIGGER game_assignments_published_guard BEFORE DELETE OR UPDATE ON public.game_assignments FOR EACH ROW EXECUTE FUNCTION game_assignments_published_guard()",
     "CREATE TRIGGER game_assignments_readonly_when_completed BEFORE INSERT OR DELETE OR UPDATE ON public.game_assignments FOR EACH ROW EXECUTE FUNCTION season_schedule_readonly_when_completed()",
     "CREATE TRIGGER game_assignments_set_timestamp BEFORE UPDATE ON public.game_assignments FOR EACH ROW EXECUTE FUNCTION trigger_set_timestamp()",
+    "CREATE TRIGGER game_scores_readonly_when_completed BEFORE INSERT OR DELETE OR UPDATE ON public.game_scores FOR EACH ROW EXECUTE FUNCTION season_schedule_readonly_when_completed()",
     "CREATE TRIGGER game_slots_set_timestamp BEFORE UPDATE ON public.game_slots FOR EACH ROW EXECUTE FUNCTION trigger_set_timestamp()",
     "CREATE TRIGGER games_readonly_when_completed BEFORE INSERT OR DELETE OR UPDATE ON public.games FOR EACH ROW EXECUTE FUNCTION season_schedule_readonly_when_completed()",
     "CREATE TRIGGER games_set_timestamp BEFORE UPDATE ON public.games FOR EACH ROW EXECUTE FUNCTION trigger_set_timestamp()",
@@ -397,9 +402,10 @@
     "CREATE TRIGGER tr_validate_team_attributes BEFORE INSERT OR UPDATE ON public.teams FOR EACH ROW EXECUTE FUNCTION validate_custom_attributes('team')"
   ],
   "views": [
+    "current_game_runs|v|security_invoker=true|organization_id uuid, season_settings_id uuid, run_id uuid, completed_at timestamp with time zone",
     "field_closures|v|security_invoker=true|id uuid, organization_id uuid, closes_location_id uuid, closes_field_id uuid, field_location_id uuid, blackout_from date, blackout_until date, start_minutes integer, end_minutes integer, reason text, note text, source_reason_text text, source text",
     "import_efficiency_metrics|v|security_invoker=true|import_job_id uuid, suggestions_applied bigint, total_suggestions bigint, match_rate double precision",
-    "view_league_standings|v|security_invoker=true|team_id uuid, organization_id uuid, team_name text, division_id uuid, games_played bigint, wins bigint, losses bigint, draws bigint, goals_for bigint, goals_against bigint, goal_differential bigint, points bigint, division text, season_settings_id uuid",
+    "view_league_standings|v|security_invoker=true|team_id uuid, organization_id uuid, team_name text, division_id uuid, games_played bigint, wins bigint, losses bigint, draws bigint, goals_for bigint, goals_against bigint, goal_differential bigint, points bigint, division text, season_settings_id uuid, results_not_counted bigint",
     "view_org_metrics|v|security_invoker=true|organization_id uuid, organization_name text, total_players bigint, total_teams bigint, total_users bigint, season_settings_id uuid"
   ]
 }

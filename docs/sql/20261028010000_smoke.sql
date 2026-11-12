@@ -74,6 +74,7 @@ DECLARE
     v_s uuid; v_d1 uuid;
     v_t1 uuid; v_t2 uuid;
     v_game uuid;
+    v_score_run uuid := gen_random_uuid();
     v_loc uuid; v_field uuid; v_slot uuid; v_req uuid;
     v_refused int;
     v_res jsonb;
@@ -99,7 +100,11 @@ BEGIN
     INSERT INTO public.divisions (organization_id, season_settings_id, name) VALUES (v_org, v_s, 'R6 U10') RETURNING id INTO v_d1;
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_d1, 'R6 Aces') RETURNING id INTO v_t1;
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_d1, 'R6 Bees') RETURNING id INTO v_t2;
-    INSERT INTO public.games (organization_id, home_team_id, away_team_id) VALUES (v_org, v_t1, v_t2)
+    -- Run at head: since 20261122010000 a score names a SAVED game (game_assignments) and is a row of game_scores.
+    -- The game is of its season's current run: a score is entered on no other.
+    INSERT INTO public.scheduler_runs (id, organization_id, season_settings_id, run_type, status, completed_at)
+    SELECT v_score_run, v_org, d.season_settings_id, 'game', 'completed', now() FROM public.teams t JOIN public.divisions d ON d.id = t.division_id WHERE t.id = v_t1;
+    INSERT INTO public.game_assignments (organization_id, run_id, home_team_id, away_team_id, division, week_index) VALUES (v_org, v_score_run, v_t1, v_t2, 'Smoke', 1)
         RETURNING id INTO v_game;
 
     -- ---- Score entry: off unless the league turns it on -------------------
@@ -116,7 +121,7 @@ BEGIN
         RESET ROLE;
     END LOOP;
     IF v_refused <> 3
-       OR (SELECT score_home FROM public.games WHERE id = v_game) IS NOT NULL
+       OR (SELECT score_home FROM public.game_scores WHERE game_id = v_game) IS NOT NULL
        OR EXISTS (SELECT 1 FROM public.audit_log WHERE resource_id = v_game) THEN
         RAISE EXCEPTION 'score entry with the setting absent, false or not a boolean: % of 3 refused 55000, or a score or audit row was written', v_refused;
     END IF;
@@ -127,7 +132,7 @@ BEGIN
     PERFORM set_config('request.jwt.claim.sub', v_staff::text, true);
     PERFORM public.update_game_score(v_org, v_game, 3::smallint, 1::smallint, '{}'::jsonb);
     RESET ROLE;
-    IF (SELECT score_home FROM public.games WHERE id = v_game) IS DISTINCT FROM 3::smallint
+    IF (SELECT score_home FROM public.game_scores WHERE game_id = v_game) IS DISTINCT FROM 3::smallint
        OR (SELECT count(*) FROM public.audit_log
             WHERE resource_id = v_game AND action = 'competition.score_updated') <> 2 THEN
         RAISE EXCEPTION 'with score entry on, an admin and a staff member did not each score once, audited';
@@ -143,7 +148,7 @@ BEGIN
         END;
         RESET ROLE;
     END LOOP;
-    IF v_refused <> 3 OR (SELECT score_home FROM public.games WHERE id = v_game) IS DISTINCT FROM 3::smallint THEN
+    IF v_refused <> 3 OR (SELECT score_home FROM public.game_scores WHERE game_id = v_game) IS DISTINCT FROM 3::smallint THEN
         RAISE EXCEPTION 'score entry: % of 3 non-admins (two signed-in non-members, another organization''s admin) refused 42501, or the score moved', v_refused;
     END IF;
     -- The service role (a server-side job) skips the setting, as it skips the

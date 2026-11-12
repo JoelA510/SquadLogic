@@ -83,6 +83,11 @@ export const FEATURE_FLAGS = {
   // authorization).
   SCORE_ENTRY: 'score_entry',
   STANDINGS: 'standings',
+  // Whether standings count a team's results against outside clubs (teams the league does not run; migration
+  // 20261122010000, plan docs/changes/2026-11-06-games-table-source-of-truth.md). Off unless turned on, no
+  // FEATURE_DEFAULTS entry: the server reads it (`standings_counts_outside`, through `org_flag(org, key, false)`),
+  // so the view decides and the page only says what was left out. The program and division levels are F11-4's.
+  STANDINGS_COUNT_OUTSIDE_RESULTS: 'standings_count_outside_results',
 
   // Retired with the coach directory (plan docs/changes/2026-10-22-admin-focus.md,
   // R4; migration 20261025010000): coaches see no contact details, so nothing
@@ -236,6 +241,16 @@ export const FEATURE_CATALOG = [
       'Show league standings to admins, ranked from the entered scores. Off unless turned on.',
     icon: Trophy,
     column: false,
+  },
+  {
+    key: FEATURE_FLAGS.STANDINGS_COUNT_OUTSIDE_RESULTS,
+    label: 'Count results against outside clubs',
+    description:
+      "Count a team's results against outside clubs (opponents from outside the league) in the standings. Off unless turned on: such results are then left out, and the Standings page says how many. An outside club is never ranked itself.",
+    icon: Trophy,
+    column: false,
+    // The switch is shown but disabled, with the reason, while Standings is off. The stored value is left as set.
+    requires: FEATURE_FLAGS.STANDINGS,
   },
 ];
 

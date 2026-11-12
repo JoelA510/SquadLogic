@@ -89,8 +89,8 @@ export function toStagedGameRow(row) {
       start: placed ? row.start : null,
       end: placed ? row.end : null,
       week_index: row.weekIndex,
-      // Only the flags the SQL knows: the parse's own warnings (`bad-time`, `bad-week`) are said at
-      // the upload and in the preview, and a staged row that carried one would refuse the whole apply.
+      // Only the flags the SQL knows (a staged row that carried another would refuse the whole apply).
+      // Since 20261122010000 that includes the parse's own warnings, `bad-time` and `bad-week`.
       flags: row.flags.map((flag) => flag.code).filter((code) => STAGED_FLAGS.includes(code)),
       division: row.divisionLabel,
       division_key: divisionDecisionKey(row.divisionLabel),

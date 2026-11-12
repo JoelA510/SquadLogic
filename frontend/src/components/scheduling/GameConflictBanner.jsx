@@ -29,6 +29,9 @@ const SEVERITY_MAP = {
   'game-made-time-tbd': 'warning',
   'week-differs': 'warning',
   'time-ambiguous': 'warning',
+  // Staged since 20261122010000: the parse's two warnings reach the saved result.
+  'bad-time': 'warning',
+  'bad-week': 'warning',
 };
 
 /**
@@ -48,6 +51,8 @@ const TYPE_LABELS = {
   'game-made-time-tbd': 'Import: now TIME TBD',
   'week-differs': 'Import: week',
   'time-ambiguous': 'Import: clock repeat',
+  'bad-time': 'Import: time not read',
+  'bad-week': 'Import: week from date',
 };
 
 /** The warnings a schedule import writes about one game of its file. */
@@ -56,6 +61,8 @@ const IMPORT_WARNING_TYPES = new Set([
   'game-made-time-tbd',
   'week-differs',
   'time-ambiguous',
+  'bad-time',
+  'bad-week',
 ]);
 
 /**

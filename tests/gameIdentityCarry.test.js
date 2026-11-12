@@ -16,7 +16,7 @@
  *     the opposite order). The planted defect is recorded in the PR.
  */
 import { describe, expect, it } from 'vitest';
-import { carryGameIds, isHeld } from '../packages/core/src/gameIdentity.js';
+import { carryGameIds, holdReason, isHeld } from '../packages/core/src/gameIdentity.js';
 
 /** @returns {Record<string, any>} */
 const saved = (id, home, away, weekIndex, extra = {}) => ({
@@ -383,22 +383,27 @@ describe('carryGameIds', () => {
 describe('isHeld', () => {
   it('a Published game is held', () => {
     expect(isHeld({ published: true })).toBe(true);
-    expect(isHeld({ published: true }, false)).toBe(true);
+    expect(isHeld({ published: true, scored: false })).toBe(true);
   });
   it('a game that is not Published is not held, and neither is nothing', () => {
     expect(isHeld({ published: false })).toBe(false);
     expect(isHeld({})).toBe(false);
     expect(isHeld(null)).toBe(false);
-    expect(isHeld(undefined, undefined)).toBe(false);
+    expect(isHeld(undefined)).toBe(false);
   });
   it('a scored game is held (F11-2 supplies the score; the rule is here)', () => {
-    expect(isHeld({ published: false }, true)).toBe(true);
-    expect(isHeld({}, true)).toBe(true);
+    expect(isHeld({ published: false, scored: true })).toBe(true);
+    expect(isHeld({ scored: true })).toBe(true);
   });
   it('only a boolean true holds: a truthy string is not a flag', () => {
     expect(isHeld({ published: 'true' })).toBe(false);
     expect(isHeld({ published: 1 })).toBe(false);
-    // @ts-expect-error -- a string is not a boolean, on purpose
-    expect(isHeld({}, 'yes')).toBe(false);
+    expect(isHeld({ scored: 'yes' })).toBe(false);
+    // An array callback hands (game, index, array): the index is not a second argument, so a scored game is held at
+    // any position and an unscored one at none (review of #725, R9).
+    const games = [{ scored: true }, { published: false }, { published: true }];
+    expect(games.filter(isHeld)).toEqual([{ scored: true }, { published: true }]);
+    expect(games.map(holdReason)).toEqual(['scored', null, 'published']);
+    expect(isHeld.length + holdReason.length).toBe(2);
   });
 });

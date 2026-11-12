@@ -108,6 +108,62 @@ describe('gamePublishedErrorResponse', () => {
   });
 });
 
+describe('gamePublishedErrorResponse: a game held by its score (20261122010000, F11-2)', () => {
+  const SCORES_MIGRATION = readFileSync(
+    path.join(ROOT, 'supabase/migrations/20261122010000_game_scores.sql'),
+    'utf8'
+  );
+
+  it('maps the scored refusals to the same 409 as the Published pair, with their own reason', () => {
+    const moved = gamePublishedErrorResponse({
+      code: '22023',
+      details: 'game_scored',
+      message: `Game ${A} has a score and cannot be moved: clear its score first`,
+    });
+    expect(moved).toMatchObject({
+      status: 409,
+      body: { code: 'GAME_PUBLISHED', reason: 'game_scored', ids: [A], count: 1 },
+    });
+    expect(moved?.body.message).toContain('clear its score first');
+    const omitted = gamePublishedErrorResponse({
+      code: '22023',
+      details: `game_scored_omitted count=3 ids=${A},${B}`,
+      message: 'this save leaves out 3 game(s) that have a score',
+    });
+    expect(omitted).toMatchObject({
+      status: 409,
+      body: { code: 'GAME_PUBLISHED', reason: 'game_scored_omitted', ids: [A, B], count: 3 },
+    });
+  });
+
+  it('CONTROL: a detail that only looks like one is not mapped', () => {
+    expect(
+      gamePublishedErrorResponse({ code: '22023', details: 'game_scoredx', message: 'x' })
+    ).toBe(null);
+    expect(
+      gamePublishedErrorResponse({
+        code: '22023',
+        details: `game_score_omitted count=1 ids=${A}`,
+        message: 'x',
+      })
+    ).toBe(null);
+  });
+
+  it('reads the text the migration writes', () => {
+    expect(SCORES_MIGRATION).toMatch(/DETAIL = 'game_scored'/);
+    expect(SCORES_MIGRATION).toMatch(
+      /format\('game_scored_omitted count=%s ids=%s', v_scored_omitted_count, array_to_string\(v_scored_omitted_ids, ','\)\)/
+    );
+    // Every DETAIL the migration raises with a game_* held code is one the mapper knows.
+    const details = [
+      ...SCORES_MIGRATION.matchAll(/DETAIL = (?:format\()?'(game_(?:scored|published)[a-z_]*)/g),
+    ].map((m) => m[1]);
+    expect(new Set(details)).toEqual(
+      new Set(['game_scored', 'game_published', 'game_scored_omitted', 'game_published_omitted'])
+    );
+  });
+});
+
 const C = 'a1111111-1111-1111-1111-0000000c0e03';
 const REMOVED =
   'a game was removed while this save was being checked: nothing was saved, try again';

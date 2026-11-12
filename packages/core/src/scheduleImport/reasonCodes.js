@@ -62,7 +62,8 @@ export const SCHEDULE_IMPORT_REASON = Object.freeze({
 
   // Accepted and said by the PARSE (owner, 2026-11-10; PR 6, task F5), where they were refusals: a time
   // that cannot be read makes the game a dated TIME TBD game, a Week that cannot be stored is derived
-  // from the date. Never staged (the SQL's staged-flag list is closed): the upload and the preview say them.
+  // from the date. Staged since 20261122010000 (the SQL's staged-flag list took them), so the upload, the
+  // preview and the saved result say them.
   BAD_TIME: 'bad-time',
   BAD_WEEK: 'bad-week',
 
@@ -120,12 +121,20 @@ export const SCHEDULE_IMPORT_FLAGS = Object.freeze([
 /**
  * The flags a STAGED row may carry: the ones `apply_game_import_job` knows (its shape check refuses a
  * staged row with any other, and with it the whole apply). `staging.js` stages these and no others.
+ * Since `20261122010000_game_scores.sql` the SQL takes the parse's two warnings (`bad-time`, `bad-week`)
+ * too, so they are staged and reach the saved result.
  */
-export const SCHEDULE_IMPORT_STAGED_FLAGS = Object.freeze([R.TIME_AMBIGUOUS, R.WEEK_DIFFERS]);
+export const SCHEDULE_IMPORT_STAGED_FLAGS = Object.freeze([
+  R.TIME_AMBIGUOUS,
+  R.WEEK_DIFFERS,
+  R.BAD_TIME,
+  R.BAD_WEEK,
+]);
 
 /**
- * The warnings the parse raises and does not stage (PR 6, task F5): the row is kept, changed, and the
- * change is said at the upload and in the preview. They are in {@link SCHEDULE_IMPORT_FLAGS} too.
+ * The warnings the parse raises (PR 6, task F5): the row is kept, changed, and the change is said at
+ * the upload and in the preview. They are in {@link SCHEDULE_IMPORT_FLAGS} too, and since
+ * `20261122010000` they are staged ({@link SCHEDULE_IMPORT_STAGED_FLAGS}), so the result carries them.
  */
 export const SCHEDULE_IMPORT_PARSE_WARNINGS = Object.freeze([R.BAD_TIME, R.BAD_WEEK]);
 
@@ -147,12 +156,12 @@ export const SCHEDULE_IMPORT_APPLY_WARNINGS = Object.freeze([
 ]);
 
 /**
- * Why a game the file names is NOT written by the apply (PR 5): a closed list that can grow by one (F11-2 adds
- * `skipped-scored`, when a score holds a game as Published does). The SQL emits these literals
+ * Why a game the file names is NOT written by the apply (PR 5): a closed list. `skipped-scored` joined it with
+ * `20261122010000_game_scores.sql` (F11-2): a game held by its score and not Published. The SQL emits these literals
  * (`apply_game_import_job`, `skipped` of its result and `skipped_games` of its list); `tests/gameImportSkipReasons.test.js`
  * holds this list to the SQL text and requires words for each, so a reason added in one place and not the other fails.
  */
-export const SCHEDULE_IMPORT_SKIP_REASONS = Object.freeze(['skipped-published']);
+export const SCHEDULE_IMPORT_SKIP_REASONS = Object.freeze(['skipped-published', 'skipped-scored']);
 
 /** The reasons a TIME TBD game from an import may carry. */
 export const SCHEDULE_IMPORT_TBD_REASONS = Object.freeze([R.IMPORTED_WITHOUT_TIME]);
@@ -205,6 +214,8 @@ const DESCRIPTIONS = Object.freeze({
 const SKIP_DESCRIPTIONS = Object.freeze({
   'skipped-published':
     'The game is Published and the file would change it. Allow changes to it first, then import again.',
+  'skipped-scored':
+    'The game has a score and the file would change it. Clear its score first, then import again.',
 });
 
 /**

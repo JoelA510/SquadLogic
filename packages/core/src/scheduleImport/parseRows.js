@@ -261,8 +261,8 @@ const quoted = (text) => `"${text.length > 60 ? `${text.slice(0, 57)}...` : text
  * @property {number | null} weekIndex
  * @property {'file' | 'derived' | null} weekSource
  * @property {ScheduleImportFlag[]} flags  what was accepted and said: `time-ambiguous` and
- *   `week-differs` (staged, the SQL knows them) and the parse's own `bad-time` and `bad-week`
- *   (`SCHEDULE_IMPORT_PARSE_WARNINGS`: shown at upload and in the preview, never staged)
+ *   `week-differs`, and the parse's own `bad-time` and `bad-week` (`SCHEDULE_IMPORT_PARSE_WARNINGS`:
+ *   shown at upload and in the preview). All four are staged (the SQL knows them since 20261122010000).
  */
 
 /**

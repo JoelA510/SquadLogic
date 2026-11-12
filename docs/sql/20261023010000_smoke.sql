@@ -53,10 +53,11 @@ BEGIN
     IF v_org IS DISTINCT FROM 'organization_id,organization_name,total_players,total_teams,total_users,season_settings_id' THEN
         RAISE EXCEPTION 'view_org_metrics columns are %', v_org;
     END IF;
-    IF v_standings IS DISTINCT FROM 'team_id,organization_id,team_name,division_id,games_played,wins,losses,draws,goals_for,goals_against,goal_differential,points,division,season_settings_id' THEN
+    -- Run at head: 20261122010000 rebuilt the view over game_scores and appended results_not_counted, last.
+    IF v_standings IS DISTINCT FROM 'team_id,organization_id,team_name,division_id,games_played,wins,losses,draws,goals_for,goals_against,goal_differential,points,division,season_settings_id,results_not_counted' THEN
         RAISE EXCEPTION 'view_league_standings columns are %', v_standings;
     END IF;
-    RAISE NOTICE 'columns: view_org_metrics 6 and view_league_standings 14, in the definitive schema''s order with division and season_settings_id last';
+    RAISE NOTICE 'columns: view_org_metrics 6 and view_league_standings 15, in the definitive schema''s order with division and season_settings_id after them and results_not_counted (20261122010000) last';
 END;
 $$;
 

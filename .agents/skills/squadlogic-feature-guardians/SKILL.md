@@ -48,7 +48,9 @@ How to add, gate, and retire an organization-level feature flag safely.
 7. A setting the server enforces is read in SQL with `org_flag(org, key, default)`, its default
    the same as `FEATURE_DEFAULTS` (absent there is off), and the mock RPC reads the stored flags
    the same way (`update_org_feature_flags` stores them in the mock). Settings the server reads
-   today: `score_entry` (`update_game_score`, 55000 while off; 20261028010000). Hiding a page
+   today: `score_entry` (`update_game_score`, 55000 while off; 20261028010000) and
+   `standings_count_outside_results` (`standings_counts_outside`, read by `view_league_standings`;
+   20261122010000). Hiding a page
    with a flag is not authorization: `standings` hides a page over data every member reads.
 
 ## Practices

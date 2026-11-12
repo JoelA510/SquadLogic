@@ -511,16 +511,19 @@ LANGUAGE sql STABLE SET search_path = public AS $f$
 $f$;
 SELECT is(pg_temp.val($$SELECT public.game_is_held('a1111111-1111-1111-1111-0000000d0e02')$$), 'true',
     'the single form follows the set form: after the one body changes, e02 is held');
-SELECT is(pg_temp.errx($$UPDATE public.game_assignments SET week_index = 9 WHERE id = 'a1111111-1111-1111-1111-0000000d0e02'$$), '22023:game_published',
-    'the guard trigger refuses to move it');
-SELECT is(pg_temp.errx($$DELETE FROM public.game_assignments WHERE id = 'a1111111-1111-1111-1111-0000000d0e02'$$), '22023:game_published',
+SELECT is(pg_temp.errx($$UPDATE public.game_assignments SET week_index = 9 WHERE id = 'a1111111-1111-1111-1111-0000000d0e02'$$), '22023:game_scored',
+    'the guard trigger refuses to move it (since 20261122010000 a held game that is not Published is refused in the words of a scored one)');
+SELECT is(pg_temp.errx($$DELETE FROM public.game_assignments WHERE id = 'a1111111-1111-1111-1111-0000000d0e02'$$), '22023:game_scored',
     'and to delete it');
-SELECT is(pg_temp.errx($$SELECT public.admin_cancel_game_assignment('a1111111-1111-1111-1111-0000000d0e02')$$), '22023:game_published', 'cancel refuses it');
-SELECT is(pg_temp.errx($$SELECT public.admin_delete_team('a1111111-1111-1111-1111-0000000d0003')$$), '22023:game_published', 'delete team refuses its team');
+SELECT is(pg_temp.errx($$SELECT public.admin_cancel_game_assignment('a1111111-1111-1111-1111-0000000d0e02')$$), '22023:game_scored', 'cancel refuses it');
+-- 20261122010000 (F11 decision D5): delete team no longer refuses up front for a game that is held without being
+-- Published (it takes that game's score away first and the game goes with the team: game_scores.sql). A game still held
+-- when the cascade reaches it, as this one is by the replaced body, meets the guard: the backstop.
+SELECT is(pg_temp.errx($$SELECT public.admin_delete_team('a1111111-1111-1111-1111-0000000d0003')$$), '22023:game_scored', 'delete team is refused for its team (by the guard, at the cascade)');
 SELECT is(pg_temp.errx($$SELECT pg_temp.save(pg_temp.set7('{}', ARRAY['a1111111-1111-1111-1111-0000000d0e02']::uuid[]))$$),
-    '22023:game_published_omitted count=1 ids=a1111111-1111-1111-1111-0000000d0e02', 'a save that leaves it out is refused as an omission');
+    '22023:game_scored_omitted count=1 ids=a1111111-1111-1111-1111-0000000d0e02', 'a save that leaves it out is refused as an omission');
 SELECT is(pg_temp.errx($$SELECT pg_temp.save(pg_temp.set7(jsonb_build_object('a1111111-1111-1111-1111-0000000d0e02', pg_temp.mv('a1111111-1111-1111-1111-0000000d0e02', 'a1111111-1111-1111-1111-0000000d00da'))))$$),
-    '22023:game_published', 'and a save that moves it by its id is refused by the guard');
+    '22023:game_scored', 'and a save that moves it by its id is refused by the guard');
 SELECT is(pg_temp.errx($$SELECT pg_temp.save(pg_temp.set7())$$), 'no error', 'control: a save that carries it where it is is accepted');
 
 -- ── 6. Order, from the source ──────────────────────────────────────────────

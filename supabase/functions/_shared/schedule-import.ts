@@ -53,6 +53,9 @@ const R = GAME_IMPORT_REASON;
 export const GAME_IMPORT_STAGED_FLAGS: readonly string[] = Object.freeze([
   R.TIME_AMBIGUOUS,
   R.WEEK_DIFFERS,
+  // 20261122010000: the SQL's list took the parse's two warnings, so they are staged and reach the saved result.
+  R.BAD_TIME,
+  R.BAD_WEEK,
 ]);
 
 /** Limits of the file (core: `SCHEDULE_IMPORT_LIMITS`), and of one request. */

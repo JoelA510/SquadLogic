@@ -162,4 +162,61 @@ describe('ScoresPage', () => {
       expect(screen.queryByTestId('season-readonly-note')).toBeNull();
     });
   });
+
+  describe('a score the database will not take from this page (between F11-2 and F11-3)', () => {
+    // Since 20261122010000 `update_game_score` names a SAVED game and takes both scores or none, while this page still
+    // lists the legacy games table and saves one cell at a time (F11-3 repoints it). Until then a save from here is
+    // refused, and the page says so in words that stay on the page, not in a toast that says only that it failed.
+    const cell = (name, index) => {
+      const row = screen.getByText(name).closest('tr');
+      return within(/** @type {HTMLElement} */ (row)).getAllByRole('gridcell')[index];
+    };
+    async function enter(value) {
+      mocks.games = [GAME];
+      renderPage();
+      await screen.findByText('Rivals');
+      fireEvent.doubleClick(cell('Rivals', 3));
+      const input = await screen.findByRole('spinbutton');
+      fireEvent.change(input, { target: { value } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      await waitFor(() => expect(mocks.rpc).toHaveBeenCalledTimes(1));
+    }
+
+    it('a game the database does not find: an alert in words, the cell back as it was', async () => {
+      mocks.rpc = vi.fn().mockResolvedValue({
+        data: null,
+        error: { code: '42501', message: 'Game not found in organization org-1' },
+      });
+      await enter('3');
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent(
+        'The score was not saved. Scores are now kept against the saved schedule, and this page still lists games from the earlier games table, so it cannot save a score yet. Nothing was changed.'
+      );
+      expect(alert.textContent).not.toMatch(/42501|Game not found/);
+    });
+
+    it('one score without the other: the same alert', async () => {
+      mocks.rpc = vi.fn().mockResolvedValue({
+        data: null,
+        error: {
+          code: '22023',
+          details: 'score_one_sided',
+          message: 'enter both scores, or clear both',
+        },
+      });
+      await enter('3');
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        /it cannot save a score yet\. Nothing was changed\./
+      );
+    });
+
+    it('CONTROL: another failure is not called that, and a save that works shows no alert', async () => {
+      mocks.rpc = vi
+        .fn()
+        .mockResolvedValue({ data: null, error: { code: '55000', message: 'Score entry is off' } });
+      await enter('3');
+      await waitFor(() => expect(mocks.rpc).toHaveBeenCalled());
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+  });
 });

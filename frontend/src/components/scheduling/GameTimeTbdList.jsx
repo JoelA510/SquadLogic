@@ -10,7 +10,7 @@ import { readScheduleTbd } from '../../utils/scheduleTbdClient.js';
  *
  * A game an import gave a date and no time is listed with its date and no time; a game the scheduler could not place
  * has no date, and is listed with its week as it is everywhere else. The rows are the season's `schedule_tbd` games as
- * `readScheduleTbd` returns them (the table, read by the RPC and joined with `game_date`), never a second list.
+ * `readScheduleTbd` returns them (the table, read by the RPC with each game's `game_date`), never a second list.
  *
  * **A game that is listed here and also on the grid** is said, not hidden. The list is the table's: a game placed by
  * hand stays in it until the next save that carries a list of unplaced games (a generation), because a hand edit sends
@@ -91,7 +91,7 @@ GameTimeTbdList.propTypes = {
 };
 
 /**
- * The list, read for a season: `readScheduleTbd` (the RPC, with the dates joined from the table), again whenever
+ * The list, read for a season: `readScheduleTbd` (the RPC, which gives each game its date), again whenever
  * `refreshKey` changes (the saved run the page shows). The list is an administrator's to read (`get_schedule_tbd`
  * refuses anyone else, 42501): `enabled` is the page's own answer to "may this person manage the schedule", and with it
  * false nothing is read or drawn. A 42501 from the read draws nothing either (the list is not theirs); any other

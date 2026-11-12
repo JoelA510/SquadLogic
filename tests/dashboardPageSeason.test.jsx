@@ -93,7 +93,8 @@ describe('DashboardPage (the admin home)', () => {
         { id: 't2', organization_id: 'org-1', division_id: 'd-spring', name: 'Spring Team' },
         { id: 't3', organization_id: 'org-1', division_id: 'd-spring-2', name: 'Other' },
       ],
-      games: [],
+      current_game_runs: [],
+      game_assignments: [],
       practice_slots: [],
       audit_log: [],
     };
@@ -114,5 +115,56 @@ describe('DashboardPage (the admin home)', () => {
     expect(kpi.querySelector('.kpi-val')).toHaveTextContent(/^1$/);
     const players = screen.getByText('Players').closest('.kpi');
     expect(players.querySelector('.kpi-val')).toHaveTextContent(/^2$/);
+  });
+  it('counts and lists the games of the saved schedule of the season (F11-3 C3), not the legacy games table', async () => {
+    const game = (id, start, home, away) => ({
+      id,
+      organization_id: 'org-1',
+      run_id: 'run-fall',
+      season_settings_id: FALL,
+      start,
+      end: start,
+      home_team: { id: `${id}-h`, name: home, division: { name: 'U8' } },
+      away_team: { id: `${id}-a`, name: away, division: { name: 'U8' } },
+      game_scores: [],
+    });
+    mocks.tables = {
+      players: [],
+      divisions: [],
+      teams: [],
+      // A row of the legacy table: read by nothing, so it is neither counted nor listed.
+      games: [{ id: 'legacy', organization_id: 'org-1', start_time: '2099-01-01T00:00:00Z' }],
+      current_game_runs: [
+        { organization_id: 'org-1', season_settings_id: FALL, run_id: 'run-fall' },
+        { organization_id: 'org-1', season_settings_id: SPRING, run_id: 'run-spring' },
+      ],
+      game_assignments: [
+        game('g-past', '2020-03-01T15:00:00Z', 'Past Home', 'Past Away'),
+        game('g-soon', '2099-03-01T15:00:00Z', 'Soon Home', 'Soon Away'),
+        game('g-later', '2099-04-01T15:00:00Z', 'Later Home', 'Later Away'),
+      ],
+      practice_slots: [],
+      audit_log: [],
+    };
+    mocks.reads = [];
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>
+    );
+    const kpi = (await screen.findByText('Games scheduled')).closest('.kpi');
+    await waitFor(() => expect(kpi.querySelector('.kpi-val')).toHaveTextContent(/^3$/));
+    // Upcoming: the two that have not started, soonest first; the played one is not listed.
+    const soon = screen.getByText('Soon Home');
+    const later = screen.getByText('Later Home');
+    expect(soon.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText('Past Home')).toBeNull();
+    // What was read: the season's current run, then its games; never the legacy table.
+    expect(mocks.reads.map((read) => read.table)).not.toContain('games');
+    expect(mocks.reads.find((read) => read.table === 'current_game_runs').eqs).toEqual([
+      ['organization_id', 'org-1'],
+      ['season_settings_id', FALL],
+    ]);
+    expect(mocks.reads.some((read) => read.table === 'game_assignments')).toBe(true);
   });
 });

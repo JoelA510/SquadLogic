@@ -8,6 +8,8 @@ import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 const mocks = vi.hoisted(() => ({
   rpc: vi.fn(),
   tables: {},
+  reads: /** @type {string[]} */ ([]),
+  failing: /** @type {string[]} */ ([]),
   demoExpiresAt: null,
 }));
 
@@ -15,13 +17,18 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
     rpc: mocks.rpc,
     from: (table) => {
-      const result = { data: mocks.tables[table] || [], error: null };
+      mocks.reads.push(table);
+      const result = mocks.failing.includes(table)
+        ? { data: null, error: { message: `${table}: synthetic read failure` } }
+        : { data: mocks.tables[table] || [], error: null };
       const builder = {
         select: () => builder,
         eq: () => builder,
+        in: () => builder,
         or: () => builder,
         order: () => builder,
         limit: () => Promise.resolve(result),
+        range: () => Promise.resolve(result),
         then: (resolve) => resolve(result),
       };
       return builder;
@@ -57,6 +64,8 @@ describe('PlayerRecordPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.demoExpiresAt = null;
+    mocks.reads = [];
+    mocks.failing = [];
     mocks.rpc.mockResolvedValue({ data: null, error: null });
     mocks.tables = {
       players: [
@@ -210,5 +219,60 @@ describe('PlayerRecordPage', () => {
       expect(screen.getByRole('button', { name: /^Edit Status:/ })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /^Edit Jersey #:/ })).toBeInTheDocument();
     });
+  });
+  describe("the player's games are the team's saved games (F11-3 C3)", () => {
+    const game = (id, run, start, home, away, scores = []) => ({
+      id,
+      run_id: run,
+      start,
+      end: start,
+      home_team_id: 't1',
+      away_team_id: 't2',
+      home_team: { id: 't1', name: home },
+      away_team: { id: 't2', name: away },
+      game_scores: scores,
+    });
+    beforeEach(() => {
+      mocks.tables.players = [{ ...mocks.tables.players[0], team_id: 't1' }];
+      mocks.tables.teams = [{ id: 't1', name: 'Team One', organization_id: MOCK_ORG_ID }];
+      mocks.tables.practice_assignments = [];
+      mocks.tables.current_game_runs = [{ run_id: 'run-now' }];
+      mocks.tables.game_assignments = [
+        game('g-late', 'run-now', '2026-10-10T16:00:00Z', 'Team One', 'Late Rivals'),
+        game('g-early', 'run-now', '2026-10-03T16:00:00Z', 'Team One', 'Early Rivals', [
+          { score_home: 4, score_away: 2 },
+        ]),
+        // Left behind in an older run by a later save: not the schedule.
+        game('g-hidden', 'run-older', '2026-10-01T16:00:00Z', 'Team One', 'Hidden Rivals'),
+      ];
+    });
+    const openSchedule = async () => {
+      renderPage();
+      await screen.findByRole('heading', { name: 'Alex Smith' });
+      const tab = screen.queryByRole('tab', { name: /Schedule|Team/ });
+      if (tab) fireEvent.click(tab);
+    };
+
+    it('lists them in order with a score, from the saved schedule and not the legacy table', async () => {
+      await openSchedule();
+      const early = await screen.findByText('Early Rivals');
+      const late = screen.getByText('Late Rivals');
+      expect(early.compareDocumentPosition(late) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(screen.getByText('4–2')).toBeInTheDocument();
+      expect(screen.queryByText('Hidden Rivals')).toBeNull();
+      expect(mocks.reads).toContain('game_assignments');
+      expect(mocks.reads).toContain('current_game_runs');
+      expect(mocks.reads).not.toContain('games');
+    });
+
+    it.each(['game_assignments', 'current_game_runs'])(
+      'says so when the read of %s fails, and shows no game',
+      async (table) => {
+        mocks.failing = [table];
+        await openSchedule();
+        expect(await screen.findByText('Games could not be loaded.')).toBeInTheDocument();
+        expect(screen.queryByText('Early Rivals')).toBeNull();
+      }
+    );
   });
 });

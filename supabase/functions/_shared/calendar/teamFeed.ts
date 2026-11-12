@@ -19,12 +19,13 @@
  *
  * ## Reads
  *
- * All four run under the service role (the feed is public, token-gated), so
+ * All five run under the service role (the feed is public, token-gated), so
  * each is scoped here rather than by RLS:
  *
  * - `season_settings` through `readSeasonTimezone` (the one server-side read
  *   of a season's clock);
- * - `games` by home or away team;
+ * - `current_game_runs` by the team's organization (and season), then `game_assignments` of those runs by
+ *   organization and by home or away team (F11-3: the saved schedule, not the legacy `games` table);
  * - `practice_assignments` by team;
  * - `practice_exceptions` by team **and** the team's organization (R4), live
  *   rows only, with the relocated slot embedded as `slot`. The twin filters
@@ -87,6 +88,17 @@ export const PRACTICE_EXCEPTIONS_SELECT =
   'slot:practice_slots!practice_slot_id ( day_of_week, start_time, end_time, fields(name, locations(name)) )';
 
 /**
+ * A saved game as the feed reads one: its own instants, and its slot (hinted by column: `game_assignments` has two
+ * foreign keys to `game_slots`) for the ground and the wall reading.
+ */
+export const SAVED_GAMES_SELECT =
+  'id, start, end, ' +
+  'game_slots!game_slot_id ( slot_date, start_time, end_time, start, end, fields(name, locations(name)) )';
+
+/** The most games one read asks for: PostgREST's `max_rows`, as {@link PRACTICE_EXCEPTIONS_READ_CAP}. */
+export const SAVED_GAMES_READ_CAP = 1000;
+
+/**
  * The most exception rows one read asks for: the project's PostgREST
  * `max_rows` (`supabase/config.toml`). PostgREST truncates at that cap without
  * an error, so a read that comes back full is said as incomplete rather than
@@ -144,30 +156,65 @@ export async function composeTeamFeed(input: {
   }
   const timezone = season.timezone;
 
-  // 2. Games.
+  // 2. Games: the saved schedule (F11-3 of docs/changes/2026-11-06-games-table-source-of-truth.md).
   //
-  // `slot_date` is the column this select was missing entirely: it asked for
-  // the two `time` columns alone and fed them straight to `new Date()`.
-  // `start`/`end` are the `timestamptz` pair, preferred when a row carries
-  // them -- the order `normalizeGameSlot` already uses.
-  const { data: games, error: gamesError } = await client
-    .from('games')
-    .select(
-      `
-          id,
-          game_slots ( slot_date, start_time, end_time, start, end, fields(name, locations(name)) ),
-          teams!games_home_team_id_fkey(name),
-          teams!games_away_team_id_fkey(name)
-      `
-    )
-    .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`);
-
+  // A game is a row of `game_assignments`, and a season's schedule is the games of its current game run, which
+  // `current_game_runs` names (the rule of the Games page). A game left behind in an older run is not shown. Both
+  // reads are scoped by the team's organization here: the service role has no row policy to do it. The game's own
+  // `start` and `end` are when it is played (an imported game can end at another time than its slot); the slot
+  // gives the ground and the wall reading `placeSlotTime` falls back to.
+  //
   // A failed read is recorded, not swallowed: it is rendered into the
   // CALDESC below, because an empty feed reads as "nothing scheduled".
   const readFailures: string[] = [];
-  if (gamesError) {
-    log('calendar-feed: games read failed', { teamId, message: gamesError.message });
+  let games: GameRow[] = [];
+  if (!organizationId) {
+    // As the exceptions read below: `.eq('organization_id', null)` matches nothing and would read as "no games".
+    log('calendar-feed: games read failed, team has no organization', { teamId });
     readFailures.push('games');
+  } else {
+    let runsQuery = client
+      .from('current_game_runs')
+      .select('run_id')
+      .eq('organization_id', organizationId);
+    if (team.season_settings_id) {
+      runsQuery = runsQuery.eq('season_settings_id', team.season_settings_id);
+    }
+    const { data: runs, error: runsError } = await runsQuery;
+    if (runsError) {
+      log('calendar-feed: games read failed (current_game_runs)', {
+        teamId,
+        message: runsError.message,
+      });
+      readFailures.push('games');
+    } else {
+      const runIds = ((runs ?? []) as Array<{ run_id: string }>).map((run) => run.run_id);
+      // No current run is a season with no saved schedule: nothing to read, and nothing failed.
+      if (runIds.length > 0) {
+        const { data, error: gamesError } = await client
+          .from('game_assignments')
+          .select(SAVED_GAMES_SELECT)
+          .eq('organization_id', organizationId)
+          .in('run_id', runIds)
+          .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`)
+          .order('id', { ascending: true })
+          .limit(SAVED_GAMES_READ_CAP);
+        if (gamesError) {
+          log('calendar-feed: games read failed', { teamId, message: gamesError.message });
+          readFailures.push('games');
+        } else {
+          games = (data ?? []) as GameRow[];
+          if (games.length >= SAVED_GAMES_READ_CAP) {
+            // Shown as read, and said: games past the cap may be missing.
+            log('calendar-feed: games read failed to stay under the row cap', {
+              teamId,
+              rows: games.length,
+            });
+            readFailures.push('games');
+          }
+        }
+      }
+    }
   }
 
   // 3. Practice assignments.
@@ -235,7 +282,7 @@ export async function composeTeamFeed(input: {
   const events = buildFeedEvents({
     teamName: team.name,
     timezone,
-    games: (games ?? []) as GameRow[],
+    games,
     practices: (practices ?? []) as PracticeRow[],
     exceptions,
     onPracticeExceptions: (result) => {

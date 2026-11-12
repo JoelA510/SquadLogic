@@ -107,6 +107,10 @@ const REGISTRY = {
     class: 'exclude',
     why: "the team builder lists the organization's teams to move players between",
   },
+  'frontend/src/utils/savedGamesClient.js': {
+    class: 'include',
+    why: 'the saved schedule names BOTH sides of a game (the team page, Scores, Standings recent games, the Dashboard): a game against an outside club is a game, shown and scored with the club by name',
+  },
   'frontend/src/utils/scheduleReportsRead.js': {
     class: 'include',
     why: 'the Day Sheet and the Changes view name BOTH sides of a game, an outside club included; the coach schedule has no coach for one',
@@ -118,10 +122,6 @@ const REGISTRY = {
   'supabase/functions/_shared/auth.ts': {
     class: 'by-id',
     why: 'resolves the organizations of the team ids a payload names',
-  },
-  'supabase/functions/_shared/calendar/teamFeed.ts': {
-    class: 'include',
-    why: 'the feed of one team names its opponent in each game, an outside club included',
   },
   'supabase/functions/_shared/engines/practice-division-settings.ts': {
     class: 'by-id',

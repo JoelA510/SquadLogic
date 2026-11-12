@@ -959,7 +959,8 @@ describe('a completed season is read-only for its schedule (mock of the schedule
     expect(getMockData('practice_assignments').map((a) => a.id)).toContain('ms-pa-old');
     expect(getMockData('game_assignments').map((a) => a.id)).toContain('ms-ga-old');
 
-    // The scores of a completed season's game are history too (the games trigger).
+    // A score names a saved game: a row of the legacy `games` table is not found (F11-3; a completed season's SAVED
+    // game refusing a score is `tests/mockGameScores.test.js`, held to the pgTAP text).
     expect(
       (
         await rpc('update_game_score', {
@@ -969,7 +970,7 @@ describe('a completed season is read-only for its schedule (mock of the schedule
           p_score_away: 1,
         })
       ).error
-    ).toMatchObject(refused);
+    ).toMatchObject({ code: '42501' });
     expect(getMockData('games').find((g) => g.id === 'ms-game-old').score_home).toBeUndefined();
     expect(
       (await rpc('admin_update_team', { p_team_id: LIVE_TEAM, p_patch: { notes: 'ok' } })).error

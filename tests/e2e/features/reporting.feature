@@ -25,6 +25,7 @@ Feature: Admin Reporting Dashboard
   Scenario: Admin enters a game score and standings update, once the league turns both on
     Given I am logged into SquadLogic as an "admin"
     And the admin's season is the mock season
+    And the saved schedule has two played games, one already scored
     When the admin turns on "Score Entry" and "Standings" in the Settings features
     And I open "Standings" from the admin navigation
     Then the admin sees the league standings

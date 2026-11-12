@@ -47,11 +47,12 @@ const TEAM = {
 };
 
 /**
- * Team A's season, added to the base seed (which already gives Team A two
- * games with no slot, `g1` and `game-2`, both at home to Team B):
+ * Team A's season, added to the base seed. The games are SAVED games (rows of
+ * `game_assignments` in the seed's completed game run, F11-3), each with its
+ * own start and end:
  *
  * - a game on Saturday 2026-11-07, 10:00-11:00, at home to Team B;
- * - a game away at Team B on 2026-11-14 whose slot has a day and no time;
+ * - a game away at Team B on 2026-11-14, 12:00-13:00;
  * - a Thursday 17:30-18:30 practice from 2026-11-02 to 2026-11-29: the 5th
  *   and the 12th as the series, the 19th TIME TBD (`contended`), and the
  *   week of the 23rd moved to Saturday the 28th, 09:00-10:00;
@@ -74,24 +75,37 @@ function seedSeason() {
         organization_id: MOCK_ORG_ID,
         field_id: 'v1',
         slot_date: '2026-11-14',
-        start_time: null,
-        end_time: null,
+        start_time: '12:00:00',
+        end_time: '13:00:00',
       },
     ],
-    games: [
+    // In November Los Angeles is UTC-8.
+    game_assignments: [
       {
         id: 'game-r7-a',
         organization_id: MOCK_ORG_ID,
+        run_id: 'run-game-1',
         home_team_id: 't1',
         away_team_id: 't2',
         game_slot_id: 'gs-r7-a',
+        slot_id: 'gs-r7-a',
+        field_id: 'v1',
+        week_index: 1,
+        start: '2026-11-07T18:00:00+00:00',
+        end: '2026-11-07T19:00:00+00:00',
       },
       {
         id: 'game-r7-b',
         organization_id: MOCK_ORG_ID,
+        run_id: 'run-game-1',
         home_team_id: 't2',
         away_team_id: 't1',
         game_slot_id: 'gs-r7-b',
+        slot_id: 'gs-r7-b',
+        field_id: 'v1',
+        week_index: 2,
+        start: '2026-11-14T20:00:00+00:00',
+        end: '2026-11-14T21:00:00+00:00',
       },
     ],
     practice_slots: [
@@ -166,11 +180,9 @@ const EXPECTED = [
   ['Practice', '', '', '2026-11-05', '17:30', '18:30', ZONE, 'Scheduled', ''],
   ['Game', 'Team B', 'Home', '2026-11-07', '10:00', '11:00', ZONE, 'Scheduled', ''],
   ['Practice', '', '', '2026-11-12', '17:30', '18:30', ZONE, 'Scheduled', ''],
-  ['Game', 'Team B', 'Away', '2026-11-14', '', '', '', 'TIME TBD', WALL_TIME_UNREADABLE],
+  ['Game', 'Team B', 'Away', '2026-11-14', '12:00', '13:00', ZONE, 'Scheduled', ''],
   ['Practice', '', '', '2026-11-19', '', '', '', 'TIME TBD', 'contended'],
   ['Practice', '', '', '2026-11-28', '09:00', '10:00', ZONE, 'Moved', ''],
-  ['Game', 'Team B', 'Home', '', '', '', '', 'Date and time TBD', GAME_SLOT_MISSING],
-  ['Game', 'Team B', 'Home', '', '', '', '', 'Date and time TBD', GAME_SLOT_MISSING],
   ['Practice', '', '', '', '', '', '', 'Date and time TBD', 'PRACTICE_RANGE_UNREADABLE'],
 ];
 
@@ -225,7 +237,7 @@ afterEach(() => {
 });
 
 describe('the schedule export: one row per event, none dropped', () => {
-  it('holds every event of the team, TIME TBD and slotless ones included, in schedule order', async () => {
+  it('holds every event of the team, TIME TBD ones included, in schedule order', async () => {
     const { read, rows } = await readTeamA();
     expect(rows.map(summary)).toEqual(EXPECTED);
     // One row per event the page shows, the same count read independently.
@@ -240,10 +252,30 @@ describe('the schedule export: one row per event, none dropped', () => {
 
   it('says why each event has no time, in the feed’s words', async () => {
     const { rows } = await readTeamA();
-    const byCode = (code) => rows.find((row) => row[H.REASON_CODE] === code)[H.REASON];
-    expect(byCode(GAME_SLOT_MISSING)).toBe(UNPLACEABLE_CAUSES[GAME_SLOT_MISSING]);
-    expect(byCode(WALL_TIME_UNREADABLE)).toBe(UNPLACEABLE_CAUSES[WALL_TIME_UNREADABLE]);
+    const byCode = (code, from = rows) => from.find((row) => row[H.REASON_CODE] === code)[H.REASON];
     expect(byCode('contended')).toBe(UNPLACEABLE_CAUSES.contended);
+    // The export's own arms for a game with no slot and for a day with no time. No saved game is either (a saved
+    // game carries its own start and end), so they are held on events given to the export directly.
+    const odd = teamScheduleRows([
+      {
+        team: TEAM,
+        timeZone: ZONE,
+        events: [
+          { id: 'x', type: 'game', date: null, startTime: null, endTime: null, hasSlot: false },
+          {
+            id: 'y',
+            type: 'game',
+            date: '2026-11-14',
+            startTime: null,
+            endTime: null,
+            hasSlot: true,
+          },
+        ],
+      },
+    ]);
+    expect(odd.map((row) => row[H.STATUS])).toEqual(['Date and time TBD', 'TIME TBD']);
+    expect(byCode(GAME_SLOT_MISSING, odd)).toBe(UNPLACEABLE_CAUSES[GAME_SLOT_MISSING]);
+    expect(byCode(WALL_TIME_UNREADABLE, odd)).toBe(UNPLACEABLE_CAUSES[WALL_TIME_UNREADABLE]);
     // The twin pins: this module's sentences are the feed's.
     for (const [code, sentence] of Object.entries(TEAM_SCHEDULE_CAUSES)) {
       expect(sentence).toBe(UNPLACEABLE_CAUSES[code]);
@@ -470,7 +502,7 @@ describe('the calendar download', () => {
       `${untimed} of ${rows.length} events have no confirmed time`
     );
     expect(calendar['X-WR-CALDESC']).toContain(
-      'except 3 with no known day, which appear only here'
+      'except 1 with no known day, which appear only here'
     );
   });
 
@@ -488,7 +520,7 @@ describe('the calendar download', () => {
     );
   });
 
-  it('places nothing on a clock when the season has no timezone, and names no zone', async () => {
+  it('places no wall time on a clock when the season has no timezone, and names no zone', async () => {
     const { read } = await readTeamA();
     const { calendar, events } = parseIcs(
       await teamCalendarIcs({
@@ -500,7 +532,16 @@ describe('the calendar download', () => {
     );
     expect(calendar['X-WR-TIMEZONE']).toBeUndefined();
     expect(events.length).toBeGreaterThan(0);
-    for (const event of events) expect(event.DTSTART.params.VALUE).toBe('DATE');
+    // A practice is a wall time, which needs the season's clock: a day with no time. A saved game carries its own
+    // instants (`game_assignments.start` is a moment, not a wall reading), so it stays where it is.
+    const games = events.filter((event) => event.UID.value.startsWith('game-r7-'));
+    expect(games.map((event) => event.DTSTART.value).sort()).toEqual([
+      '20261107T180000Z',
+      '20261114T200000Z',
+    ]);
+    const practices = events.filter((event) => !event.UID.value.startsWith('game-r7-'));
+    expect(practices.length).toBeGreaterThan(0);
+    for (const event of practices) expect(event.DTSTART.params.VALUE).toBe('DATE');
   });
 
   it('renames the page’s embeds to the feed’s and changes nothing else', () => {
@@ -524,6 +565,11 @@ describe('the calendar download', () => {
       fields: { name: 'F', locations: { name: 'L' } },
     });
     expect(feed.games[1].game_slots).toBeNull();
+    // A saved game's own instants go with it (absent reads as none).
+    expect(
+      feedRowsOf({ games: [{ id: 'g', start: 'a', end: 'b', game_slot: null }] }).games
+    ).toEqual([{ id: 'g', start: 'a', end: 'b', game_slots: null }]);
+    expect(feed.games[0]).toMatchObject({ start: null, end: null });
     expect(feed.practices[0]).toEqual({
       id: 'p',
       effective_date_range: '[2026-11-02,2026-11-30)',

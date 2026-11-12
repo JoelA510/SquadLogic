@@ -21,6 +21,80 @@ type MockRow = Record<string, unknown>;
 const dayFromToday = (days: number) =>
   new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 
+/**
+ * The UTC instant of a wall time in the mock season's zone (America/Los_Angeles) on a date: whichever of the zone's
+ * two offsets reads back as that time, so the seed is right on either side of a clock change.
+ */
+function losAngelesInstant(date: string, hour: number): string {
+  const wallHour = (iso: string) =>
+    Number(
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/Los_Angeles',
+        hour: '2-digit',
+        hourCycle: 'h23',
+      }).format(new Date(iso))
+    );
+  const two = (n: number) => String(n).padStart(2, '0');
+  const at = [7, 8]
+    .map((offset) => `${date}T${two(hour + offset)}:00:00+00:00`)
+    .find((iso) => wallHour(iso) === hour);
+  if (!at) throw new Error(`seed: ${date} has no ${hour}:00 in America/Los_Angeles`);
+  return at;
+}
+
+/**
+ * Two played games of the saved schedule (F11-3: Scores and Standings list the season's saved games, not the legacy
+ * `games` table): Team A at home to Team B yesterday, scored 2 to 1, and again an hour ago, not scored yet. They are
+ * rows of `game_assignments` in the seed's completed game run, and the score is a row of `game_scores`.
+ */
+async function seedPlayedGames(page: Page) {
+  await openMock(page);
+  await page.evaluate((mockOrgId) => {
+    const db = JSON.parse(
+      sessionStorage.getItem('__MOCK_DB__') || JSON.stringify(window.__MOCK_DB__ || {})
+    );
+    const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+    const run = (db.scheduler_runs || []).find(
+      (r: MockRow) =>
+        r.organization_id === orgId && r.run_type === 'game' && r.status === 'completed'
+    );
+    if (!run) throw new Error('seed: the mock db has no completed game run');
+    const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
+    const game = (id: string, startedAgo: number) => ({
+      id,
+      organization_id: orgId,
+      run_id: run.id,
+      home_team_id: 't1',
+      away_team_id: 't2',
+      week_index: 1,
+      start: ago(startedAgo),
+      end: ago(startedAgo - 3_600_000),
+      assignment_source: 'auto',
+      published: false,
+    });
+    const ids = ['ga-e2e-played-1', 'ga-e2e-played-2'];
+    db.game_assignments = (db.game_assignments || []).filter(
+      (g: MockRow) => !ids.includes(String(g.id))
+    );
+    db.game_assignments.push(game(ids[0], 86_400_000), game(ids[1], 3_600_000));
+    db.game_scores = (db.game_scores || []).filter(
+      (s: MockRow) => !ids.includes(String(s.game_id))
+    );
+    db.game_scores.push({
+      game_id: ids[0],
+      organization_id: orgId,
+      home_team_id: 't1',
+      away_team_id: 't2',
+      score_home: 2,
+      score_away: 1,
+      created_at: ago(80_000_000),
+      updated_at: ago(80_000_000),
+      updated_by: null,
+    });
+    window.__saveMockDB__(db);
+  }, MOCK_ORG_ID);
+}
+
 async function openMock(page: Page) {
   if (page.url() === 'about:blank') await page.goto('/');
   await waitForMockClient(page);
@@ -38,12 +112,18 @@ Given('the league has turned on score entry and standings', async ({ page }) => 
     org.feature_flags = { ...(org.feature_flags || {}), score_entry: true, standings: true };
     window.__saveMockDB__(db);
   }, MOCK_ORG_ID);
+  // And there is something to score: the pages list the saved schedule's played games.
+  await seedPlayedGames(page);
+});
+
+Given('the saved schedule has two played games, one already scored', async ({ page }) => {
+  await seedPlayedGames(page);
 });
 
 Given('Team A has an upcoming game and a weekly practice', async ({ page }) => {
   await openMock(page);
   await page.evaluate(
-    ({ mockOrgId, gameDate, from, until }) => {
+    ({ mockOrgId, gameDate, gameStart, gameEnd, from, until }) => {
       const db = JSON.parse(
         sessionStorage.getItem('__MOCK_DB__') || JSON.stringify(window.__MOCK_DB__ || {})
       );
@@ -57,16 +137,30 @@ Given('Team A has an upcoming game and a weekly practice', async ({ page }) => {
         start_time: '10:00:00',
         end_time: '11:00:00',
       });
-      db.games = (db.games || []).filter((g: MockRow) => g.id !== 'game-e2e-coach');
-      db.games.push({
+      // A saved game (F11-3: the team page and its files read `game_assignments` of the season's current game
+      // run), 10:00 to 11:00 on the season's clock.
+      const run = (db.scheduler_runs || []).find(
+        (r: MockRow) =>
+          r.organization_id === orgId && r.run_type === 'game' && r.status === 'completed'
+      );
+      if (!run) throw new Error('seed: the mock db has no completed game run');
+      db.game_assignments = (db.game_assignments || []).filter(
+        (g: MockRow) => g.id !== 'game-e2e-coach'
+      );
+      db.game_assignments.push({
         id: 'game-e2e-coach',
         organization_id: orgId,
+        run_id: run.id,
         home_team_id: 't1',
         away_team_id: 't2',
         game_slot_id: 'gs-e2e-coach',
-        start_time: `${gameDate}T17:00:00Z`,
-        score_home: null,
-        score_away: null,
+        slot_id: 'gs-e2e-coach',
+        field_id: 'v1',
+        week_index: 1,
+        start: gameStart,
+        end: gameEnd,
+        assignment_source: 'auto',
+        published: false,
       });
       db.practice_slots = (db.practice_slots || []).filter((s: MockRow) => s.id !== 'ps-e2e-coach');
       db.practice_slots.push({
@@ -96,6 +190,8 @@ Given('Team A has an upcoming game and a weekly practice', async ({ page }) => {
     {
       mockOrgId: MOCK_ORG_ID,
       gameDate: dayFromToday(5),
+      gameStart: losAngelesInstant(dayFromToday(5), 10),
+      gameEnd: losAngelesInstant(dayFromToday(5), 11),
       from: dayFromToday(0),
       until: dayFromToday(27),
     }

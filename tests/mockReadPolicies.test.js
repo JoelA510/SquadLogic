@@ -129,8 +129,27 @@ describe('mock rotate_calendar_token and update_game_score :: who may', () => {
   });
 
   // Admin focus R6 (20261028010000): score entry is an admin's, behind the
-  // league's `score_entry` setting (off unless set; 55000 while it is off).
+  // league's `score_entry` setting (off unless set; 55000 while it is off). Since F11-3 a score names a SAVED game
+  // (20261122010000): the game is seeded into the season's current game run.
   it('scores a game for an admin only, and only while score entry is on', async () => {
+    const GAME = 'ga-policy';
+    const run = getMockData('scheduler_runs').find(
+      (r) => r.run_type === 'game' && r.status === 'completed'
+    );
+    expect(run, 'the seed has a completed game run').toBeTruthy();
+    seedMockDb({
+      game_assignments: [
+        {
+          id: GAME,
+          organization_id: ORG,
+          run_id: run.id,
+          home_team_id: 't1',
+          away_team_id: 't2',
+          week_index: 1,
+        },
+      ],
+    });
+    const stored = () => getMockData('game_scores').find((row) => row.game_id === GAME);
     const score = (gameId) =>
       supabase.rpc('update_game_score', {
         p_organization_id: ORG,
@@ -140,9 +159,9 @@ describe('mock rotate_calendar_token and update_game_score :: who may', () => {
       });
 
     setSession('mock-admin-id');
-    const off = await score('game-2');
+    const off = await score(GAME);
     expect(off.error?.code).toBe('55000');
-    expect(getMockData('games').find((g) => g.id === 'game-2')?.score_home).toBeNull();
+    expect(stored()).toBeUndefined();
 
     // Turned on as the settings page does it, through the audited RPC.
     const flags = await supabase.rpc('update_org_feature_flags', {
@@ -152,36 +171,36 @@ describe('mock rotate_calendar_token and update_game_score :: who may', () => {
     expect(flags.error).toBeNull();
 
     setSession('mock-outsider-id');
-    expect((await score('game-2')).error?.code).toBe('42501');
+    expect((await score(GAME)).error?.code).toBe('42501');
     // A coach's account (a non-member) is refused too.
     setSession('mock-coach-id');
-    expect((await score('game-2')).error?.code).toBe('42501');
-    expect(getMockData('games').find((g) => g.id === 'game-2')?.score_home).toBeNull();
+    expect((await score(GAME)).error?.code).toBe('42501');
+    expect(stored()).toBeUndefined();
     // Nor may a non-member turn the setting on.
     expect(
       (await supabase.rpc('update_org_feature_flags', { p_org_id: ORG, p_flags: {} })).error
     ).toBeTruthy();
 
     setSession('mock-admin-id');
-    const own = await score('game-2');
+    const own = await score(GAME);
     expect(own.error).toBeNull();
-    expect(getMockData('games').find((g) => g.id === 'game-2')?.score_home).toBe(3);
+    expect(stored()?.score_home).toBe(3);
   });
 });
 
 describe('mock .or() :: an in-list with several values', () => {
   it('reads every value of an in-list', async () => {
-    // Split on every comma, `home_team_id.in.(zzz,t2)` became the clauses
-    // `home_team_id.in.(zzz` and `t2)`, and a filter on two teams matched none.
+    // Split on every comma, `id.in.(zzz,t1)` became the clauses `id.in.(zzz` and `t1)`, and a filter on
+    // two ids matched none.
     const { data, error } = await supabase
-      .from('games')
+      .from('teams')
       .select('*')
-      .or('home_team_id.in.(zzz,t1),away_team_id.in.(zzz,yyy)');
+      .or('id.in.(zzz,t1),name.in.(zzz,yyy)');
     expect(error).toBeNull();
-    const seeded = getMockData('games').filter((g) => g.home_team_id === 't1');
-    expect(seeded.length, 'no seeded game is home to t1, so this matches nothing').toBeGreaterThan(
-      0
+    const seeded = getMockData('teams').filter((team) => team.id === 't1');
+    expect(seeded.length, 'no seeded team is t1, so this matches nothing').toBeGreaterThan(0);
+    expect((data || []).map((team) => team.id).sort()).toEqual(
+      seeded.map((team) => team.id).sort()
     );
-    expect((data || []).map((g) => g.id).sort()).toEqual(seeded.map((g) => g.id).sort());
   });
 });

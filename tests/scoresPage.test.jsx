@@ -232,8 +232,8 @@ describe('ScoresPage: results that are not in the saved schedule are counted, no
     cleanup();
 
     // Old data only (a scored game is held, so a save cannot leave it behind): a later run that does not hold it.
-    const supabase = await client();
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__'));
+    await client();
+    const db = JSON.parse(JSON.stringify(window.__MOCK_DB__));
     db.scheduler_runs.push({
       id: 'run-later',
       organization_id: ORG,
@@ -242,10 +242,7 @@ describe('ScoresPage: results that are not in the saved schedule are counted, no
       status: 'completed',
       completed_at: '2026-10-15T00:00:00Z',
     });
-    window.__saveMockDB__
-      ? window.__saveMockDB__(db)
-      : sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-    expect(supabase).toBeTruthy();
+    window.__saveMockDB__(db);
     renderPage();
     expect(await screen.findByTestId('scores-outside-schedule')).toHaveTextContent(
       '1 earlier result is not listed here: its game is no longer in the saved schedule. It still counts in the standings.'

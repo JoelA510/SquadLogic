@@ -9,6 +9,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 import { readXlsx } from './helpers/readXlsx.js';
+import { seedMockDb } from './helpers/seedMockDb.js';
 import { parseIcs } from './helpers/parseIcs.js';
 import {
   TEAM_SCHEDULE_COLUMNS,
@@ -74,6 +75,35 @@ beforeEach(() => {
   sessionStorage.clear();
   delete window.__MOCK_DB__;
   sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify({ user: { id: 'mock-admin-id' } }));
+  // One saved game, Team A at home to Team B, in the seed's completed game run (F11-3: the files read the saved
+  // schedule). In November Los Angeles is UTC-8.
+  seedMockDb({
+    game_slots: [
+      {
+        id: 'gs-ui',
+        organization_id: MOCK_ORG_ID,
+        field_id: 'v1',
+        slot_date: '2026-11-07',
+        start_time: '10:00:00',
+        end_time: '11:00:00',
+      },
+    ],
+    game_assignments: [
+      {
+        id: 'game-ui',
+        organization_id: MOCK_ORG_ID,
+        run_id: 'run-game-1',
+        home_team_id: 't1',
+        away_team_id: 't2',
+        game_slot_id: 'gs-ui',
+        slot_id: 'gs-ui',
+        field_id: 'v1',
+        week_index: 1,
+        start: '2026-11-07T18:00:00+00:00',
+        end: '2026-11-07T19:00:00+00:00',
+      },
+    ],
+  });
   saved = [];
   let current = null;
   URL.createObjectURL = vi.fn((blob) => {
@@ -110,12 +140,15 @@ describe('the schedule downloads', () => {
       { team: TEAM_A, timeZone: ZONE, events: a.events },
       { team: TEAM_B, timeZone: ZONE, events: b.events },
     ]);
-    // The base seed's two slotless games are Team A's and Team B's.
-    expect(rows.length).toBeGreaterThanOrEqual(4);
+    // The saved game below is in both teams' schedules: two rows of the file, each timed.
+    expect(rows.filter((row) => row['Event Type'] === 'Game')).toHaveLength(2);
+    const untimed = rows.filter((row) => !row.Start).length;
     expect(await saved[0].blob.text()).toBe(teamScheduleCsv(rows));
     expect(
       await within(group).findByText(
-        new RegExp(`Downloaded ${rows.length} event\\(s\\), 4 with no confirmed time`)
+        new RegExp(
+          `Downloaded ${rows.length} event\\(s\\)${untimed ? `, ${untimed} with no confirmed time` : ''}`
+        )
       )
     ).toBeInTheDocument();
   });
@@ -153,16 +186,19 @@ describe('the schedule downloads', () => {
     render(<Exports teams={[TEAM_A, TEAM_B]} />);
     const group = await exportsGroup();
     // Now the games read fails for the export.
+    // Team B's games (the saved schedule, `game_assignments`) cannot be read; Team A's can.
     vi.spyOn(mockSupabase, 'from').mockImplementation((table) =>
-      table === 'games'
+      table === 'game_assignments'
         ? /** @type {any} */ ({
-            select: () => ({
+            select: (columns) => ({
               or: (filter) =>
-                Promise.resolve(
-                  filter.includes('t2')
-                    ? { data: null, error: { message: 'boom' } }
-                    : realFrom('games').select('*').or(filter)
-                ),
+                filter.includes('t2')
+                  ? {
+                      order: () => ({
+                        range: () => Promise.resolve({ data: null, error: { message: 'boom' } }),
+                      }),
+                    }
+                  : realFrom('game_assignments').select(columns).or(filter),
             }),
           })
         : realFrom(table)

@@ -453,6 +453,113 @@ const initialMockData = {
   game_assignments: [],
   // The legacy table: kept, unread by any page since F11-3, and seeded with nothing (F11-5 drops it).
   games: [],
+  scheduler_runs: [
+    {
+      id: 'run-practice-1',
+      organization_id: MOCK_ORG_ID,
+      season_id: MOCK_SEASON_ID,
+      run_type: 'practice',
+      status: 'completed',
+      created_at: new Date().toISOString(),
+      completed_at: new Date().toISOString(),
+      results: {
+        summary: { assignmentRate: 1.0, manualFollowUpRate: 0, unassignedTeams: 0 },
+        baseSlotDistribution: [
+          { baseSlotId: 'slot_mon_1800', day: 'Monday', totalCapacity: 10, totalAssigned: 1 },
+          { baseSlotId: 'slot_wed_1800', day: 'Wednesday', totalCapacity: 10, totalAssigned: 0 },
+        ],
+      },
+    },
+    {
+      id: 'run-game-1',
+      organization_id: MOCK_ORG_ID,
+      season_id: MOCK_SEASON_ID,
+      run_type: 'game',
+      status: 'completed',
+      created_at: new Date().toISOString(),
+      completed_at: new Date().toISOString(),
+      results: {
+        summary: { assignmentRate: 1.0, manualFollowUpRate: 0, unassignedTeams: 0 },
+      },
+    },
+    {
+      id: 'run-1',
+      organization_id: MOCK_ORG_ID,
+      season_settings_id: MOCK_SEASON_ID,
+      run_type: 'team',
+      status: 'completed',
+      results: {
+        teamsByDivision: {
+          'U8 Boys': [
+            { id: 't1', name: 'Team A', division_id: 'U8 Boys', headCoach: 'Mock Admin' },
+            { id: 't2', name: 'Team B', division_id: 'U8 Boys', headCoach: 'Mock Coach' },
+          ],
+        },
+        rosterBalanceByDivision: {
+          'U8 Boys': {
+            summary: { totalPlayers: 24, totalCapacity: 30, averageFillRate: 0.8 },
+            teamStats: [
+              { teamId: 't1', slotsRemaining: 3 },
+              { teamId: 't2', slotsRemaining: 3 },
+            ],
+          },
+        },
+        coachCoverageByDivision: {
+          'U8 Boys': { totalTeams: 2, teamsWithCoach: 2, coverageRate: 1.0 },
+        },
+      },
+      started_at: new Date(Date.now() - 3600000).toISOString(),
+      completed_at: new Date().toISOString(),
+    },
+  ],
+  team_summaries: [
+    {
+      id: 'summary-1',
+      organization_id: MOCK_ORG_ID,
+      season_id: MOCK_SEASON_ID,
+      total_players: 24,
+      total_teams: 2,
+      unassigned_players: 0,
+      skill_balance_score: 92,
+      last_updated: new Date().toISOString(),
+    },
+  ],
+  imports: [
+    {
+      id: 'import-1',
+      user_id: 'mock-admin-id',
+      organization_id: MOCK_ORG_ID,
+      import_type: 'players',
+      data: {
+        totalRows: 2,
+        validRows: 2,
+        data: [
+          {
+            'First Name': 'Alex',
+            'Last Name': 'Smith',
+            Birthdate: '2015-05-15',
+            Gender: 'm',
+            'Skill Level': 'advanced',
+          },
+          {
+            'First Name': 'Sam',
+            'Last Name': 'Jones',
+            Birthdate: '2016-08-20',
+            Gender: 'f',
+            'Skill Level': 'developing',
+          },
+        ],
+        fileName: 'mock_players.csv',
+      },
+      created_at: new Date(Date.now() - 86400000).toISOString(),
+    },
+  ],
+  import_jobs: [],
+  staging_players: [],
+  staging_import_rows: [],
+  import_application_records: [],
+  field_availability_profiles: [],
+  field_availability_profile_formats: [],
   field_blackout_windows: [],
   field_blackouts: [],
   publication_baselines: [],
@@ -1899,13 +2006,13 @@ const createMockQuery = (table, data = null) => {
         // An embed PostgREST refuses returns no data, single or not.
       } else if (isSingle) {
         if (results.length > 0) {
-          finalData = finalData[0];
+          finalData = projectRow ? finalData[0] : results[0];
         } else {
           finalData = null;
           error = { code: 'PGRST116', message: 'No rows found' };
         }
       } else if (isMaybeSingle) {
-        finalData = results.length > 0 ? finalData[0] : null;
+        finalData = results.length === 0 ? null : projectRow ? finalData[0] : results[0];
       }
 
       if (headOnly) finalData = null;

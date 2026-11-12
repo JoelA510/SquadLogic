@@ -42,8 +42,17 @@ function requireClient(client) {
 }
 
 /** A database error in its own words. @param {any} error @param {string} fallback */
+/** Words for a refusal whose database message is not written for a person. */
+const RPC_REFUSAL_WORDS = {
+  import_not_ready_to_apply:
+    'This import is no longer waiting to be applied (it was applied or discarded in the meantime), so it was not discarded.',
+};
+
 function fromRpc(error, fallback) {
-  return refusal(error?.message || fallback, error?.details || error?.code || null);
+  return refusal(
+    RPC_REFUSAL_WORDS[error?.details] || error?.message || fallback,
+    error?.details || error?.code || null
+  );
 }
 
 /**
@@ -386,12 +395,13 @@ export const GAME_IMPORT_DISCARDABLE_STATUS = 'ready_to_apply';
  * `import.canceled`), so it can no longer be mapped or applied. Its staged rows stay with the failed job (they hold
  * labels, dates and times, no person's data) and go when the job does.
  *
- * The discard is never sent blind. `cancel_ready_import_job` as deployed does not check the job's status: sent for a
- * job that was APPLIED it marks it `failed`, which leaves the games saved, takes the job out of the roll back and
- * audits an `import.canceled` that did not happen. So the job is read first, here, for every caller, and the call is
- * made only for a job read as `ready_to_apply`; a job that cannot be read is not discarded (the read's error is
- * thrown). The time between this read and the call is the database's to close: the function is to refuse such a job
- * itself in the next migration (docs/changes/2026-11-03-schedule-expansion.md).
+ * The job is read first, here, for every caller, and the call is made only for a job read as `ready_to_apply`; a job
+ * that cannot be read is not discarded (the read's error is thrown). Since migration 20261122010000 the function
+ * itself refuses a job that is not `ready_to_apply` (22023, `import_not_ready_to_apply`; before it, it marked an
+ * APPLIED job `failed`, which took it out of the roll back). The read stays: it answers with the job's status without
+ * a refused call, and it is the only check while a database still runs the older body. It may go once the migration
+ * is deployed (docs/changes/2026-11-03-schedule-expansion.md). A job that changes between the read and the call is
+ * refused by the function: that is not an error here, the job is read again and reported as not discarded.
  *
  * @param {any} client
  * @param {string} jobId
@@ -406,6 +416,9 @@ export async function discardGameImport(client, jobId) {
     p_import_job_id: jobId,
     p_import_type: 'games',
   });
+  if (error?.details === 'import_not_ready_to_apply') {
+    return { discarded: false, status: (await readGameImportJobState(client, jobId)).status };
+  }
   if (error) throw fromRpc(error, 'The staged import could not be discarded.');
   return { discarded: true, status };
 }

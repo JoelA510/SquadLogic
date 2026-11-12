@@ -1157,7 +1157,13 @@ export function ImportProvider({ children }) {
         setImportStatus('idle');
         setProgress(0);
         localStorage.removeItem('importStatus');
-        addLog(`${type} import canceled before apply.`);
+        // A job that was no longer waiting (applied or cancelled in another tab: the function refuses it since
+        // 20261122010000) is settled the same way, from the job as it is, and said in words.
+        addLog(
+          cancelResult?.status === 'not_cancelled'
+            ? cancelResult.message
+            : `${type} import canceled before apply.`
+        );
         return cancelResult;
       } catch (err) {
         logger.error('Import cancel failed:', err);

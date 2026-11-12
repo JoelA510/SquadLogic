@@ -3423,7 +3423,7 @@ $$;
 REVOKE ALL ON FUNCTION public.standings_counts_outside(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.standings_counts_outside(uuid) TO authenticated, service_role;
 COMMENT ON FUNCTION public.standings_counts_outside(uuid) IS
-    'Whether a division''s standings count its teams'' results against outside clubs (teams.is_external). Today the organization''s standings_count_outside_results setting, false unless set; the program and division levels (F11-4) replace this one body. SECURITY DEFINER because view_league_standings calls it as its reader and org_flag is closed to client roles; it answers false for a division of an organization the caller is not a member of. 20261122010000.';
+    'Whether a division''s standings count its teams'' results against outside clubs (teams.is_external). Today the organization''s standings_count_outside_results setting, false unless set; the program and division levels (F11-4) replace this one body. It runs with its owner''s rights because view_league_standings calls it as its reader and org_flag is closed to client roles; it answers false for a division of an organization the caller is not a member of. 20261122010000.';
 
 -- The same fourteen columns in the same order (CREATE OR REPLACE keeps the grants and the reader''s rights), and one
 -- appended. The CTE is still named game_results; it now reads the score table.

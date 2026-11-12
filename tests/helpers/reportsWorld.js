@@ -161,6 +161,9 @@ export function tbdRows() {
       away_team_name: 'Synthetic Meteors',
       week_index: 2,
       reason: 'no-slot-available',
+      // As `get_schedule_tbd` answers since 20261122010000: every game row carries the two keys.
+      game_date: null,
+      external_ref: null,
     },
     {
       id: 'tbd-2',

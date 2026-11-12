@@ -1,7 +1,7 @@
 /**
  * E3 of F11-3 (schedule expansion PR 6, review follow-up 1): `ImportContext` is mounted once for the whole app, so
  * what it holds about an import (the job in flight, and each type's last import with its `importJobId`) must not
- * outlive a switch of organization or season. Reproduced here first, over the real mock client: an organization with
+ * outlive a switch of organization. Reproduced here first, over the real mock client: an organization with
  * an import in flight and a coach import on record, then a switch to an organization with neither.
  */
 import React from 'react';
@@ -99,12 +99,13 @@ describe('ImportContext forgets one scope’s import when the scope changes', ()
     expect(hook.result.current.isImporting).toBe(false);
   });
 
-  it('a switch of season: the same, and the organization’s job in flight is read again for the new one', async () => {
+  it('a switch of season keeps the organization’s import: the job and the import on record are the organization’s', async () => {
     const hook = await mountInA();
     scope.season = 'season-b';
     hook.rerender();
     await settle();
-    // The import on record and the job are the organization's: read again, not carried over by accident.
+    // `import_jobs` and `imports` are read by organization, and the job carries its own season to its apply: a switch
+    // of season shows no other organization's data, so nothing is reset (the brief's "or season", checked and dropped).
     await waitFor(() => expect(hook.result.current.activeJob?.id).toBe('job-a'));
     expect(hook.result.current.importedCoaches?.importJobId).toBe('job-a-earlier');
   });

@@ -349,8 +349,34 @@ export function ImportProvider({ children }) {
     setImportLogs((prev) => [...prev, { timestamp: new Date(), message }]);
   }, []);
 
+  // 1b. One import belongs to ONE organization. This provider is mounted once for the whole app, so a switch of
+  // organization forgets what it held about the last one's (the job in flight and each type's last import, with its
+  // `importJobId`) before the load below reads the new one's: otherwise the import screen would offer to apply, cancel
+  // or continue another organization's job (F11-3, E3; the schedule import panel does the same by its key).
+  const scopeOrgId = currentOrganization?.id ?? null;
+  const scopeOrgRef = useRef(scopeOrgId);
+  useEffect(() => {
+    if (scopeOrgRef.current === scopeOrgId) return;
+    scopeOrgRef.current = scopeOrgId;
+    setActiveJobId(null);
+    setActiveJob(null);
+    setIsImporting(false);
+    setProgress(0);
+    setImportStatus('idle');
+    localStorage.removeItem('importStatus');
+    setImportedPlayers(null);
+    setImportedCoaches(null);
+    setImportedEvaluations(null);
+    setImportedFields(null);
+    setImportedFieldAvailability(null);
+    setImportedData(null);
+  }, [scopeOrgId]);
+
   // 2. Load initial state & Setup Realtime Subscriptions
   useEffect(() => {
+    // A load still answering for an organization that is no longer the current one writes nothing.
+    const loadingFor = currentOrganization?.id ?? null;
+    const stillCurrent = () => scopeOrgRef.current === loadingFor;
     const loadFromSupabase = async () => {
       try {
         let readyImportType = null;
@@ -394,6 +420,7 @@ export function ImportProvider({ children }) {
             .order('created_at', { ascending: false })
             .limit(1);
 
+          if (!stillCurrent()) return;
           if (activeJobs && activeJobs.length > 0) {
             const job = activeJobs[0];
             if (job.status === 'ready_to_apply') {
@@ -417,6 +444,7 @@ export function ImportProvider({ children }) {
           .order('created_at', { ascending: false });
 
         if (error) throw error;
+        if (!stillCurrent()) return;
 
         if (data && !readyImportType) {
           const latestPlayers = data.find((i) => i.import_type === 'players');

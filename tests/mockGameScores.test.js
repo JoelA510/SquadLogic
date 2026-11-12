@@ -329,8 +329,8 @@ describe("the held rule :: Published or scored, one predicate, in the database's
     score(db, e('02'), 3, 1);
     const row = db.game_assignments.find((g) => g.id === e('02'));
     expect(mockGameIsHeld(db, e('02'))).toBe(true);
-    expect(isHeld(row, isRowScored(row, db))).toBe(true);
-    expect(isHeld(row, false)).toBe(false);
+    expect(isHeld({ ...row, scored: isRowScored(row, db) })).toBe(true);
+    expect(isHeld({ ...row, scored: false })).toBe(false);
     expect(
       mockGameHeldIds(db, [e('01'), e('02'), e('03')])
         .map((id) => id.slice(-4))

@@ -55,30 +55,28 @@ const slotOf = (game) => {
  *
  * Only a boolean `true` holds: a string such as `'true'` is not a flag (the database column is a boolean).
  *
- * Since 20261122010000 (F11-2) a game with a score is held too. `scored` is whether the game has one: by default the
- * game's own `scored` flag, which `useGameAssignments` sets from `game_scores` for every game it loads, so every caller
- * that asks about a loaded game gets Published OR scored without naming it; a caller that holds the score apart passes
- * it. Only a boolean `true` counts, for either.
+ * Since 20261122010000 (F11-2) a game with a score is held too. Whether it has one is the game's own `scored` flag,
+ * which `useGameAssignments` sets from `game_scores` for every game it loads. There is ONE argument on purpose: a
+ * second, optional one would be filled by an array callback's index (`games.filter(isHeld)` hands `(game, index)`),
+ * and a scored game at index 0 would read as not held. Only a boolean `true` counts, for either flag.
  *
  * @param {{ published?: unknown, scored?: unknown } | null | undefined} game
- * @param {boolean} [scored] - whether the game has a score (default: the game's own `scored === true`)
  * @returns {boolean}
  */
-export function isHeld(game, scored = game?.scored === true) {
-  return game?.published === true || scored === true;
+export function isHeld(game) {
+  return game?.published === true || game?.scored === true;
 }
 
 /**
  * Why a held game is held, for the words of a refusal: the database's `game_hold_code`. A held game that is Published is
  * `'published'` (changes to it must be allowed first, whether or not it also has a score); one that is not is held by
- * its score. Null when the game is not held: this never decides whether a game is held.
+ * its score. Null when the game is not held: this never decides whether a game is held. One argument, as `isHeld`.
  *
  * @param {{ published?: unknown, scored?: unknown } | null | undefined} game
- * @param {boolean} [scored]
  * @returns {'published' | 'scored' | null}
  */
-export function holdReason(game, scored = game?.scored === true) {
-  if (!isHeld(game, scored)) return null;
+export function holdReason(game) {
+  if (!isHeld(game)) return null;
   return game?.published === true ? 'published' : 'scored';
 }
 

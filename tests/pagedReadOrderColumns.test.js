@@ -280,3 +280,189 @@ describe("the mock keeps and returns the database's columns for the score relati
     expect(Object.keys(deriveCurrentGameRuns(db)[0])).toEqual(RELATIONS.get('current_game_runs'));
   });
 });
+
+/**
+ * F11-3: every read of the saved schedule names real columns and real foreign keys, embeds included (the readers
+ * repointed off the legacy `games` table embed a game's slot, sides, ground and score, and the mock answers an embed
+ * PostgREST refuses unless it is told the schema; lessons 104 to 108). Subjects: every `.from('<relation>')` of the
+ * five relations below in `frontend/src` and `supabase/functions`, outside the mock and the tests. A select given as a
+ * constant of the same file is read from that constant. Each embed must be a relation the parent reaches by a foreign
+ * key: forward, through a column of the parent (named by its `!hint` where there are two), or back, from a relation
+ * whose key names the parent (`game_scores` to `game_assignments`). The keys are written out here from the
+ * migrations and checked against them below.
+ */
+describe('every read of the saved schedule names real columns and real foreign keys (F11-3)', () => {
+  const SUBJECTS = [
+    'game_assignments',
+    'game_scores',
+    'game_slots',
+    'view_league_standings',
+    'current_game_runs',
+  ];
+  /** parent -> embedded relation -> the parent's columns that reference it (forward), or 'reverse'. */
+  const KEYS = {
+    game_assignments: {
+      game_slots: ['game_slot_id', 'slot_id'],
+      teams: ['home_team_id', 'away_team_id'],
+      fields: ['field_id'],
+      game_scores: 'reverse',
+    },
+    game_slots: { fields: ['field_id'], divisions: ['division_id'] },
+    fields: { locations: ['location_id'] },
+    teams: { divisions: ['division_id'] },
+  };
+  const ALL_FILES = [
+    ...FILES,
+    ...sourceFiles(path.join(ROOT, 'supabase/functions')).map((file) => ({
+      file: path.relative(ROOT, file),
+      text: readFileSync(file, 'utf8'),
+    })),
+    ...readdirSync(path.join(ROOT, 'supabase/functions/_shared/calendar'))
+      .filter((name) => name.endsWith('.ts'))
+      .map((name) => {
+        const file = path.join(ROOT, 'supabase/functions/_shared/calendar', name);
+        return { file: path.relative(ROOT, file), text: readFileSync(file, 'utf8') };
+      }),
+  ].filter(({ file }) => !/\/lib\/mock|\/tests\/|_test\.ts$/.test(file));
+
+  /** The text of a string constant of a file (`const NAME = '...' + '...'`), or null. */
+  function constantText(text, name) {
+    const match = new RegExp(`const ${name}\\s*=\\s*([^;]+);`).exec(text);
+    if (!match) return null;
+    return [...match[1].matchAll(/(['"`])((?:(?!\1)[\s\S])*)\1/g)].map((m) => m[2]).join('');
+  }
+  function topLevel(text) {
+    const parts = [];
+    let depth = 0;
+    let current = '';
+    for (const ch of text) {
+      if (ch === '(') depth += 1;
+      if (ch === ')') depth -= 1;
+      if (ch === ',' && depth === 0) {
+        parts.push(current);
+        current = '';
+      } else current += ch;
+    }
+    parts.push(current);
+    return parts.map((part) => part.trim()).filter(Boolean);
+  }
+  /** Problems with a select list read against `relation`. */
+  function judgeSelect(relation, select, where) {
+    const problems = [];
+    const columns = RELATIONS.get(relation);
+    if (!columns) return [`${where}: ${relation} is not a table or view`];
+    for (const part of topLevel(select)) {
+      const embed = /^(?:\w+\s*:\s*)?(\w+)((?:\s*!\s*\w+)*)\s*\(([\s\S]*)\)$/.exec(part);
+      if (!embed) {
+        const column = part.replace(/^\w+\s*:\s*/, '').trim();
+        if (column !== '*' && !columns.includes(column))
+          problems.push(`${where}: ${relation}.${column} does not exist`);
+        continue;
+      }
+      const [, child, bangs, inner] = embed;
+      const hints = bangs
+        .split('!')
+        .map((w) => w.trim())
+        .filter((w) => w && w !== 'inner' && w !== 'left');
+      const key = KEYS[relation]?.[child];
+      if (!key) problems.push(`${where}: ${relation} has no foreign key to or from ${child}`);
+      else if (key !== 'reverse') {
+        if (key.length > 1 && hints.length === 0)
+          problems.push(`${where}: ${relation} -> ${child} is ambiguous without a column hint`);
+        if (hints.length > 0 && !key.includes(hints[0]))
+          problems.push(
+            `${where}: ${relation} -> ${child} hinted by ${hints[0]}, not a key column`
+          );
+      }
+      problems.push(...judgeSelect(child, inner, where));
+    }
+    return problems;
+  }
+  function reads(files = ALL_FILES) {
+    const found = [];
+    for (const { file, text } of files) {
+      for (const match of text.matchAll(/\.from\(\s*['"](\w+)['"]\s*\)/g)) {
+        if (!SUBJECTS.includes(match[1])) continue;
+        const end = text.indexOf(';', match.index);
+        const chain = text.slice(match.index, end);
+        const where = `${file}:${text.slice(0, match.index).split('\n').length}`;
+        const literal = /\.select\(\s*(['"`])((?:(?!\1)[\s\S])*)\1/.exec(chain)?.[2];
+        const named = /\.select\(\s*([A-Z_][A-Z0-9_]*)\s*[,)]/.exec(chain)?.[1];
+        const select = literal ?? (named ? constantText(text, named) : null);
+        const filters = [
+          ...[...chain.matchAll(/\.(?:eq|neq|in|is|gt|gte|lt|lte|order)\(\s*['"](\w+)['"]/g)].map(
+            (m) => m[1]
+          ),
+          ...[...chain.matchAll(/orderBy:\s*['"](\w+)['"]/g)].map((m) => m[1]),
+          ...[...chain.matchAll(/\.or\(\s*[`'"]([^`'"]*)[`'"]/g)].flatMap((m) =>
+            m[1].split(',').map((clause) => clause.split('.')[0])
+          ),
+        ];
+        found.push({ where, relation: match[1], select, filters });
+      }
+    }
+    return found;
+  }
+  function judgeReads(found) {
+    const problems = [];
+    for (const read of found) {
+      if (read.select === null) problems.push(`${read.where}: the select list cannot be read`);
+      else problems.push(...judgeSelect(read.relation, read.select, read.where));
+      for (const column of read.filters) {
+        if (!RELATIONS.get(read.relation).includes(column))
+          problems.push(`${read.where}: filters ${read.relation}.${column}, which does not exist`);
+      }
+    }
+    return problems;
+  }
+
+  it('the keys written above are the migrations’ own (each column is one the parent has)', () => {
+    for (const [parent, children] of Object.entries(KEYS)) {
+      for (const columns of Object.values(children)) {
+        if (columns === 'reverse') continue;
+        for (const column of columns) expect(RELATIONS.get(parent), parent).toContain(column);
+      }
+    }
+    expect(RELATIONS.get('game_scores')).toContain('game_id');
+  });
+
+  it('finds the reads of every repointed reader and of the feed', () => {
+    const found = reads();
+    const where = found.map((read) => read.where.split(':')[0]);
+    for (const file of [
+      'frontend/src/utils/savedGamesClient.js',
+      'frontend/src/pages/ScoresPage.jsx',
+      'frontend/src/hooks/useGameAssignments.js',
+      'supabase/functions/_shared/calendar/teamFeed.ts',
+    ]) {
+      expect(where, file).toContain(file);
+    }
+    expect(found.every((read) => read.select !== null)).toBe(true);
+  });
+
+  it('each names only columns its relations have, and embeds only through a key', () => {
+    expect(judgeReads(reads())).toEqual([]);
+  });
+
+  it('PLANT: an unhinted slot, a hint on no key, a column of the legacy table and an unrelated embed are each reported', () => {
+    const planted = [
+      "supabase.from('game_assignments').select('id, game_slots(slot_date)');",
+      "supabase.from('game_assignments').select('id, home:teams!coach_id(name)');",
+      "supabase.from('game_assignments').select('id, start_time, score_home').eq('season_id', s);",
+      "supabase.from('game_assignments').select('id, games(id)');",
+      "supabase.from('current_game_runs').select('run_id').or(`season_id.eq.${x}`);",
+    ];
+    const problems = judgeReads(
+      reads(planted.map((text, i) => ({ file: `planted${i}.js`, text })))
+    );
+    expect(problems).toEqual([
+      'planted0.js:1: game_assignments -> game_slots is ambiguous without a column hint',
+      'planted1.js:1: game_assignments -> teams hinted by coach_id, not a key column',
+      'planted2.js:1: game_assignments.start_time does not exist',
+      'planted2.js:1: game_assignments.score_home does not exist',
+      'planted2.js:1: filters game_assignments.season_id, which does not exist',
+      'planted3.js:1: game_assignments has no foreign key to or from games',
+      'planted4.js:1: filters current_game_runs.season_id, which does not exist',
+    ]);
+  });
+});

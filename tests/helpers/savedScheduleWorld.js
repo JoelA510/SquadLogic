@@ -28,7 +28,7 @@ export const TEAM_NAMES = {
   planets: 'Synthetic Planets',
 };
 
-/** [slot id, field, date, local start hour] */
+/** [slot id, field, date, local start hour] @type {Array<[string, string, string, number]>} */
 const SLOT_DEFS = [
   ['slot-1', 'field-north', '2026-10-03', 9],
   ['slot-2', 'field-south', '2026-10-03', 9],
@@ -45,9 +45,14 @@ const slotOf = (id) => SLOT_DEFS.find(([slot]) => slot === id);
 /**
  * One assignment of the save's payload: `home` v `away` in `slot`, an hour long unless told otherwise
  * (`minutes`: an imported game can end at another time than its slot).
+ *
+ * @param {keyof typeof TEAMS} home
+ * @param {keyof typeof TEAMS} away
+ * @param {string} slot
+ * @param {{ id?: string, week?: number, minutes?: number }} [options]
  */
 export function assignment(home, away, slot, { id, week = 1, minutes = 60 } = {}) {
-  const [, field, date, hour] = slotOf(slot);
+  const [, field, date, hour] = /** @type {[string, string, string, number]} */ (slotOf(slot));
   return {
     ...(id ? { id } : {}),
     home_team_id: TEAMS[home],

@@ -98,6 +98,7 @@ export async function fetchTeamSavedGames(teamId) {
  * the embed is not carried under another name.
  *
  * @param {Record<string, any>} row
+ * @returns {Record<string, any>}
  */
 export function withScore({ game_scores: scores, ...row }) {
   const score = Array.isArray(scores) ? (scores[0] ?? null) : (scores ?? null);

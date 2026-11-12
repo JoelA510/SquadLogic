@@ -4,10 +4,9 @@
  * - One read, bounded to the run: the games with their score embedded through the foreign key
  *   (`game_assignments` selecting `game_scores(game_id)`), not a second read of every score the organization ever
  *   recorded. One snapshot, so a game and its hold cannot disagree.
- * - Before migration 20261122010000 is applied (the client is deployed at merge, the migration some minutes later, or
- *   not at all if a guard stops it) there is no `game_scores` to embed: PostgREST answers PGRST200 (no relationship),
- *   PGRST205 or 42P01 (no table). That, and only that, reads as "no game is scored": the schedule loads as it did
- *   before, and it is logged once. Any other failure is an error, as before.
+ * - Since F11-3 (migration 20261122010000 is deployed, verified 2026-11-12) there is no fallback: a database that
+ *   answers "no `game_scores`" (PGRST200, PGRST205, 42P01) is an error the page says, never "no game is scored",
+ *   which would leave every scored game unheld on screen.
  */
 import { renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -54,8 +53,7 @@ vi.mock('../frontend/src/lib/logger.js', () => {
   return { logger: { error: vi.fn(), warn: mocks.warn, log: vi.fn(), info: vi.fn() } };
 });
 
-const { useGameAssignments, resetScoreRelationNotice } =
-  await import('../frontend/src/hooks/useGameAssignments.js');
+const { useGameAssignments } = await import('../frontend/src/hooks/useGameAssignments.js');
 
 const game = (id, extra = {}) => ({
   id,
@@ -69,7 +67,6 @@ const EMBED = '*, game_scores(game_id)';
 beforeEach(() => {
   mocks.reads.length = 0;
   mocks.warn.mockClear();
-  resetScoreRelationNotice();
 });
 
 async function load() {
@@ -110,7 +107,7 @@ describe('the games and their scores are one read of the run', () => {
   });
 });
 
-describe('before the migration is applied the schedule still loads', () => {
+describe('a database with no game_scores is an error, not an unscored schedule (F11-3, E1)', () => {
   const MISSING = [
     {
       code: 'PGRST200',
@@ -122,44 +119,21 @@ describe('before the migration is applied the schedule still loads', () => {
       message: "Could not find the table 'public.game_scores' in the schema cache",
     },
     { code: '42P01', message: 'relation "public.game_scores" does not exist' },
+    { code: '42501', message: 'permission denied for table game_scores' },
   ];
 
   it.each(MISSING)(
-    '$code: no game is scored, the games are read without the embed, and it is said once',
+    '$code: the read fails, with no second read and no schedule',
     async (missing) => {
       mocks.answer = (select) =>
         select === EMBED
           ? { data: null, error: missing }
           : { data: [game('a'), game('b')], error: null };
-      const first = await load();
-      expect(first.error).toBe(null);
-      expect(first.assignments.map((a) => [a.id, a.scored])).toEqual([
-        ['a', false],
-        ['b', false],
-      ]);
-      expect(mocks.reads.map((r) => r.select)).toEqual([EMBED, '*']);
-      await load();
-      expect(mocks.warn).toHaveBeenCalledTimes(1);
+      const { assignments, error } = await load();
+      expect(error).toMatchObject({ code: missing.code });
+      expect(assignments).toEqual([]);
+      expect(mocks.reads.map((r) => r.select)).toEqual([EMBED]);
+      expect(mocks.warn).not.toHaveBeenCalled();
     }
   );
-
-  it('CONTROL: any other failure of the read is an error, with no second read and no schedule', async () => {
-    mocks.answer = () => ({
-      data: null,
-      error: { code: '42501', message: 'permission denied for table game_scores' },
-    });
-    const { assignments, error } = await load();
-    expect(error).toMatchObject({ code: '42501' });
-    expect(assignments).toEqual([]);
-    expect(mocks.reads.map((r) => r.select)).toEqual([EMBED]);
-  });
-
-  it('CONTROL: a failure of the fallback read is an error too', async () => {
-    mocks.answer = (select) =>
-      select === EMBED
-        ? { data: null, error: { code: 'PGRST200', message: 'no relationship' } }
-        : { data: null, error: { code: '500', message: 'boom' } };
-    const { error } = await load();
-    expect(error).toMatchObject({ code: '500' });
-  });
 });

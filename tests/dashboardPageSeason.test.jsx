@@ -155,10 +155,10 @@ describe('DashboardPage (the admin home)', () => {
     const kpi = (await screen.findByText('Games scheduled')).closest('.kpi');
     await waitFor(() => expect(kpi.querySelector('.kpi-val')).toHaveTextContent(/^3$/));
     // Upcoming: the two that have not started, soonest first; the played one is not listed.
-    const soon = screen.getByText('Soon Home');
-    const later = screen.getByText('Later Home');
+    const soon = screen.getByText(/Soon Home/);
+    const later = screen.getByText(/Later Home/);
     expect(soon.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.queryByText('Past Home')).toBeNull();
+    expect(screen.queryByText(/Past Home/)).toBeNull();
     // What was read: the season's current run, then its games; never the legacy table.
     expect(mocks.reads.map((read) => read.table)).not.toContain('games');
     expect(mocks.reads.find((read) => read.table === 'current_game_runs').eqs).toEqual([

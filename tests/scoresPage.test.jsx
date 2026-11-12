@@ -5,6 +5,7 @@
 // writes is read back from `game_scores`. A score is both numbers or none: the page holds a half-entered score and
 // sends the two together.
 import React from 'react';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
@@ -49,6 +50,12 @@ vi.mock('../frontend/src/lib/logger.js', () => ({
 }));
 
 const { default: ScoresPage } = await import('../frontend/src/pages/ScoresPage.jsx');
+const renderPage = () =>
+  render(
+    <MemoryRouter>
+      <ScoresPage />
+    </MemoryRouter>
+  );
 
 const LIVE = { id: SEASON, status: 'active', timezone: TZ };
 /** After both game days (2026-10-03 and 2026-10-10). */
@@ -88,7 +95,7 @@ afterEach(() => {
 
 describe('ScoresPage lists the saved schedule', () => {
   it('says there is nothing to score when no schedule is saved', async () => {
-    render(<ScoresPage />);
+    renderPage();
     expect(await screen.findByRole('grid', { name: 'Scores grid' })).toBeInTheDocument();
     expect(screen.getByText(/No past games yet/)).toBeInTheDocument();
   });
@@ -99,7 +106,7 @@ describe('ScoresPage lists the saved schedule', () => {
       assignment('meteors', 'planets', 'slot-4', { week: 2 }),
     ]);
     await score(await gameId(run, 'comets', 'rockets'), 2, 1);
-    render(<ScoresPage />);
+    renderPage();
     expect(await screen.findByText(TEAM_NAMES.rockets)).toBeInTheDocument();
     const names = screen.getAllByRole('row').map((row) => row.textContent);
     expect(names.findIndex((text) => text.includes(TEAM_NAMES.planets))).toBeLessThan(
@@ -118,7 +125,7 @@ describe('ScoresPage lists the saved schedule', () => {
       assignment('comets', 'rockets', 'slot-1'),
       assignment('meteors', 'planets', 'slot-4', { week: 2 }),
     ]);
-    render(<ScoresPage />);
+    renderPage();
     expect(await screen.findByText(TEAM_NAMES.rockets)).toBeInTheDocument();
     expect(screen.queryByText(TEAM_NAMES.planets)).toBeNull();
   });
@@ -126,7 +133,7 @@ describe('ScoresPage lists the saved schedule', () => {
   it('lists a game moved by a later save once, and not the row it left in the earlier run', async () => {
     await save([assignment('comets', 'rockets', 'slot-1')]);
     await save([assignment('comets', 'rockets', 'slot-4', { week: 2 })]);
-    render(<ScoresPage />);
+    renderPage();
     expect(await screen.findByText(TEAM_NAMES.rockets)).toBeInTheDocument();
     expect(screen.getAllByText(TEAM_NAMES.rockets)).toHaveLength(1);
   });
@@ -136,7 +143,7 @@ describe('ScoresPage sends both scores of a game together', () => {
   async function open() {
     const run = await save([assignment('comets', 'rockets', 'slot-1')]);
     const id = await gameId(run, 'comets', 'rockets');
-    render(<ScoresPage />);
+    renderPage();
     await screen.findByText(TEAM_NAMES.rockets);
     return id;
   }
@@ -161,7 +168,7 @@ describe('ScoresPage sends both scores of a game together', () => {
     const id = await open();
     await score(id, 2, 2);
     cleanup();
-    render(<ScoresPage />);
+    renderPage();
     await screen.findByText(TEAM_NAMES.rockets);
     await type(TEAM_NAMES.rockets, 3, '4');
     await waitFor(async () => expect(await scores()).toEqual([[id, 4, 2]]));
@@ -198,7 +205,7 @@ describe('ScoresPage: a completed season’s scores are history', () => {
     await score(await gameId(run, 'comets', 'rockets'), 1, 0);
     mocks.season = { ...LIVE, status: 'completed' };
     mocks.seasons = [mocks.season];
-    render(<ScoresPage />);
+    renderPage();
     expect(await screen.findByText(TEAM_NAMES.rockets)).toBeInTheDocument();
     expect(screen.getByTestId('season-readonly-note')).toHaveTextContent('completed season');
     fireEvent.doubleClick(cell(TEAM_NAMES.rockets, 3));
@@ -207,7 +214,7 @@ describe('ScoresPage: a completed season’s scores are history', () => {
 
   it('CONTROL: the active season’s game opens its editor and shows no note', async () => {
     await save([assignment('comets', 'rockets', 'slot-1')]);
-    render(<ScoresPage />);
+    renderPage();
     await screen.findByText(TEAM_NAMES.rockets);
     expect(screen.queryByTestId('season-readonly-note')).toBeNull();
     fireEvent.doubleClick(cell(TEAM_NAMES.rockets, 3));
@@ -219,7 +226,7 @@ describe('ScoresPage: results that are not in the saved schedule are counted, no
   it('says how many, and says nothing when there is none', async () => {
     const run = await save([assignment('comets', 'rockets', 'slot-1')]);
     await score(await gameId(run, 'comets', 'rockets'), 1, 0);
-    render(<ScoresPage />);
+    renderPage();
     await screen.findByText(TEAM_NAMES.rockets);
     expect(screen.queryByTestId('scores-outside-schedule')).toBeNull();
     cleanup();
@@ -239,7 +246,7 @@ describe('ScoresPage: results that are not in the saved schedule are counted, no
       ? window.__saveMockDB__(db)
       : sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
     expect(supabase).toBeTruthy();
-    render(<ScoresPage />);
+    renderPage();
     expect(await screen.findByTestId('scores-outside-schedule')).toHaveTextContent(
       '1 earlier result is not listed here: its game is no longer in the saved schedule. It still counts in the standings.'
     );

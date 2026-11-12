@@ -255,11 +255,11 @@ describe('PlayerRecordPage', () => {
 
     it('lists them in order with a score, from the saved schedule and not the legacy table', async () => {
       await openSchedule();
-      const early = await screen.findByText('Early Rivals');
-      const late = screen.getByText('Late Rivals');
+      const early = await screen.findByText(/Early Rivals/);
+      const late = screen.getByText(/Late Rivals/);
       expect(early.compareDocumentPosition(late) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(screen.getByText('4–2')).toBeInTheDocument();
-      expect(screen.queryByText('Hidden Rivals')).toBeNull();
+      expect(screen.queryByText(/Hidden Rivals/)).toBeNull();
       expect(mocks.reads).toContain('game_assignments');
       expect(mocks.reads).toContain('current_game_runs');
       expect(mocks.reads).not.toContain('games');
@@ -271,7 +271,7 @@ describe('PlayerRecordPage', () => {
         mocks.failing = [table];
         await openSchedule();
         expect(await screen.findByText('Games could not be loaded.')).toBeInTheDocument();
-        expect(screen.queryByText('Early Rivals')).toBeNull();
+        expect(screen.queryByText(/Early Rivals/)).toBeNull();
       }
     );
   });

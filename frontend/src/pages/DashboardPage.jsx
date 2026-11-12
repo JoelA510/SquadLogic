@@ -23,6 +23,7 @@ import Avatar from '../components/ui/Avatar.jsx';
 import LoadingScreen from '../components/LoadingScreen.jsx';
 import { supabase } from '../lib/supabaseClient.js';
 import { fetchAllPages } from '../lib/pagedFetch.js';
+import { fetchCurrentSavedGames } from '../utils/savedGamesClient.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { usePermission } from '../hooks/usePermission.js';
@@ -104,14 +105,8 @@ function useHomeData() {
                   .eq('season_settings_id', seasonId)
               )
             : [],
-          fetchAllPages(() =>
-            supabase
-              .from('games')
-              .select(
-                `id, start_time, home_team:home_team_id (id, name, division:divisions (name)), away_team:away_team_id (id, name)`
-              )
-              .eq('organization_id', orgId)
-          ),
+          // The season's saved schedule: the games of its current game run (F11-3).
+          seasonId ? fetchCurrentSavedGames({ organizationId: orgId, seasonId }) : [],
           fetchAllPages(() =>
             supabase.from('practice_slots').select('id').eq('organization_id', orgId)
           ),
@@ -172,8 +167,8 @@ function AdminHome() {
   const upcoming = useMemo(
     () =>
       games
-        .filter((g) => g.start_time && new Date(g.start_time) >= new Date())
-        .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
+        .filter((g) => g.start && new Date(g.start) >= new Date())
+        .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
         .slice(0, 5),
     [games]
   );
@@ -422,7 +417,7 @@ function AdminHome() {
                 </div>
               )}
               {upcoming.map((game, index) => {
-                const date = new Date(game.start_time);
+                const date = new Date(game.start);
                 return (
                   <div
                     key={game.id}

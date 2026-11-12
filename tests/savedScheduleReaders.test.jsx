@@ -26,7 +26,7 @@ vi.mock('../frontend/src/lib/logger.js', () => ({
 }));
 
 const { mockSupabase } = await import('../frontend/src/lib/mockSupabaseClient.js');
-const { fetchCurrentSavedGames, fetchTeamSavedGames } =
+const { fetchCurrentGameRunIds, fetchCurrentSavedGames, fetchSavedGames, fetchTeamSavedGames } =
   await import('../frontend/src/utils/savedGamesClient.js');
 const { fetchTeamEvents } = await import('../frontend/src/hooks/useTeamPortal.js');
 const { confirmPreview, stageMapPreview } = await import('./helpers/gameImportFlow.js');
@@ -38,15 +38,24 @@ const READERS = {
   'frontend/src/pages/DashboardPage.jsx': 'fetchCurrentSavedGames',
   'frontend/src/pages/LeagueStandings.jsx': 'fetchCurrentSavedGames',
   'frontend/src/pages/PlayerRecordPage.jsx': 'fetchTeamSavedGames',
-  'frontend/src/pages/ScoresPage.jsx': 'fetchCurrentSavedGames',
+  'frontend/src/pages/ScoresPage.jsx': 'fetchSavedGames',
 };
 
-const db = () => JSON.parse(JSON.stringify(window.__MOCK_DB__));
+/** The raw tables, by plain reads of whole tables (no embed, no view: nothing a reader under test uses). */
+async function db() {
+  const out = {};
+  for (const table of ['scheduler_runs', 'game_assignments', 'game_scores']) {
+    const { data, error } = await mockSupabase.from(table).select('*');
+    if (error) throw error;
+    out[table] = data;
+  }
+  return out;
+}
 const key = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
 /** The schedule of a season, from the raw tables: the rows of its latest completed game run, with their scores. */
-function oracle(org, season) {
-  const raw = db();
+async function oracle(org, season) {
+  const raw = await db();
   const runs = (raw.scheduler_runs || [])
     .filter(
       (run) =>
@@ -86,10 +95,13 @@ const shown = (rows) =>
 
 /** Run every reader and hold it to the oracle. Returns how many games the schedule holds. */
 async function readersAgree(org, season, teams, timeZone) {
-  const expected = oracle(org, season);
+  const expected = await oracle(org, season);
   expect(shown(await fetchCurrentSavedGames({ organizationId: org, seasonId: season }))).toEqual(
     expected
   );
+  // The Scores page asks for the run first and then its games.
+  const runIds = await fetchCurrentGameRunIds({ organizationId: org, seasonId: season });
+  expect(shown(await fetchSavedGames({ runIds }))).toEqual(expected);
   for (const team of teams) {
     const mine = expected.filter((game) => game.home === team || game.away === team);
     expect(shown(await fetchTeamSavedGames(team)), `team ${team}`).toEqual(mine);
@@ -122,6 +134,7 @@ describe('the readers are found by scan and each is run', () => {
     // Each reader named above is one this file runs (`readersAgree`).
     expect([...new Set(Object.values(READERS))].sort()).toEqual([
       'fetchCurrentSavedGames',
+      'fetchSavedGames',
       'fetchTeamSavedGames',
     ]);
   });
@@ -146,7 +159,7 @@ describe('after every write of the game save and the score entry', () => {
     const scored = await gameId(first, 'comets', 'rockets');
     await score(scored, 3, 1);
     expect(await readersAgree(ORG, SEASON, teams, TZ)).toBe(3);
-    expect(oracle(ORG, SEASON).find((game) => game.id === scored).score).toEqual([3, 1]);
+    expect((await oracle(ORG, SEASON)).find((game) => game.id === scored).score).toEqual([3, 1]);
 
     // A second save: the scored game is carried by its id, one game is moved in place, one is placed again without
     // its id (its earlier row stays behind in the earlier run, hidden).
@@ -158,11 +171,11 @@ describe('after every write of the game save and the score entry', () => {
     ]);
     expect(await readersAgree(ORG, SEASON, teams, TZ)).toBe(3);
     // The control that the case is real: the table holds a row no reader may show.
-    expect(db().game_assignments.length).toBe(4);
+    expect((await db()).game_assignments.length).toBe(4);
 
     await score(scored, null, null);
     expect(await readersAgree(ORG, SEASON, teams, TZ)).toBe(3);
-    expect(db().game_scores).toEqual([]);
+    expect((await db()).game_scores).toEqual([]);
 
     const cancelled = await mockSupabase.rpc('admin_cancel_game_assignment', {
       p_assignment_id: moved,
@@ -180,7 +193,7 @@ describe('after an import is applied and rolled back', () => {
   it('the readers show the import’s games, and after the rollback the schedule it replaced', async () => {
     importWorld.seedGameImportWorld();
     const tz = SEASON_ROW.timezone;
-    const before = oracle(ORG, SEASON);
+    const before = await oracle(ORG, SEASON);
     expect(await readersAgree(ORG, SEASON, teams, tz)).toBe(before.length);
     expect(before.length).toBe(3);
 
@@ -201,7 +214,7 @@ describe('after an import is applied and rolled back', () => {
       seasonSettingsId: SEASON,
     });
     expect(await readersAgree(ORG, SEASON, teams, tz)).toBe(before.length);
-    expect(oracle(ORG, SEASON).map((game) => [game.id, game.start, game.end])).toEqual(
+    expect((await oracle(ORG, SEASON)).map((game) => [game.id, game.start, game.end])).toEqual(
       before.map((game) => [game.id, game.start, game.end])
     );
   });

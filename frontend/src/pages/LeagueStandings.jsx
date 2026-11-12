@@ -8,16 +8,11 @@ import { useFeatures } from '../hooks/useFeatures.js';
 import { FEATURE_FLAGS } from '../constants/featureFlags.js';
 import { divisionDisplayName } from '../utils/divisions.js';
 import ScoreNotSavedAlert from '../components/ScoreNotSavedAlert.jsx';
-import { SCORE_NOT_SAVED_HERE, isScoreNotSavableHere } from '../utils/scoreSaveRefusal.js';
+import { isHalfEntered, scoreRefusalText, typeScore } from '../utils/scoreEntry.js';
+import { fetchCurrentSavedGames, hasStarted } from '../utils/savedGamesClient.js';
 
-const parseScoreInput = (score) => {
-  if (score === '' || score === null || score === undefined) return null;
-  const parsed = parseInt(score, 10);
-  return Number.isNaN(parsed) ? null : parsed;
-};
-
-const getRpcScore = (data, key, fallback) =>
-  data && Object.prototype.hasOwnProperty.call(data, key) ? data[key] : fallback;
+/** How many played games the page lists for score entry, newest first. */
+const RECENT_GAMES = 50;
 
 // Divisions belong to a season, so the view holds an organization's teams from
 // every season: rank only the selected season's. With no season selected there
@@ -43,6 +38,8 @@ export default function LeagueStandings() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [updatingGameId, setUpdatingGameId] = useState(null);
+  // What is typed and not saved yet, by game: one number of a score whose other is still empty.
+  const [drafts, setDrafts] = useState(/** @type {Record<string, any>} */ ({}));
   const [scoreNotSaved, setScoreNotSaved] = useState(/** @type {string | null} */ (null));
 
   const { genderModel, isEnabled } = useFeatures();
@@ -67,26 +64,19 @@ export default function LeagueStandings() {
         if (standingsErr) throw standingsErr;
         setStandings(standingsData || []);
 
-        // Load Games for Score Entry
-        const { data: gamesData, error: gamesErr } = await supabase
-          .from('games')
-          .select(
-            `
-             id,
-             start_time,
-             score_home,
-             score_away,
-             home_team:home_team_id (id, name, division:divisions (name)),
-             away_team:away_team_id (id, name, division:divisions (name))
-          `
-          )
-          .eq('organization_id', currentOrganization.id)
-          .lte('start_time', new Date().toISOString()) // Only past games
-          .order('start_time', { ascending: false })
-          .limit(50);
-
-        if (gamesErr) throw gamesErr;
-        setGames(gamesData || []);
+        // The season's saved games whose start has passed, newest first (F11-3: the saved schedule and its
+        // scores, the rows the standings above are computed from).
+        const saved = seasonId
+          ? await fetchCurrentSavedGames({ organizationId: currentOrganization.id, seasonId })
+          : [];
+        const now = Date.now();
+        setDrafts({});
+        setGames(
+          saved
+            .filter((game) => hasStarted(game, now))
+            .sort((a, b) => Date.parse(b.start) - Date.parse(a.start))
+            .slice(0, RECENT_GAMES)
+        );
       } catch (err) {
         logger.error(err);
         setError('Failed to load standings and games data.');
@@ -97,34 +87,34 @@ export default function LeagueStandings() {
     loadData();
   }, [currentOrganization?.id, seasonId]);
 
-  const handleScoreUpdate = async (gameId, homeScore, awayScore) => {
-    if (!currentOrganization?.id) return;
-    try {
-      setUpdatingGameId(gameId);
-      const hScore = parseScoreInput(homeScore);
-      const aScore = parseScoreInput(awayScore);
+  const forgetDraft = (gameId) =>
+    setDrafts((current) =>
+      Object.fromEntries(Object.entries(current).filter(([id]) => id !== gameId))
+    );
 
-      const { data, error } = await supabase.rpc('update_game_score', {
+  // A score is both numbers or none (the database refuses one without the other): one number is held on the page
+  // until the other is entered, and the two are sent together.
+  const handleScoreUpdate = async (game, side, value) => {
+    if (!currentOrganization?.id) return;
+    const { entry, send } = typeScore(game, drafts[game.id], side, value);
+    setDrafts((current) => ({ ...current, [game.id]: entry }));
+    if (!send) {
+      if (!isHalfEntered(entry)) forgetDraft(game.id);
+      return;
+    }
+    try {
+      setUpdatingGameId(game.id);
+      const { error } = await supabase.rpc('update_game_score', {
         p_organization_id: currentOrganization.id,
-        p_game_id: gameId,
-        p_score_home: hScore,
-        p_score_away: aScore,
+        p_game_id: game.id,
+        p_score_home: entry.score_home,
+        p_score_away: entry.score_away,
       });
 
       if (error) throw error;
       setScoreNotSaved(null);
-
-      const persistedHomeScore = getRpcScore(data, 'score_home', hScore);
-      const persistedAwayScore = getRpcScore(data, 'score_away', aScore);
-
-      // Update local game state
-      setGames((prev) =>
-        prev.map((g) =>
-          g.id === gameId
-            ? { ...g, score_home: persistedHomeScore, score_away: persistedAwayScore }
-            : g
-        )
-      );
+      setGames((prev) => prev.map((g) => (g.id === game.id ? { ...g, ...entry } : g)));
+      forgetDraft(game.id);
 
       // Refresh Standings View since data changed
       const { data: standingsData } = await fetchStandings(currentOrganization.id, seasonId);
@@ -132,11 +122,9 @@ export default function LeagueStandings() {
       if (standingsData) setStandings(standingsData);
     } catch (err) {
       logger.error(err);
-      // Said on the page, and in the same words as the Scores page when the save is one this list cannot make (it
-      // reads the earlier games table: utils/scoreSaveRefusal.js).
-      setScoreNotSaved(
-        isScoreNotSavableHere(err) ? SCORE_NOT_SAVED_HERE : 'The score was not saved. Try again.'
-      );
+      // The boxes go back to the saved score, and why is said on the page, in the Scores page's words.
+      forgetDraft(game.id);
+      setScoreNotSaved(scoreRefusalText(err));
     } finally {
       setUpdatingGameId(null);
     }
@@ -267,66 +255,70 @@ export default function LeagueStandings() {
           {canEditScores && '- Score Entry'}
         </h2>
 
-        {/* The list below is still the earlier games table (F11-3 repoints it), so it can differ from the saved
-            schedule the standings above are computed from: said where the list is. */}
-        <p className="mb-4 text-sm text-text-secondary" data-testid="recent-games-source-note">
-          These games are read from the earlier games table, not from the saved schedule, until this
-          page is updated.
-        </p>
         <ScoreNotSavedAlert message={scoreNotSaved} className="mb-4" />
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {games.map((game) => (
-            <div
-              key={game.id}
-              className="bg-bg-app border border-border-highlight rounded-lg p-4 space-y-4"
-              data-testid="game-score-card"
-            >
-              <div className="text-xs text-text-muted text-center border-b border-border-subtle pb-2 mb-2">
-                {new Date(game.start_time).toLocaleDateString()} •{' '}
-                {displayDivision(game.home_team?.division?.name || game.home_team?.division)}
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="font-semibold text-text-primary truncate w-1/3 text-right">
-                  {game.home_team?.name}
-                </span>
-                <div className="flex items-center gap-2 w-1/3 justify-center">
-                  {canEditScores ? (
-                    <>
-                      <input
-                        type="number"
-                        className="w-12 h-10 bg-bg-surface border border-border-highlight text-center rounded text-text-primary font-bold focus:border-color-primary focus:ring-1 focus:ring-color-primary"
-                        value={game.score_home ?? ''}
-                        onChange={(e) =>
-                          handleScoreUpdate(game.id, e.target.value, game.score_away)
-                        }
-                        disabled={updatingGameId === game.id}
-                        aria-label="Home Score"
-                      />
-                      <span className="text-text-muted font-bold">-</span>
-                      <input
-                        type="number"
-                        className="w-12 h-10 bg-bg-surface border border-border-highlight text-center rounded text-text-primary font-bold focus:border-color-primary focus:ring-1 focus:ring-color-primary"
-                        value={game.score_away ?? ''}
-                        onChange={(e) =>
-                          handleScoreUpdate(game.id, game.score_home, e.target.value)
-                        }
-                        disabled={updatingGameId === game.id}
-                        aria-label="Away Score"
-                      />
-                    </>
-                  ) : (
-                    <div className="text-lg font-bold text-text-primary">
-                      {game.score_home ?? '-'} <span className="text-text-muted mx-1">-</span>{' '}
-                      {game.score_away ?? '-'}
-                    </div>
-                  )}
+          {games.map((saved) => {
+            // What the boxes hold: the saved score with what is typed and unsaved over it.
+            const game = { ...saved, ...(drafts[saved.id] ?? {}) };
+            const half = isHalfEntered(drafts[saved.id]);
+            return (
+              <div
+                key={game.id}
+                className="bg-bg-app border border-border-highlight rounded-lg p-4 space-y-4"
+                data-testid="game-score-card"
+              >
+                <div className="text-xs text-text-muted text-center border-b border-border-subtle pb-2 mb-2">
+                  {new Date(game.start).toLocaleDateString()} •{' '}
+                  {displayDivision(game.home_team?.division?.name || game.home_team?.division)}
                 </div>
-                <span className="font-semibold text-text-primary truncate w-1/3 text-left">
-                  {game.away_team?.name}
-                </span>
+                <div className="flex justify-between items-center">
+                  <span className="font-semibold text-text-primary truncate w-1/3 text-right">
+                    {game.home_team?.name}
+                  </span>
+                  <div className="flex items-center gap-2 w-1/3 justify-center">
+                    {canEditScores ? (
+                      <>
+                        <input
+                          type="number"
+                          className="w-12 h-10 bg-bg-surface border border-border-highlight text-center rounded text-text-primary font-bold focus:border-color-primary focus:ring-1 focus:ring-color-primary"
+                          value={game.score_home ?? ''}
+                          onChange={(e) => handleScoreUpdate(saved, 'score_home', e.target.value)}
+                          disabled={updatingGameId === game.id}
+                          aria-label="Home Score"
+                        />
+                        <span className="text-text-muted font-bold">-</span>
+                        <input
+                          type="number"
+                          className="w-12 h-10 bg-bg-surface border border-border-highlight text-center rounded text-text-primary font-bold focus:border-color-primary focus:ring-1 focus:ring-color-primary"
+                          value={game.score_away ?? ''}
+                          onChange={(e) => handleScoreUpdate(saved, 'score_away', e.target.value)}
+                          disabled={updatingGameId === game.id}
+                          aria-label="Away Score"
+                        />
+                      </>
+                    ) : (
+                      <div className="text-lg font-bold text-text-primary">
+                        {game.score_home ?? '-'} <span className="text-text-muted mx-1">-</span>{' '}
+                        {game.score_away ?? '-'}
+                      </div>
+                    )}
+                  </div>
+                  <span className="font-semibold text-text-primary truncate w-1/3 text-left">
+                    {game.away_team?.name}
+                  </span>
+                </div>
+                {half && (
+                  <p
+                    className="text-xs text-text-secondary text-center"
+                    data-testid="score-needs-both"
+                    role="status"
+                  >
+                    Enter both scores to save.
+                  </p>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
           {games.length === 0 && (
             <div className="col-span-full text-center py-8 text-text-secondary">
               No past games found to enter scores.

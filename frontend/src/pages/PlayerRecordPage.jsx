@@ -9,6 +9,7 @@ import Avatar from '../components/ui/Avatar.jsx';
 import InlineField from '../components/ui/InlineField.jsx';
 import { useToast } from '../components/ui/ToastHost.jsx';
 import { supabase } from '../lib/supabaseClient.js';
+import { fetchTeamSavedGames } from '../utils/savedGamesClient.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { useFeatures } from '../hooks/useFeatures.js';
 import { FEATURE_FLAGS } from '../constants/featureFlags.js';
@@ -36,6 +37,9 @@ function Stars({ n = 0 }) {
  * contacts are not stored (20261025010000; leagues keep them on their
  * registration platform).
  */
+/** How many of the team's games the Schedule tab lists. */
+const PLAYER_GAMES_SHOWN = 10;
+
 export default function PlayerRecordPage() {
   const { playerId } = useParams();
   const navigate = useNavigate();
@@ -91,15 +95,17 @@ export default function PlayerRecordPage() {
               )
               .eq('team_id', found.team_id)
               .limit(10),
-            supabase
-              .from('games')
-              .select(
-                `id, start_time, score_home, score_away,
-                 home_team:home_team_id (id, name), away_team:away_team_id (id, name)`
-              )
-              .or(`home_team_id.eq.${found.team_id},away_team_id.eq.${found.team_id}`)
-              .order('start_time', { ascending: true })
-              .limit(10),
+            // The team's games in the saved schedule, with their scores (F11-3): the first ten by start. A failed
+            // read is said on the page, as the practices' is.
+            fetchTeamSavedGames(found.team_id).then(
+              (rows) => ({
+                data: rows
+                  .sort((a, b) => Date.parse(a.start) - Date.parse(b.start))
+                  .slice(0, PLAYER_GAMES_SHOWN),
+                error: null,
+              }),
+              (error) => ({ data: null, error })
+            ),
           ]);
           if (!cancelled) {
             if (practicesRes.error) {
@@ -466,7 +472,7 @@ export default function PlayerRecordPage() {
                       }}
                     >
                       <b style={{ width: 88 }}>
-                        {game.start_time ? new Date(game.start_time).toLocaleDateString() : '—'}
+                        {game.start ? new Date(game.start).toLocaleDateString() : '—'}
                       </b>
                       <span>
                         {game.home_team?.name} <span className="muted">vs</span>{' '}

@@ -12,24 +12,48 @@ import { divisionDisplayName } from '../utils/divisions.js';
 import { logger } from '../lib/logger.js';
 import LoadingScreen from '../components/LoadingScreen.jsx';
 import ScoreNotSavedAlert from '../components/ScoreNotSavedAlert.jsx';
-import { SCORE_NOT_SAVED_HERE, isScoreNotSavableHere } from '../utils/scoreSaveRefusal.js';
+import { isHalfEntered, scoreRefusalText, typeScore } from '../utils/scoreEntry.js';
+import { fetchCurrentGameRunIds, fetchSavedGames, hasStarted } from '../utils/savedGamesClient.js';
 
 /**
- * Scores & Results — spreadsheet-style score entry over past games,
- * persisting through the audited update_game_score RPC (the same path
- * LeagueStandings uses; standings views refresh from it). An admin page the
- * league turns on (`score_entry`; the route checks it, and the RPC refuses
- * every caller while it is off).
+ * How many results of the season belong to games that are not in its saved schedule (the current game run). Old data
+ * only: a scored game is held, so a save cannot leave one behind. They still count in the standings, so the page
+ * counts them in a sentence instead of hiding them.
+ */
+async function countScoresOutsideSchedule(organizationId, seasonId, runIds) {
+  let query = supabase
+    .from('game_assignments')
+    .select('id, game_scores!inner(game_id)', { count: 'exact', head: true })
+    .eq('organization_id', organizationId)
+    .eq('season_settings_id', seasonId);
+  // A season has one current run, or none (then every scored game of the season is outside it).
+  if (runIds.length > 0) query = query.neq('run_id', runIds[0]);
+  const { count, error } = await query;
+  if (error) throw error;
+  return count ?? 0;
+}
+
+/**
+ * Scores & Results — spreadsheet-style score entry over the played games of the season's saved schedule
+ * (`game_assignments` of the current game run, with their `game_scores`; F11-3), persisting through the audited
+ * update_game_score RPC (the same path LeagueStandings uses; standings are computed from it). A score is both numbers
+ * or none, so a half-entered score is held on the page and the two are sent together. An admin page the league turns
+ * on (`score_entry`; the route checks it, and the RPC refuses every caller while it is off).
  */
 export default function ScoresPage() {
-  const { currentOrganization, availableSeasons } = useOrganization();
+  const { currentOrganization, currentSeasonSetting, availableSeasons } = useOrganization();
   const { genderModel } = useFeatures();
   const toast = useToast();
   const [games, setGames] = useState([]);
-  const [cannotSave, setCannotSave] = useState(false);
+  // What is typed and not saved yet, by game: one number of a score whose other is still empty.
+  const [drafts, setDrafts] = useState(/** @type {Record<string, any>} */ ({}));
+  const [notSaved, setNotSaved] = useState(/** @type {string | null} */ (null));
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [outsideSchedule, setOutsideSchedule] = useState(0);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const orgId = currentOrganization?.id;
+  const seasonId = currentSeasonSetting?.id ?? null;
   // A completed season's scores are history (20261111010000: the database refuses the write): its
   // games are listed and cannot be edited. A game's season is its own, else its division's.
   const completedSeasonIds = useMemo(
@@ -43,8 +67,9 @@ export default function ScoresPage() {
   );
   const isCompletedSeasonGame = useCallback(
     (game) => {
-      const seasonId = game?.season_id ?? game?.home_team?.division?.season_settings_id ?? null;
-      return seasonId !== null && completedSeasonIds.has(String(seasonId));
+      const gameSeason =
+        game?.season_settings_id ?? game?.home_team?.division?.season_settings_id ?? null;
+      return gameSeason !== null && completedSeasonIds.has(String(gameSeason));
     },
     [completedSeasonIds]
   );
@@ -54,22 +79,29 @@ export default function ScoresPage() {
     (async () => {
       if (!orgId) return;
       setLoading(true);
+      setLoadFailed(false);
+      setDrafts({});
       try {
-        const { data, error } = await supabase
-          .from('games')
-          .select(
-            `id, season_id, start_time, score_home, score_away,
-             home_team:home_team_id (id, name, division:divisions (name, season_settings_id)),
-             away_team:away_team_id (id, name)`
-          )
-          .eq('organization_id', orgId)
-          .lte('start_time', new Date().toISOString())
-          .order('start_time', { ascending: false })
-          .limit(200);
-        if (error) throw error;
-        if (!cancelled) setGames(data || []);
+        // With no season selected there is no schedule to list.
+        const runIds = seasonId
+          ? await fetchCurrentGameRunIds({ organizationId: orgId, seasonId })
+          : [];
+        const saved = await fetchSavedGames({ runIds });
+        const now = Date.now();
+        const played = saved
+          .filter((game) => hasStarted(game, now))
+          .sort((a, b) => Date.parse(b.start) - Date.parse(a.start));
+        const outside = seasonId ? await countScoresOutsideSchedule(orgId, seasonId, runIds) : 0;
+        if (cancelled) return;
+        setGames(played);
+        setOutsideSchedule(outside);
       } catch (err) {
         logger.error('[ScoresPage] load failed:', err);
+        if (!cancelled) {
+          setGames([]);
+          setOutsideSchedule(0);
+          setLoadFailed(true);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -77,55 +109,70 @@ export default function ScoresPage() {
     return () => {
       cancelled = true;
     };
-  }, [orgId]);
+  }, [orgId, seasonId]);
 
-  const persistScore = useCallback(
-    async (gameId, scoreHome, scoreAway) => {
-      const previous = games.find((game) => game.id === gameId);
-      if (isCompletedSeasonGame(previous)) return;
-      setGames((current) =>
-        current.map((game) =>
-          game.id === gameId ? { ...game, score_home: scoreHome, score_away: scoreAway } : game
-        )
-      );
+  const forgetDraft = useCallback(
+    (gameId) =>
+      setDrafts((current) =>
+        Object.fromEntries(Object.entries(current).filter(([id]) => id !== gameId))
+      ),
+    []
+  );
+
+  const enterScore = useCallback(
+    async (gameId, side, value) => {
+      const saved = games.find((game) => game.id === gameId);
+      if (!saved || isCompletedSeasonGame(saved)) return;
+      const { entry, send } = typeScore(saved, drafts[gameId], side, value);
+      // One number without the other is not a result: it is held here and nothing is sent.
+      setDrafts((current) => ({ ...current, [gameId]: entry }));
+      if (!send) {
+        // Typed back to what is saved: there is nothing unsaved to hold.
+        if (!isHalfEntered(entry)) forgetDraft(gameId);
+        return;
+      }
       try {
         const { error } = await supabase.rpc('update_game_score', {
           p_organization_id: orgId,
           p_game_id: gameId,
-          p_score_home: scoreHome,
-          p_score_away: scoreAway,
+          p_score_home: entry.score_home,
+          p_score_away: entry.score_away,
         });
         if (error) throw error;
-        setCannotSave(false);
-        toast('Score saved', 'success');
+        setGames((current) =>
+          current.map((game) => (game.id === gameId ? { ...game, ...entry } : game))
+        );
+        forgetDraft(gameId);
+        setNotSaved(null);
+        toast(entry.score_home === null ? 'Score cleared' : 'Score saved', 'success');
       } catch (err) {
         logger.error('[ScoresPage] score update failed:', err);
-        setGames((current) => current.map((game) => (game.id === gameId ? previous : game)));
-        // Since 20261122010000 a score is kept against the SAVED schedule and both scores are entered together,
-        // while this page still lists the earlier games table and saves one cell at a time (it is repointed by F11-3
-        // of docs/changes/2026-11-06-games-table-source-of-truth.md). The database then answers "not found" or "one
-        // score without the other": said here in words that stay on the page, because trying again cannot work.
-        if (isScoreNotSavableHere(err)) setCannotSave(true);
-        else toast('Failed to save score', 'warning');
+        // The row goes back to the saved score, and why is said in words that stay on the page.
+        forgetDraft(gameId);
+        setNotSaved(scoreRefusalText(err));
       }
     },
-    [games, orgId, toast, isCompletedSeasonGame]
+    [games, drafts, orgId, toast, isCompletedSeasonGame, forgetDraft]
   );
 
   const rows = useMemo(
     () =>
       games.map((game) => ({
         ...game,
-        _date: game.start_time ? new Date(game.start_time).toLocaleDateString() : '—',
+        // What the boxes hold: the saved score with what is typed and unsaved over it.
+        ...(drafts[game.id] ?? {}),
+        _half: isHalfEntered(drafts[game.id]),
+        _date: game.start ? new Date(game.start).toLocaleDateString() : '—',
         _division: divisionDisplayName(
           game.home_team?.division?.name || game.home_team?.division || '',
           genderModel
         ),
         _home: game.home_team?.name || '—',
         _away: game.away_team?.name || '—',
-        _final: game.score_home != null && game.score_away != null,
+        _final:
+          !isHalfEntered(drafts[game.id]) && game.score_home != null && game.score_away != null,
       })),
-    [games, genderModel]
+    [games, drafts, genderModel]
   );
 
   const columns = useMemo(
@@ -135,7 +182,7 @@ export default function ScoresPage() {
           key: '_date',
           label: 'Date',
           width: 110,
-          sortVal: (row) => row.start_time || '',
+          sortVal: (row) => row.start || '',
         },
         { key: '_division', label: 'Division', width: 100 },
         { key: '_home', label: 'Home', width: 180 },
@@ -168,7 +215,13 @@ export default function ScoresPage() {
           width: 90,
           sortable: false,
           render: (row) =>
-            row._final ? <Badge tone="success">Final</Badge> : <Badge>Awaiting</Badge>,
+            row._half ? (
+              <Badge tone="warning">Enter both scores</Badge>
+            ) : row._final ? (
+              <Badge tone="success">Final</Badge>
+            ) : (
+              <Badge>Awaiting</Badge>
+            ),
         },
       ]),
     []
@@ -193,10 +246,27 @@ export default function ScoresPage() {
         />
       }
     >
-      <ScoreNotSavedAlert
-        message={cannotSave ? SCORE_NOT_SAVED_HERE : null}
-        className="mx-4 mt-3"
-      />
+      <ScoreNotSavedAlert message={notSaved} className="mx-4 mt-3" />
+      {loadFailed && (
+        <p
+          role="alert"
+          data-testid="scores-load-failed"
+          className="mx-4 mt-3 rounded-lg border border-status-error/30 bg-status-error-bg px-4 py-2 text-sm font-medium text-status-error"
+        >
+          The games could not be loaded. Reload the page to try again.
+        </p>
+      )}
+      {outsideSchedule > 0 && (
+        <p
+          role="note"
+          data-testid="scores-outside-schedule"
+          className="mx-4 mt-3 rounded-lg border border-border-subtle bg-bg-surface px-4 py-2 text-sm text-text-secondary"
+        >
+          {outsideSchedule === 1
+            ? '1 earlier result is not listed here: its game is no longer in the saved schedule. It still counts in the standings.'
+            : `${outsideSchedule} earlier results are not listed here: their games are no longer in the saved schedule. They still count in the standings.`}
+        </p>
+      )}
       {hasReadOnlyGames && (
         <p
           role="note"
@@ -215,13 +285,7 @@ export default function ScoresPage() {
         search={search}
         setSearch={setSearch}
         searchKeys={['_home', '_away', '_division', '_date']}
-        onCellChange={(gameId, key, value) => {
-          const game = games.find((entry) => entry.id === gameId);
-          if (!game) return;
-          const scoreHome = key === 'score_home' ? value : (game.score_home ?? null);
-          const scoreAway = key === 'score_away' ? value : (game.score_away ?? null);
-          persistScore(gameId, scoreHome, scoreAway);
-        }}
+        onCellChange={(gameId, key, value) => enterScore(gameId, key, value)}
         emptyText="No past games yet — scores unlock once games have been played"
       />
     </Page>

@@ -168,12 +168,16 @@ DECLARE
     v_copied integer;
 BEGIN
     -- A legacy result is a row with BOTH scores (the old standings view counted nothing else; a one-sided entry was
-    -- never a result and is not copied: it stays in the legacy table).
+    -- never a result and is not copied: it stays in the legacy table). It is matched only with a game of a season's
+    -- CURRENT run (`current_game_runs`): a score on a game left in an older run would hold a game no screen shows, and
+    -- every later save would be refused for leaving it out.
     WITH legacy AS (
         SELECT g.id,
                (SELECT count(*) FROM public.game_assignments ga
                  WHERE ga.organization_id = g.organization_id AND ga.home_team_id = g.home_team_id
-                   AND ga.away_team_id = g.away_team_id AND ga.game_slot_id = g.game_slot_id) AS matches
+                   AND ga.away_team_id = g.away_team_id AND ga.game_slot_id = g.game_slot_id
+                   AND EXISTS (SELECT 1 FROM public.current_game_runs c
+                                WHERE c.organization_id = ga.organization_id AND c.run_id = ga.run_id)) AS matches
           FROM public.games g
          WHERE g.score_home IS NOT NULL AND g.score_away IS NOT NULL
     )
@@ -191,6 +195,8 @@ BEGIN
       JOIN public.game_assignments ga
         ON ga.organization_id = g.organization_id AND ga.home_team_id = g.home_team_id
        AND ga.away_team_id = g.away_team_id AND ga.game_slot_id = g.game_slot_id
+       AND EXISTS (SELECT 1 FROM public.current_game_runs c
+                    WHERE c.organization_id = ga.organization_id AND c.run_id = ga.run_id)
      WHERE g.score_home IS NOT NULL AND g.score_away IS NOT NULL
     ON CONFLICT (game_id) DO NOTHING;
     GET DIAGNOSTICS v_copied = ROW_COUNT;
@@ -200,7 +206,7 @@ $$;
 
 REVOKE ALL ON FUNCTION public.copy_legacy_game_scores() FROM PUBLIC, anon, authenticated, service_role;
 COMMENT ON FUNCTION public.copy_legacy_game_scores() IS
-    'Internal (no client role may call it): copies each result of the legacy games table (both scores set) to the saved game that matches it by organization, home, away and slot when exactly one does; refuses (55000, legacy_score_unmatched) when one matches none or several; a game already scored keeps its score. Called once by 20261122010000; dropped with the legacy table (F11-5).';
+    'Internal (no client role may call it): copies each result of the legacy games table (both scores set) to the saved game of a current run that matches it by organization, home, away and slot when exactly one does; refuses (55000, legacy_score_unmatched) when one matches none or several; a game already scored keeps its score. Called once by 20261122010000; dropped with the legacy table (F11-5).';
 
 -- ---------------------------------------------------------------------------
 -- 3. The one predicate: Published OR scored. Every path that asks follows.
@@ -1633,6 +1639,7 @@ BEGIN
            g.organization_id,
            g.home_team_id,
            g.away_team_id,
+           g.run_id,
            gs.score_home,
            gs.score_away,
            ht.organization_id AS home_team_org_id,
@@ -1672,7 +1679,10 @@ BEGIN
 
     -- The service role (a server-side job; no client holds it) skips the
     -- setting as it skips the role checks above.
+    -- 20261122010000: the setting gates ENTERING a score. A clear (both scores empty) is always allowed to an admin:
+    -- a scored game is held, and turning score entry off must not leave games held with no way to release them.
     IF v_effective_role <> 'service_role'
+       AND p_score_home IS NOT NULL
        AND NOT public.org_flag(p_organization_id, 'score_entry', false) THEN
         RAISE EXCEPTION 'Score entry is off for organization %: an admin turns it on in Settings', p_organization_id
             USING ERRCODE = '55000';
@@ -1681,6 +1691,16 @@ BEGIN
     v_changed :=
         v_game.score_home IS DISTINCT FROM p_score_home
         OR v_game.score_away IS DISTINCT FROM p_score_away;
+
+    -- 20261122010000: a score is SET only on a game of its season's current game run (`current_game_runs`). A score on
+    -- a game left in an older run would hold a game no screen shows, and every later save would be refused for leaving
+    -- it out, with nothing on any page to release it. A clear is never refused for this: it releases a hold.
+    IF v_changed AND p_score_home IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM public.current_game_runs c
+                        WHERE c.organization_id = p_organization_id AND c.run_id = v_game.run_id) THEN
+        RAISE EXCEPTION 'Game % is not in its season''s current schedule, so it takes no score: only a game of the schedule that is shown can be scored', p_game_id
+            USING ERRCODE = '22023', DETAIL = 'game_not_current';
+    END IF;
 
     IF v_changed THEN
         -- A completed season refuses here: game_scores carries the completed-season trigger (22023, season_completed).
@@ -3378,20 +3398,28 @@ $function$;
 --
 -- The seam the settings cascade (F11-4) extends: today the organization's setting, off unless it is a boolean true.
 
+-- SECURITY DEFINER, and it has to be: the view is security_invoker, so this runs as the signed-in reader, and `org_flag`
+-- is closed to every client role (20261021010000). As an invoker it failed every member's read of the standings with
+-- 42501 as soon as an own team had a result against an outside club. As a definer it reads ONE boolean of ONE setting
+-- for a division, and only for a member of that division's organization (`is_org_member`, as the table policies ask):
+-- for anyone else it answers false, so it is not a way to read another organization's setting.
 CREATE FUNCTION public.standings_counts_outside(p_division_id uuid)
 RETURNS boolean
 LANGUAGE sql
 STABLE
+SECURITY DEFINER
 SET search_path = public
 AS $$
     SELECT COALESCE((SELECT public.org_flag(d.organization_id, 'standings_count_outside_results', false)
-                       FROM public.divisions d WHERE d.id = p_division_id), false)
+                       FROM public.divisions d
+                      WHERE d.id = p_division_id
+                        AND public.is_org_member(d.organization_id)), false)
 $$;
 
 REVOKE ALL ON FUNCTION public.standings_counts_outside(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.standings_counts_outside(uuid) TO authenticated, service_role;
 COMMENT ON FUNCTION public.standings_counts_outside(uuid) IS
-    'Whether a division''s standings count its teams'' results against outside clubs (teams.is_external). Today the organization''s standings_count_outside_results setting, false unless set; the program and division levels (F11-4) replace this one body. Read by view_league_standings as its reader. 20261122010000.';
+    'Whether a division''s standings count its teams'' results against outside clubs (teams.is_external). Today the organization''s standings_count_outside_results setting, false unless set; the program and division levels (F11-4) replace this one body. SECURITY DEFINER because view_league_standings calls it as its reader and org_flag is closed to client roles; it answers false for a division of an organization the caller is not a member of. 20261122010000.';
 
 -- The same fourteen columns in the same order (CREATE OR REPLACE keeps the grants and the reader''s rights), and one
 -- appended. The CTE is still named game_results; it now reads the score table.

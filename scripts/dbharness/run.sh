@@ -4967,7 +4967,7 @@ done
 # 20261122010000 copies each result of the legacy `games` table to the saved game that matches it by home, away and slot,
 # and stops (nothing applied) when a scored legacy row matches none. Production holds no `games` row, so a build from
 # scratch runs the step over an empty table and proves only that it parses (lesson 67). So the harness builds to the
-# migration before it and plants three legacy rows: one scored that matches a saved game (4-2), one with no score, and
+# migration before it and plants three legacy rows: one scored that matches a saved game of the season's current run (4-2), one with no score, and
 # one with ONE score (never a result). The migration must copy exactly the first. Then a fourth is planted, scored and
 # matching nothing, on a second build: the migration must refuse in its words and leave no score table behind.
 echo "=== legacy scores: the copy to game_scores (planted, then 20261122010000 applied) ==="
@@ -4992,9 +4992,11 @@ LS_SEED="INSERT INTO public.organizations (id, name, slug) VALUES
             ('2a000000-0000-4000-8000-0000000000d1','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000e2','2026-04-04',1),
             ('2a000000-0000-4000-8000-0000000000d2','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000e2','2026-04-11',2),
             ('2a000000-0000-4000-8000-0000000000d3','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000e2','2026-04-18',3);
-          INSERT INTO public.game_assignments (id, organization_id, game_slot_id, slot_id, home_team_id, away_team_id, division, week_index) VALUES
-            ('2a000000-0000-4000-8000-0000000000c1','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000d1','2a000000-0000-4000-8000-0000000000d1','2a000000-0000-4000-8000-0000000000b1','2a000000-0000-4000-8000-0000000000b2','Legacy Scores Division',1),
-            ('2a000000-0000-4000-8000-0000000000c2','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000d2','2a000000-0000-4000-8000-0000000000d2','2a000000-0000-4000-8000-0000000000b1','2a000000-0000-4000-8000-0000000000b3','Legacy Scores Division',1);
+          INSERT INTO public.scheduler_runs (id, organization_id, season_settings_id, run_type, status, completed_at) VALUES
+            ('2a000000-0000-4000-8000-0000000000aa','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000a1','game','completed','2026-03-01T00:00:00Z');
+          INSERT INTO public.game_assignments (id, organization_id, run_id, game_slot_id, slot_id, home_team_id, away_team_id, division, week_index) VALUES
+            ('2a000000-0000-4000-8000-0000000000c1','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000aa','2a000000-0000-4000-8000-0000000000d1','2a000000-0000-4000-8000-0000000000d1','2a000000-0000-4000-8000-0000000000b1','2a000000-0000-4000-8000-0000000000b2','Legacy Scores Division',1),
+            ('2a000000-0000-4000-8000-0000000000c2','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000aa','2a000000-0000-4000-8000-0000000000d2','2a000000-0000-4000-8000-0000000000d2','2a000000-0000-4000-8000-0000000000b1','2a000000-0000-4000-8000-0000000000b3','Legacy Scores Division',1);
           INSERT INTO public.games (id, organization_id, game_slot_id, home_team_id, away_team_id, score_home, score_away) VALUES
             ('2a000000-0000-4000-8000-0000000000f1','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000d1','2a000000-0000-4000-8000-0000000000b1','2a000000-0000-4000-8000-0000000000b2',4,2),
             ('2a000000-0000-4000-8000-0000000000f2','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000d2','2a000000-0000-4000-8000-0000000000b1','2a000000-0000-4000-8000-0000000000b3',NULL,NULL),

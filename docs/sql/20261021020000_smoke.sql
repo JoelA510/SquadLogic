@@ -53,6 +53,7 @@ DECLARE
     v_p1 uuid;
     v_p2 uuid;
     v_game uuid;
+    v_score_run uuid := gen_random_uuid();
     v_job uuid := gen_random_uuid();
     v_n integer;
     v_tok uuid;
@@ -93,7 +94,10 @@ BEGIN
     INSERT INTO public.staging_players (organization_id, import_job_id, source_row_number, raw_payload, normalized_payload)
         VALUES (v_org, v_job, 1, '{}'::jsonb, '{}'::jsonb);
     -- Run at head: since 20261122010000 a score names a SAVED game (game_assignments) and is a row of game_scores.
-    INSERT INTO public.game_assignments (organization_id, home_team_id, away_team_id, division, week_index) VALUES (v_org, v_ta, v_tc, 'Smoke', 1) RETURNING id INTO v_game;
+    -- The game is of its season's current run: a score is entered on no other.
+    INSERT INTO public.scheduler_runs (id, organization_id, season_settings_id, run_type, status, completed_at)
+    SELECT v_score_run, v_org, d.season_settings_id, 'game', 'completed', now() FROM public.teams t JOIN public.divisions d ON d.id = t.division_id WHERE t.id = v_ta;
+    INSERT INTO public.game_assignments (organization_id, run_id, home_team_id, away_team_id, division, week_index) VALUES (v_org, v_score_run, v_ta, v_tc, 'Smoke', 1) RETURNING id INTO v_game;
 
     -- Calendar tokens: the new teams got theirs from the trigger, and the
     -- column on teams is gone.

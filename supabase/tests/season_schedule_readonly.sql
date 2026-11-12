@@ -180,7 +180,8 @@ SELECT is(pg_temp.err(format($$SELECT public.admin_cancel_practice_assignment(%L
 -- 20261122010000 (F11-2): a score names a saved game and is a row of game_scores, which carries the trigger.
 SELECT is(pg_temp.err(format($$SELECT public.update_game_score('a1111111-1111-1111-1111-111111111111', %L, 3::smallint, 1::smallint)$$, (SELECT old_ga FROM ids))),
     '22023:season_completed', 'update_game_score is refused on a completed season''s game');
-SELECT is(pg_temp.err(format($$SELECT public.update_game_score('a1111111-1111-1111-1111-111111111111', %1$L, 3::smallint, 1::smallint); SELECT public.update_game_score('a1111111-1111-1111-1111-111111111111', %1$L, NULL, NULL)$$, (SELECT live_ga FROM ids))),
+-- A score is entered only on a game of the season's CURRENT run (20261122010000): the active season's latest save is ff3e3.
+SELECT is(pg_temp.err(format($$SELECT public.update_game_score('a1111111-1111-1111-1111-111111111111', %1$L, 3::smallint, 1::smallint); SELECT public.update_game_score('a1111111-1111-1111-1111-111111111111', %1$L, NULL, NULL)$$, (SELECT id FROM public.game_assignments WHERE run_id = 'a1111111-1111-1111-1111-0000000ff3e3' ORDER BY id LIMIT 1))),
     'no error', 'and allowed on the active season''s (entered, then cleared again so the game is not held for what follows)');
 SELECT is(pg_temp.err(format($$SELECT public.admin_cancel_game_assignment(%L)$$, (SELECT live_ga FROM ids))),
     'no error', 'admin_cancel_game_assignment is allowed');

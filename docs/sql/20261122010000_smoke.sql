@@ -10,7 +10,8 @@
 --      be cancelled, each in the words of a scored game; its unscored twin can; a score survives a save that moves the
 --      games around it.
 --   4. The key is the backstop: with no signed-in user a delete of a scored game meets the foreign key.
---   5. Standings: an outside club has no row and a result against one is not counted until the organization says so.
+--   5. Standings: an outside club has no row and a result against one is not counted until the organization says so; a
+--      signed-in member (the role authenticated) reads them; a score is cleared with score entry off.
 --   6. current_game_runs is the latest completed game run of the season.
 --   7. The riders: cancel_ready_import_job refuses a job that is not ready_to_apply; get_schedule_tbd returns game_date.
 --
@@ -208,7 +209,28 @@ BEGIN
     IF EXISTS (SELECT 1 FROM public.view_league_standings WHERE team_id = v_club) THEN
         RAISE EXCEPTION 'with the setting on, an outside club has a standings row';
     END IF;
-    v_checks := v_checks + 5;
+    -- AS the role a signed-in reader is (the view is security_invoker, so its setting read runs as the reader; `org_flag`
+    -- is closed to that role, and the helper has to be the definer that reads it for a member).
+    SET LOCAL ROLE authenticated;
+    IF (SELECT games_played || ' ' || points || ' ' || results_not_counted FROM public.view_league_standings WHERE team_id = v_t3) IS DISTINCT FROM '1 3 0' THEN
+        RAISE EXCEPTION 'a signed-in member does not read the standings of a team with a result against an outside club';
+    END IF;
+    RESET ROLE;
+    -- With score entry turned off a score is still cleared (a scored game must not stay held with no way to release it),
+    -- and entering one is refused.
+    UPDATE public.organizations SET feature_flags = feature_flags - 'score_entry' WHERE id = v_org;
+    BEGIN
+        PERFORM public.update_game_score(v_org, v_away, 4::smallint, 0::smallint, '{}'::jsonb);
+        RAISE EXCEPTION 'a score was entered with score entry off' USING ERRCODE = 'XX000';
+    EXCEPTION WHEN SQLSTATE '55000' THEN NULL;
+    END;
+    PERFORM public.update_game_score(v_org, v_away, NULL, NULL, '{}'::jsonb);
+    IF EXISTS (SELECT 1 FROM public.game_scores WHERE game_id = v_away) OR public.game_is_held(v_away) THEN
+        RAISE EXCEPTION 'a score could not be cleared with score entry off';
+    END IF;
+    UPDATE public.organizations SET feature_flags = feature_flags || '{"score_entry": true}'::jsonb WHERE id = v_org;
+    v_checks := v_checks + 8;
+    RAISE NOTICE 'as a signed-in reader (role authenticated) the standings of a team with a result against an outside club are read; with score entry off a score is refused (55000) and still cleared';
     RAISE NOTICE 'standings: an outside club has no row; a result against one is not counted by default (and the row says one was left out) and is counted once the organization turns it on; a win is three points';
 
     -- ---- 6. current_game_runs ------------------------------------------------------------------------

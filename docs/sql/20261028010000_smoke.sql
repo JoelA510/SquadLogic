@@ -74,6 +74,7 @@ DECLARE
     v_s uuid; v_d1 uuid;
     v_t1 uuid; v_t2 uuid;
     v_game uuid;
+    v_score_run uuid := gen_random_uuid();
     v_loc uuid; v_field uuid; v_slot uuid; v_req uuid;
     v_refused int;
     v_res jsonb;
@@ -100,7 +101,10 @@ BEGIN
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_d1, 'R6 Aces') RETURNING id INTO v_t1;
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_d1, 'R6 Bees') RETURNING id INTO v_t2;
     -- Run at head: since 20261122010000 a score names a SAVED game (game_assignments) and is a row of game_scores.
-    INSERT INTO public.game_assignments (organization_id, home_team_id, away_team_id, division, week_index) VALUES (v_org, v_t1, v_t2, 'Smoke', 1)
+    -- The game is of its season's current run: a score is entered on no other.
+    INSERT INTO public.scheduler_runs (id, organization_id, season_settings_id, run_type, status, completed_at)
+    SELECT v_score_run, v_org, d.season_settings_id, 'game', 'completed', now() FROM public.teams t JOIN public.divisions d ON d.id = t.division_id WHERE t.id = v_t1;
+    INSERT INTO public.game_assignments (organization_id, run_id, home_team_id, away_team_id, division, week_index) VALUES (v_org, v_score_run, v_t1, v_t2, 'Smoke', 1)
         RETURNING id INTO v_game;
 
     -- ---- Score entry: off unless the league turns it on -------------------

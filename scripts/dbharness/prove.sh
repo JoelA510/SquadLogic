@@ -5756,6 +5756,21 @@ plant "M71 the standings count an outside opponent" "$M71" \
   "           (NOT (opp.is_external AND false) OR public.standings_counts_outside(own.division_id)) AS counted" \
   "smoke 20261122010000"
 
+# The review of #725 (R1): the helper the standings view calls ran as its caller, and its caller (a signed-in reader) may
+# not execute org_flag, so every member's read of the standings failed once a result against an outside club existed.
+# The smoke reads the view as the role `authenticated` and goes red when the helper is an invoker again.
+plant "M71 the standings helper runs as its caller" "$M71" \
+  "STABLE
+SECURITY DEFINER
+SET search_path = public
+AS \$\$
+    SELECT COALESCE((SELECT public.org_flag(d.organization_id, 'standings_count_outside_results', false)" \
+  "STABLE
+SET search_path = public
+AS \$\$
+    SELECT COALESCE((SELECT public.org_flag(d.organization_id, 'standings_count_outside_results', false)" \
+  "smoke 20261122010000"
+
 # The revert (docs/sql/20261122010000_revert.sql) refuses while a score is recorded. The harness plants one, requires the
 # first run to refuse in its words and change nothing, removes the score, and runs it again.
 plant "R71 the revert does not refuse while a score is recorded" "$R71" \

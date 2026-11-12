@@ -20,9 +20,9 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   GAME_PUBLISH_REASON_CODES,
   PUBLISHED_GUARDED_FIELDS,
-  changesPublishedPlacement,
   setGamesPublishedRefusal,
 } from '@squadlogic/core/gamePublished.js';
+import { changesPublishedPlacement } from './helpers/publishedOmissions.js';
 import { getMockData, mockSupabase as supabase } from '../frontend/src/lib/mockSupabaseClient.js';
 import { MOCK_ORG_ID, MOCK_SEASON_ID } from '../frontend/src/lib/mockSeedIds.js';
 

@@ -24,7 +24,7 @@ import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { publishedOmissions } from '../packages/core/src/gamePublished.js';
+import { publishedOmissions } from './helpers/publishedOmissions.js';
 import { buildDivisionRoundRobins } from '../packages/core/src/gameScheduling.js';
 import { mockSupabase } from '../frontend/src/lib/mockSupabaseClient.js';
 import { seedMockDb } from './helpers/seedMockDb.js';

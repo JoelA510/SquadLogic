@@ -20,7 +20,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ORG, SEASON, TZ, seedWorld } from './helpers/publishedGamesWorld.js';
 import { cancelRefusal, moveRefusal } from '../frontend/src/utils/gamePublishedText.js';
-import { publishedOmissions } from '../packages/core/src/gamePublished.js';
+import { publishedOmissions } from './helpers/publishedOmissions.js';
 import { getMockData } from '../frontend/src/lib/mockSupabaseClient.js';
 
 const ROLE = vi.hoisted(() => ({ value: /** @type {any} */ (null) }));

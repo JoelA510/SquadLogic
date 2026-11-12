@@ -14,9 +14,9 @@
  * bulk calls, and as the oracle for what a regeneration must carry (PR 2).
  *
  * **Identity.** Since 20261120010000 the game save updates a game in place when an assignment names it by `id`, and
- * upserts on the matchup tuple (home, away, slot, week) for one without; `publishedOmissions` counts a game carried by
- * either. A game sent without its id at another slot or week is a new tuple, hence a new row: a Published original is
- * then an OMISSION, and anything keyed by the old id stays with the old row. The test oracle for the whole save's
+ * upserts on the matchup tuple (home, away, slot, week) for one without; the save's omission check counts a game
+ * carried by either (its test oracle is `tests/helpers/publishedOmissions.js`, not shipped code). A game sent
+ * without its id at another slot or week is a new tuple, hence a new row: a Published original is then an OMISSION, and anything keyed by the old id stays with the old row. The test oracle for the whole save's
  * identity checks is `tests/helpers/gameIdentityRefusal.js` (not shipped code).
  *
  * @module gamePublished
@@ -150,11 +150,6 @@ export function changedPublishedFields(before, after) {
   );
 }
 
-/** Whether a change to a saved game is one the guard refuses while it is Published. */
-export function changesPublishedPlacement(before, after) {
-  return changedPublishedFields(before, after).length > 0;
-}
-
 /**
  * Split ids into calls of at most {@link GAME_PUBLISH_MAX_IDS} (the bulk bar resolves a scope to ids from the saved
  * set and sends them in as few calls as that allows). Duplicates are dropped, first sight wins; a non-string or empty
@@ -183,55 +178,6 @@ export function splitGameIds(ids, size = GAME_PUBLISH_MAX_IDS) {
   const calls = [];
   for (let at = 0; at < unique.length; at += size) calls.push(unique.slice(at, at + size));
   return calls;
-}
-
-// The matchup key, or null when a part is missing: as in SQL, a NULL part matches nothing (NULL = NULL is not true).
-const keyOf = (row) => {
-  const parts = [
-    read(row, 'home_team_id'),
-    read(row, 'away_team_id'),
-    read(row, 'game_slot_id') ?? read(row, 'slot_id'),
-    read(row, 'week_index'),
-  ];
-  if (parts.some((part) => part === null || part === '')) return null;
-  return parts.map((part) => String(part).toLowerCase()).join('|');
-};
-
-/**
- * The Published saved games a save would leave out: the twin of the check in `persist_game_schedule`. A save carries
- * every Published game of its season, unchanged; a game it leaves out is not deleted but orphaned in an older run and
- * gone from the page. A game is carried when its matchup tuple (home, away, slot, week) OR its `id` is in the payload
- * (the save updates a game in place when an assignment names it by id; a payload row without one is upserted on the
- * tuple).
- *
- * `saved` is the set the save is about: the caller scopes it to the season (the database scopes by the home team's
- * division's season, or by the organization's seasons that are not completed when the run names no season). Only a
- * game a save can carry is an omission, as in the database: a row with an incomplete key is not listed (no save could
- * carry it; the guard trigger still holds it), and a game of a completed season, which is read-only, is the caller's
- * to leave out.
- *
- * @param {Array<Record<string, any>>} saved - saved games (`published` true marks the guarded ones)
- * @param {Array<Record<string, any>>} payload - the games the save carries
- * @returns {Array<Record<string, any>>} the omitted Published games, in id order
- */
-export function publishedOmissions(saved, payload) {
-  const carried = new Set((payload ?? []).map(keyOf).filter((key) => key !== null));
-  // 20261120010000: a game is carried if its id OR its tuple is in the payload (an assignment that names a saved game by
-  // id continues it wherever it is sent; the guard then judges the move).
-  const carriedIds = new Set(
-    (payload ?? [])
-      .map((row) => row?.id)
-      .filter((id) => typeof id === 'string' && id !== '')
-      .map((id) => id.toLowerCase())
-  );
-  return (saved ?? [])
-    .filter((row) => {
-      if (row?.published !== true) return false;
-      if (typeof row.id === 'string' && carriedIds.has(row.id.toLowerCase())) return false;
-      const key = keyOf(row);
-      return key !== null && !carried.has(key);
-    })
-    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
 }
 
 /**

@@ -697,6 +697,7 @@ const mergeSource = (db, source) => {
               String(r.player_id) === String(record.player_id)
             );
           if (key === 'team_calendar_tokens') return String(r.team_id) === String(record.team_id);
+          if (key === 'game_scores') return String(r.game_id) === String(record.game_id);
           if (key === 'view_org_metrics')
             return String(r.organization_id) === String(record.organization_id);
           if (key === 'view_league_standings') return String(r.team_id) === String(record.team_id);
@@ -764,6 +765,8 @@ const TOMBSTONE_KEY_FNS = {
   team_players: (row) => `${row.team_id}:${row.player_id}`,
   player_buddies: (row) => `${row.player_id}:${row.buddy_player_id}`,
   team_calendar_tokens: (row) => String(row.team_id),
+  // 20261122010000: a score's key is its game (the table has no `id`).
+  game_scores: (row) => String(row.game_id),
 };
 const tombstoneKey = (table, row) =>
   TOMBSTONE_KEY_FNS[table] ? TOMBSTONE_KEY_FNS[table](row) : String(row.id);
@@ -4364,6 +4367,30 @@ export const mockSupabase = {
             error: null,
           };
         }
+
+        // **The guard at the cascade** (20261122010000; it was unmirrored for a Published game too). The database
+        // deletes the field's slots and, by the cascade, their games, and nulls the field of a game that keeps its
+        // slot; the guard trigger refuses either for a held game (Published or scored) of a signed-in caller, and the
+        // whole call fails with nothing written. Asked before the first write here, in the guard's own words.
+        const guardedByDelete = publishedWriteRefusal(
+          'game_assignments',
+          (db.game_assignments || [])
+            .map((before) => {
+              const deleted = affected.some(
+                (row) =>
+                  row.kind === 'game_assignment' &&
+                  row.disposition === 'deleted' &&
+                  String(row.id) === String(before.id)
+              );
+              if (deleted) return { before, after: null };
+              return String(before.field_id) === String(p.p_field_id)
+                ? { before, after: { ...before, field_id: null } }
+                : null;
+            })
+            .filter(Boolean),
+          db
+        );
+        if (guardedByDelete) return guardedByDelete;
 
         const previous = { ...field };
         audit('field', field.id, 'deleted', {

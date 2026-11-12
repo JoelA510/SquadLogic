@@ -52,11 +52,15 @@ export function useGameAssignments(runId) {
         // alone; a read that fails throws, because a schedule whose holds are unknown is not one to edit.
         const scoredIds = new Set();
         if (data.length > 0) {
-          const scores = await fetchAllPages(() =>
-            supabase
-              .from('game_scores')
-              .select('game_id')
-              .eq('organization_id', data[0].organization_id)
+          // Ordered by `game_id`: the table's key. It has no `id`, which is what a paged read orders by unless told
+          // (PostgREST refuses an order by a column the table does not have; tests/pagedReadOrderColumns.test.js).
+          const scores = await fetchAllPages(
+            () =>
+              supabase
+                .from('game_scores')
+                .select('game_id')
+                .eq('organization_id', data[0].organization_id),
+            { orderBy: 'game_id' }
           );
           for (const row of scores) scoredIds.add(String(row.game_id));
         }

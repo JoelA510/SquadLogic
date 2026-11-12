@@ -161,7 +161,6 @@ describe('LeagueStandings :: results against outside clubs', () => {
     expect(db, 'the mock database is readable').toBeTruthy();
     db.game_assignments.push(game('g-outside-2', 't-wanderers', 't-club'));
     db.game_scores.push({
-      id: 'g-outside-2',
       game_id: 'g-outside-2',
       organization_id: ORG,
       home_team_id: 't-wanderers',

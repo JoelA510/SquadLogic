@@ -29,13 +29,13 @@
  *     its test oracle (`tests/helpers/gameIdentityRefusal.js`), not by this file;
  *   - the exemptions of the trigger (a job with no signed-in user, the cascade of a deleted organization): the
  *     mock's direct writes are always the signed-in app's;
- *   - the mock's OWN cascades: `admin_delete_field` (confirmed), the field-import rollback and slot removal delete
- *     or null the field of `game_assignments` without asking the guard, where the database raises 22023
- *     `game_published` from the cascade (after its booking check refuses a booked field first). A screen built or
- *     E2E-tested in mock mode on a Published game must not rely on those deletes succeeding (code review, #707;
- *     not mirrored: the Games page (PR 3) shows Published games but offers no way to delete a field, venue or
- *     slot, and its E2E feature deletes none, so it does not depend on them; the cascades stay unmirrored, statically
- *     reviewed);
+ *   - two of the mock's OWN cascades: the field-import rollback and slot removal delete or null the field of
+ *     `game_assignments` without asking the guard, where the database raises 22023 `game_published` (or, since
+ *     20261122010000, `game_scored`) from the cascade. A screen built or E2E-tested in mock mode on a held game must
+ *     not rely on those deletes succeeding (code review, #707; not mirrored: no screen that shows a schedule offers
+ *     either, and no E2E feature runs one over a held game; statically reviewed). The third, a confirmed
+ *     `admin_delete_field`, IS mirrored since 20261122010000: it asks the guard before its first write
+ *     (`tests/mockScoredGameDeleters.test.js`);
  *   - row locking and the per-organization lock, and the SLA01 rollback of a failed audit write.
  *
  * Pure over `db` so a test can drive it directly; `mockSupabaseClient.js` wires it into `rpc()` and the write paths.

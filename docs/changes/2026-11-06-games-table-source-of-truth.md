@@ -609,6 +609,23 @@ done. What differs from the text above, each a decision of the build:
   the Scores and Standings pages read the legacy table until F11-3. **On a real database the Scores page can score
   nothing between F11-2 and F11-3** (it lists legacy rows, and it saves one cell at a time, which D10 refuses):
   F11-3's C3 must make it list saved games and send both scores together.
+- **F11-3's C3 is BLOCKING for turning score entry on (2026-11-12).** No league may be told to turn `score_entry`
+  on until F11-3 has made the Scores page list saved games and send both scores together. Until then the page says so
+  itself: a save the database refuses for either reason shows an alert in words ("The score was not saved. Scores are
+  now kept against the saved schedule ... it cannot save a score yet. Nothing was changed."), `tests/scoresPage.test.jsx`.
+- **To remove after this migration is deployed (noted 2026-11-12):** the fallback in `readScheduleTbd`
+  (`frontend/src/utils/scheduleTbdClient.js`), which reads `game_date` from the table when `get_schedule_tbd` answers
+  rows without that key (the body before `20261122010000`). Once production runs the new body it is dead code.
+- **Fix round 1 (2026-11-12, Codex on #725, two findings, both taken).** (1) `useGameAssignments` paged `game_scores`
+  with the helper's default order, `id`, a column the table does not have: PostgREST refuses it, so a saved schedule
+  would not have loaded on a real database. It orders by `game_id`; the mock's score rows no longer carry an `id` of
+  their own; and `tests/pagedReadOrderColumns.test.js` holds every paged read's order column, every read of the three
+  score relations, and the mock's row keys for them, to the columns the migrations and the catalogue snapshot give.
+  (2) The mock rolled an import back over a scored game and left its score behind; it refuses as the SQL does. Its
+  siblings were run against a scored game (`tests/mockScoredGameDeleters.test.js`): cancel, a direct delete or move,
+  delete team and the game save already matched; a confirmed `admin_delete_field` did not (it took a held game, a
+  Published one too) and now asks the guard first; the field-import rollback and slot removal stay unmirrored, said in
+  `mockGamePublished.js`.
 - The plan's parity test for `current_game_runs` against `useSchedulerRun` stays C5 of F11-3; F11-2 holds the view
   and the mock's copy to the same cases (`supabase/tests/game_scores.sql`, `tests/mockGameScores.test.js`).
 
@@ -627,7 +644,9 @@ becomes "create the `games` view" and is smaller.
       the file, a team in two games sees two, a moved game appears once at its new time.
 - [ ] C2 (M) The feed (`teamFeed.ts`) reads the same. Test: the existing `ics-feed_test.ts` suite plus a case from a saved
       schedule; a failed read is still reported, not swallowed.
-- [ ] C3 (M) Dashboard, Player record, Scores and Standings read the saved schedule and scores. Tests: the existing
+- [ ] C3 (M) **BLOCKING for turning score entry on (2026-11-12; see "As built" under F11-2):** the Scores page lists
+      saved games and sends both scores of a game together (it saves one cell at a time today, which the database
+      refuses), and the mock's legacy score arm and stored standings rows go. Dashboard, Player record, Scores and Standings read the saved schedule and scores. Tests: the existing
       `tests/scoresPage.test.jsx`, `tests/leagueStandingsSeason.test.jsx` (re-seeded through the save), plus a Dashboard case
       (count and list from a saved schedule).
 - [ ] C4 (S) The census `tests/gamesTableReaders.test.js` (from the code); it is red while any reader names `games`.

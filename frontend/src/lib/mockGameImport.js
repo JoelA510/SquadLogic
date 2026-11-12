@@ -1600,7 +1600,10 @@ function rollbackJob(db, job, ctx, env) {
         !now ||
         imageOf(now) !== imageOf(r.applied_payload) ||
         !run ||
-        !same(now.run_id ?? '', run.id)
+        !same(now.run_id ?? '', run.id) ||
+        // 20261122010000: a score entered on a game the import wrote is a change since (the SQL's EXISTS over
+        // game_scores). The rollback never deletes a score, and never moves a game under one.
+        (db.game_scores || []).some((score) => same(score.game_id, now.id))
       );
     })
     .map((r) => r.target_id)
@@ -1621,7 +1624,7 @@ function rollbackJob(db, job, ctx, env) {
   if (changed.length + changedTbd.length > 0) {
     return fail(
       '22023',
-      `The import cannot be rolled back: ${changed.length + changedTbd.length} game(s) (placed or TIME TBD) it wrote were changed, cancelled, had changes allowed or were saved into a later run since`,
+      `The import cannot be rolled back: ${changed.length + changedTbd.length} game(s) (placed or TIME TBD) it wrote were changed, cancelled, given a score, had changes allowed or were saved into a later run since`,
       `game_import_changed count=${changed.length + changedTbd.length} ids=${changed.slice(0, LISTED_IDS).join(',')}` +
         (changedTbd.length > 0 ? ` tbd_ids=${changedTbd.slice(0, LISTED_IDS).join(',')}` : '')
     );

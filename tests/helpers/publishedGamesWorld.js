@@ -174,7 +174,6 @@ export function seedWorld({ games = savedGames(), members = true, scoredIds = []
     game_scores: games
       .filter((game) => scoredIds.includes(game.id))
       .map((game) => ({
-        id: game.id,
         game_id: game.id,
         organization_id: ORG,
         home_team_id: game.home_team_id,

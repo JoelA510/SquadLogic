@@ -2624,8 +2624,10 @@ owner's answers of 2026-11-09 and of 2026-11-09 evening and 2026-11-10 follow th
 `ad18861`). **Updated 2026-11-11:** PR 6 is merged (#722, `53c79cc`; task G5 not built, see "As built" under PR 6 in
 section 7). **In review:** the F11 plan's F11-2 (scores, the held rule, standings; migration `20261122010000`; it also
 closes follow-ups 3 (two of its three lines) and 5 of PR 6's review). **Not merged:** PR 8, 10, 11 and 12, and F11-3
-to F11-5. PR 14 stays held. Next after F11-2 deploys: F11-3, which must also make the Scores page list saved games and
-send both scores together (the F11 plan, "As built" under F11-2).
+to F11-5. PR 14 stays held. Next after F11-2 deploys: F11-3, whose task C3 is **BLOCKING for turning score entry on**:
+it must make the Scores page list saved games and send both scores together (the F11 plan, "As built" under F11-2).
+Until then the page refuses in words and no league is to be told to turn `score_entry` on. Also after F11-2 deploys:
+remove the `game_date` fallback in `readScheduleTbd` (noted 2026-11-12).
 
 - **Order and the dependency rule.** Section 7 ("Dependencies and order") has the dependency table and the one priority
   rule: at most two PRs in flight; a free slot takes the first PR, in the order PR 1; PR 4; PR 2; PR 5; PR 3; PR 9;

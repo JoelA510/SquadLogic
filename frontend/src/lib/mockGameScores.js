@@ -98,8 +98,7 @@ export function mockUpdateSavedGameScore(db, params, ctx) {
       db.game_scores = [
         ...(db.game_scores || []),
         {
-          // `id` is the mock's own (its generic table code keys rows by it); the database's key is game_id.
-          id: game.id,
+          // The table's columns and no other (its key is game_id; the mock's generic code keys this table by it).
           game_id: game.id,
           organization_id: game.organization_id,
           home_team_id: game.home_team_id,

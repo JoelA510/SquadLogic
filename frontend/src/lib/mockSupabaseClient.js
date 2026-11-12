@@ -1838,6 +1838,18 @@ const createMockQuery = (table, data = null) => {
             return { ...item, division: division ? { ...division, season: season || null } : null };
           });
         }
+        if (table === 'game_assignments' && /\bgame_scores\s*\(/.test(queryContent)) {
+          // `game_scores(game_id)`, as `useGameAssignments` reads a run's games with their score (20261122010000). The
+          // foreign key is from the score's four columns to the game, and they are not a unique key of `game_scores`
+          // by themselves, so PostgREST answers the embed as a to-many list: one row for a scored game, none otherwise.
+          const scores = getMockData('game_scores');
+          results = results.map((item) => ({
+            ...item,
+            game_scores: scores
+              .filter((score) => String(score.game_id) === String(item.id))
+              .map((score) => ({ game_id: score.game_id })),
+          }));
+        }
         if (table === 'games' && queryContent.includes('game_slot:game_slots')) {
           // `game_slot:game_slots (slot_date, ..., field:fields (name, location:locations (name)))`,
           // as the team page and the coach home read a game's slot (admin focus R6): the

@@ -154,7 +154,6 @@ describe('every paged read orders by a column of its table', () => {
   it('finds the paged reads (a scan that found none would pass everything)', () => {
     expect(DEFAULT_ORDER).toBe('id');
     expect(reads.length).toBeGreaterThanOrEqual(40);
-    expect(reads.some((read) => read.tables.includes('game_scores'))).toBe(true);
     expect(reads.some((read) => read.tables.includes('game_assignments'))).toBe(true);
     // The four calls that page a list of tables resolve to more than one each.
     expect(reads.filter((read) => read.tables.length > 1).length).toBeGreaterThanOrEqual(4);
@@ -206,6 +205,11 @@ describe('every read of the score relations names real columns', () => {
           named.push(use[1]);
         for (const use of chain.matchAll(/orderBy:\s*['"](\w+)['"]/g)) named.push(use[1]);
         found.push({ file, relation: match[1], named });
+      }
+      // A relation read as an EMBED in another table's select (`game_scores(game_id)`): the columns it names.
+      for (const embed of text.matchAll(/['"`][^'"`]*\b(\w+)\s*\(([\w\s,]+)\)[^'"`]*['"`]/g)) {
+        if (!SUBJECTS.includes(embed[1])) continue;
+        found.push({ file, relation: embed[1], named: embed[2].split(',').map((c) => c.trim()) });
       }
     }
     return found;

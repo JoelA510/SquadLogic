@@ -20,19 +20,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
-    from: (table) => {
-      // 20261122010000: the hook reads which games are scored after the games themselves; none are, here.
-      if (table === 'game_scores') {
-        const scores = {
-          select: () => scores,
-          eq: () => scores,
-          order: () => scores,
-          range: () => scores,
-          then: (resolve, reject) =>
-            Promise.resolve({ data: [], error: null }).then(resolve, reject),
-        };
-        return scores;
-      }
+    from: () => {
       let runId = null;
       const builder = {
         select: () => builder,

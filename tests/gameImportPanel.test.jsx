@@ -256,6 +256,10 @@ describe('confirm: everything that will be created is listed, and nothing is cre
     expect(screen.queryByTestId('schedule-import-create-ack')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Confirm and import' }));
     await waitFor(() => expect(step()).toMatch(/4 of 4/));
+    // ...and at the result: the two rows the import kept and changed are listed once each, with the rest it flagged.
+    const said = screen.getByTestId('schedule-import-result-warnings').textContent;
+    expect(said.match(/Row 8:/g)).toHaveLength(1);
+    expect(said.match(/Row 13:/g)).toHaveLength(1);
     // read back: no record was created for a label nobody decided
     expect(await table('teams')).toHaveLength(6);
     expect(await table('divisions')).toHaveLength(1);
@@ -322,9 +326,12 @@ describe('confirm: everything that will be created is listed, and nothing is cre
     const flagged = screen.getByTestId('schedule-import-warnings').textContent;
     expect(flagged).toMatch(/Field Field 1: Two games are on one field at overlapping times\./);
     expect(flagged).toMatch(/Row 12: The Week in the file is not the week the date falls in\./);
-    expect(screen.getByTestId('schedule-import-kept-warnings').textContent).toMatch(
-      /Row 8:.*Row 13:/
-    );
+    // One row, one listing (review of #725, R6): since 20261122010000 a time or a Week the import could not read is a
+    // staged flag the preview itself reports, so the rows are in the flagged list once and there is no second list.
+    expect(flagged.match(/Row 8:/g)).toHaveLength(1);
+    expect(flagged).toMatch(/Row 8: .*TIME TBD/);
+    expect(flagged.match(/Row 13:/g)).toHaveLength(1);
+    expect(screen.queryByTestId('schedule-import-kept-warnings')).toBeNull();
     // declared, not implied: what was not checked
     expect(screen.getByTestId('schedule-import-coverage').textContent).toMatch(
       /Not checked by the import: coach overlap, hosting balance/

@@ -1198,18 +1198,6 @@ function ScheduleImportWorkflow({
             total={(preview.warnings ?? []).length}
             items={(preview.warnings ?? []).map((w) => warningLine(w, league))}
           />
-          {staging && (
-            <NamedList
-              testId="schedule-import-kept-warnings"
-              heading="Rows the import kept and changed when it read the file"
-              total={
-                staging.warnings.filter((w) => ['bad-time', 'bad-week'].includes(w.code)).length
-              }
-              items={staging.warnings
-                .filter((w) => ['bad-time', 'bad-week'].includes(w.code))
-                .map((w) => `Row ${w.row}: ${w.message}`)}
-            />
-          )}
 
           <p
             data-testid="schedule-import-coverage"

@@ -50,6 +50,8 @@ const t = (n) => `a1111111-1111-1111-1111-0000000d00${n}`;
 const e = (n) => `a1111111-1111-1111-1111-0000000d0e${n}`;
 const d = (n) => `a1111111-1111-1111-1111-0000000d00d${n}`;
 const RUN1 = 'a1111111-1111-1111-1111-0000000d0a01';
+const RUN0 = 'a1111111-1111-1111-1111-0000000d0a00';
+const RUN_DONE = 'a1111111-1111-1111-1111-0000000d0ac1';
 
 function world() {
   const slot = (n, week, hour) => ({
@@ -126,7 +128,16 @@ function world() {
     game_slots: slots,
     scheduler_runs: [
       {
-        id: 'a1111111-1111-1111-1111-0000000d0a00',
+        id: RUN_DONE,
+        organization_id: ORG,
+        season_settings_id: DONE,
+        season_id: DONE,
+        run_type: 'game',
+        status: 'completed',
+        completed_at: '2025-03-01T00:00:00Z',
+      },
+      {
+        id: RUN0,
         organization_id: ORG,
         season_settings_id: SEASON,
         season_id: SEASON,
@@ -151,7 +162,14 @@ function world() {
       game('05', '05', '06', 3),
       game('0a', '01', 'e1', 9),
       game('0b', 'e1', 'e2', 'a'),
-      { ...game('09', '07', '08', 1), run_id: null, season_settings_id: DONE, division: 'C U10' },
+      {
+        ...game('09', '07', '08', 1),
+        run_id: RUN_DONE,
+        season_settings_id: DONE,
+        division: 'C U10',
+      },
+      // An older, hidden row (the run before the one the page shows): T2 against T4.
+      { ...game('08', '02', '04', 8), run_id: RUN0 },
       {
         id: 'b2222222-2222-2222-2222-0000000d0e01',
         organization_id: ORG_B,
@@ -273,6 +291,26 @@ describe('mock update_game_score for a saved game :: the answers the database gi
     );
     expect(db.game_scores).toEqual([]);
     expect(db.audit_log).toEqual([]);
+  });
+
+  it("R3: a score is set only on a game of its season's current run; a clear is never refused for that", () => {
+    const db = world();
+    expect(score(db, e('08'), 1, 0)).toBe(inPgtap('22023:game_not_current'));
+    expect(stored(db, e('08'))).toBe('none');
+    expect(db.audit_log).toEqual([]);
+    expect(score(db, e('08'), null, null)).toBe(inPgtap('--- changed=false was=---'));
+    // CONTROL: a game of the run the page shows takes one.
+    expect(score(db, e('02'), 1, 0)).toBe('1-0 changed=true was=---');
+  });
+
+  it('R4: with score entry off a score is refused and edited by nobody, and is still cleared', () => {
+    const db = world();
+    expect(score(db, e('02'), 4, 0)).toBe(inPgtap('4-0 changed=true was=---'));
+    db.organizations[0].feature_flags = {};
+    expect(score(db, e('03'), 1, 0)).toBe('55000:');
+    expect(score(db, e('02'), 5, 0)).toBe('55000:');
+    expect(score(db, e('02'), null, null)).toBe(inPgtap('--- changed=true was=4-0'));
+    expect(mockGameIsHeld(db, e('02'))).toBe(false);
   });
 
   it('DECLARED: the legacy arm is reached only by an id that names no saved game', () => {
@@ -494,6 +532,7 @@ describe('current_game_runs :: the rule of useSchedulerRun', () => {
       },
     ]);
     expect(runs.find((r) => r.season_settings_id === 'season-d').run_id).toBe('r-old-column');
-    expect(runs.some((r) => r.season_settings_id === DONE)).toBe(false);
+    expect(runs.find((r) => r.season_settings_id === DONE).run_id).toBe(RUN_DONE);
+    expect(runs.some((r) => r.season_settings_id === 'no-such-season')).toBe(false);
   });
 });

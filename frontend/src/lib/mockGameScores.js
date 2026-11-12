@@ -5,7 +5,8 @@
  *
  * - {@link mockUpdateSavedGameScore}: `update_game_score` for a SAVED game (`game_assignments`): both scores or none
  *   (22023 `score_one_sided`), a negative score (23514), the game of the organization (42501), an admin (42501), the
- *   `score_entry` setting (55000), a completed season (22023 `season_completed`); it writes, replaces or deletes the
+ *   `score_entry` setting for ENTERING a score (55000; a clear is never gated by it), a game that is not in its
+ *   season's current run when a score is set (22023 `game_not_current`), a completed season (22023 `season_completed`); it writes, replaces or deletes the
  *   game's row of `game_scores` and audits `competition.score_updated` with the previous values, only on a change.
  * - {@link deriveLeagueStandings}: `view_league_standings` computed from `game_scores`: a row for an own team, none for
  *   an outside club, a result against an outside club counted only when the organization's
@@ -70,7 +71,9 @@ export function mockUpdateSavedGameScore(db, params, ctx) {
     return fail('42501', 'Access denied: only an organization admin enters scores');
   }
   const organization = (db.organizations || []).find((row) => same(row.id, org));
-  if (organization?.feature_flags?.score_entry !== true) {
+  // The setting gates ENTERING a score; a clear is always an admin's to make (a scored game is held, and turning score
+  // entry off must not leave games held with nothing to release them).
+  if (home !== null && organization?.feature_flags?.score_entry !== true) {
     return fail(
       '55000',
       `Score entry is off for organization ${org}: an admin turns it on in Settings`
@@ -80,6 +83,21 @@ export function mockUpdateSavedGameScore(db, params, ctx) {
   const previousHome = stored ? stored.score_home : null;
   const previousAway = stored ? stored.score_away : null;
   const changed = previousHome !== home || previousAway !== away;
+  // A score is SET only on a game of its season's current game run (`current_game_runs`): one on a game left in an
+  // older run would hold a game no screen shows. A clear is never refused for this.
+  if (
+    changed &&
+    home !== null &&
+    !deriveCurrentGameRuns(db).some(
+      (run) => same(run.organization_id, org) && same(run.run_id, game.run_id)
+    )
+  ) {
+    return fail(
+      '22023',
+      `Game ${game.id} is not in its season's current schedule, so it takes no score: only a game of the schedule that is shown can be scored`,
+      'game_not_current'
+    );
+  }
   if (changed) {
     // game_scores carries the completed-season trigger: the season is read from the home team.
     const refused = ctx.seasonRefusal([game]);

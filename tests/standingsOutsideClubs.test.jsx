@@ -56,6 +56,7 @@ const team = (id, name, extra = {}) => ({
 const game = (id, home, away) => ({
   id,
   organization_id: ORG,
+  run_id: 'run-outside',
   home_team_id: home,
   away_team_id: away,
   week_index: 1,
@@ -71,6 +72,17 @@ async function seedLeague(flags) {
     ],
     organization_members: [{ organization_id: ORG, profile_id: ADMIN, role: 'admin' }],
     season_settings: [{ id: SEASON, organization_id: ORG, status: 'active' }],
+    // The games are of the season's current run: a score is entered on no other.
+    scheduler_runs: [
+      {
+        id: 'run-outside',
+        organization_id: ORG,
+        season_settings_id: SEASON,
+        run_type: 'game',
+        status: 'completed',
+        completed_at: '2026-03-01T00:00:00Z',
+      },
+    ],
     divisions: [{ id: 'div-u10', organization_id: ORG, season_settings_id: SEASON, name: 'U10' }],
     teams: [
       team('t-rovers', 'Synthetic Rovers'),

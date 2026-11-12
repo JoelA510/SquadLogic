@@ -237,7 +237,9 @@ describe("the mock keeps and returns the database's columns for the score relati
       { id: 't1', organization_id: 'o', division_id: 'd', name: 'One' },
       { id: 't2', organization_id: 'o', division_id: 'd', name: 'Two' },
     ],
-    game_assignments: [{ id: 'g', organization_id: 'o', home_team_id: 't1', away_team_id: 't2' }],
+    game_assignments: [
+      { id: 'g', organization_id: 'o', run_id: 'r', home_team_id: 't1', away_team_id: 't2' },
+    ],
     scheduler_runs: [
       {
         id: 'r',

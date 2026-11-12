@@ -390,3 +390,38 @@ describe('regenerate and Apply: a game keeps its id', () => {
     expect(visible().some((row) => row.published_at === '2026-10-01T00:00:00Z')).toBe(false);
   });
 });
+
+describe('a save refused for a game identity (409 GAME_IDENTITY) reads the saved schedule again (F11-3 C6)', () => {
+  /** Press Generate and Apply; the save is refused as the Edge function refuses it. */
+  async function applyRefused(code) {
+    seed();
+    SAVE.impl = async () => {
+      throw Object.assign(new Error('game ga-x is named more than once in this save'), {
+        code,
+        status: 409,
+      });
+    };
+    await mount();
+    const run = await screen.findByRole('button', {
+      name: 'Auto-Generate: run auto-scheduler optimization',
+    });
+    await waitFor(() => expect(run).toBeEnabled());
+    fireEvent.click(run);
+    const apply = await screen.findByRole('button', { name: /apply schedule/i });
+    await waitFor(() => expect(apply).toBeEnabled());
+    const from = vi.spyOn(mockSupabase, 'from');
+    fireEvent.click(apply);
+    await screen.findByText(/named more than once/);
+    // Settle: any read the refusal starts has started by now.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    return from.mock.calls.filter(([table]) => table === 'game_assignments').length;
+  }
+
+  it('the saved games are read once more after the refusal', async () => {
+    expect(await applyRefused('GAME_IDENTITY')).toBeGreaterThanOrEqual(1);
+  });
+
+  it('CONTROL: another refusal does not read them again (the read is for this one)', async () => {
+    expect(await applyRefused('GAME_PUBLISHED')).toBe(0);
+  });
+});

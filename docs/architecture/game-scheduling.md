@@ -73,13 +73,15 @@ from the season's start, as the import counts it). It stages one `manual` game w
 saves it through `persist_game_schedule` like a move, so the grid, the conflict banner and `game.saved` are unchanged.
 A new time is found or made by `ensure_game_slot` first (audited `game.slot_created` only when it makes one), then the
 save names it; if the save then fails, the slot stays, unused, and the error names it. No migration and no change to
-either function. The rules: a slot that holds a Published or scored game is **refused** (when staged, and again on Apply
-against the slot the database returns); a team already playing, or a field already in use, at that time is a
-**double booking, flagged and not blocked** (owner, 2026-11-09: warnings, not blockers), shown in the dialog and the
-banner and recorded in the saved run's warnings; an outside club is never double-booked; the game **starts not
-Published** (the save never writes the flag). A time that overlaps a Published game in a different slot on the same
-field is a double booking, flagged: only the very slot is refused. The same pair in the slot and week it already holds
-is refused too (the save's unique key). Tests: `tests/gameAddByHand.test.jsx`; E2E: four
+either function. The rules: **one game per slot**. A slot that already holds a game is never offered or used: it is refused when the
+game is staged and again on Apply against the slot the database returns, in the hold's words for a Published or scored
+game. A new time that is an existing slot must match its end, and on Apply a slot the database already had is read back
+and must match the week and times the page worked out. A team already playing, or a field already in use, at that time
+in another slot is a **double booking, flagged and not blocked** (owner, 2026-11-09: warnings, not blockers), as is a
+slot reserved for another division. These are shown in the dialog and the banner, each clash once, and recorded in the
+saved run's warnings. An outside club is never double-booked. The game **starts not Published** (the save never writes
+the flag). Generating waits while an added game is staged.
+Tests: `tests/gameAddByHand.test.jsx`; E2E: four
 scenarios in `tests/e2e/features/published_games.feature`.
 
 ## Testing Strategy

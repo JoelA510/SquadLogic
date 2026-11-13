@@ -1705,29 +1705,47 @@ Plants: a game addable over a Published slot; a double booking blocked instead o
 calls `ensure_game_slot` for a new time and then the existing save. Decisions taken here (within 5.5 and the owner's
 answers; none adds scope):
 
-- **"A Published slot" is a slot holding a held game** (Published, or with a score: the one predicate `isHeld`). It is
-  refused when the game is staged and again on Apply against the slot id the database returns, since a new time can be
-  an existing slot (`ensure_game_slot` finds one by field, date and start time). A time that overlaps a Published game
-  in another slot on the same field is not "over" it: it is a double booking, flagged.
-- **A double booking** is a team (not an outside club, which stands for several real teams, as the import rules) already
-  playing, or the field already in use, at an overlapping time. Flagged in the dialog, in the conflict banner while
-  staged, and in the saved run's `results.warnings`; never refused (owner, 2026-11-09, entry 2). A new time in the very
-  slot of a game that is not Published is such a double booking (the grid draws one game per cell, so one of the two is
-  seen in the list only: a known limit, recorded under the PR's risks).
-- **A new time's week** is `scheduleWeekOf(date, season_start)`, the import's rule; a date before the season starts, or
-  a season with no start date, is refused (no week can be given). A daylight-saving gap is refused with the season
+- **One game per slot (review of #731, the coordinator's item 4; it replaces the first draft's "flagged" second game
+  in a slot).** A slot that already holds a game, Published or not, is not offered as an open slot, and a new time
+  that is such a slot is refused, naming the game in it and saying to move that game or choose another time. The grid
+  draws one game per cell, and a schedule that hides a game is the worst failure here, so this is a necessary blocker in
+  the owner's sense (2026-11-09, entry 2). A slot holding a Published or scored game says so in the hold's words
+  (`holdReason`). The test is asked when the game is staged, against a second game staged at the same new time, and again
+  on Apply against the slot id the database returns, since a new time can be an existing slot (`ensure_game_slot`
+  finds one by field, date and start time). Two games of one pair at one place (pair, slot, week, the save's unique key)
+  are refused before the save in the same words.
+- **A new time that is an existing slot must be that slot as it is** (review item 2, as the practice import's
+  slot-differs). If the field, date and start match a slot but the end differs, the new time is refused, naming the
+  slot's end and saying to pick it as an open slot or choose another time; the slot's end is never taken silently. On
+  Apply, a slot the database already had (`created: false`) is read back, because the RPC returns only `{id, created}`
+  (`20261121010000_game_import.sql:736`). If its week, start or end differs from what the page worked out, Apply is
+  refused in words and nothing is saved.
+- **A double booking is flagged, never refused**: a team (not an outside club, which stands for several real teams, as
+  the import rules) already playing, or the field already in use, at an overlapping time in another slot. Flagged in the
+  dialog, in the conflict banner while staged, and in the saved run's `results.warnings`. After Apply on a generated
+  review, the banner reads the generated snapshot with the flags added, which is what the run saved (review C3). A clash
+  between two added games is said once. **A slot reserved for another division** is flagged the same way, not refused
+  (owner: warnings, not blockers).
+- **A new time's week** is `scheduleWeekOf(date, season_start)`, the import's rule. A date before the season starts, or
+  a season with no start date, is refused (no week can be given). A daylight-saving gap is refused in the season
   clock's words. The form waits, with its reason, for two different teams and an end after the start.
-- **The same pair in the slot and week it already holds is refused** (one place holds one game of a pair: the save's
-  unique key, a necessary blocker), said by the dialog instead of the save's identity conflict; the reverse pair there
-  is a double booking, flagged.
+- **Generating waits while an added game is staged** (review item 7): a new schedule replaces the review and would
+  drop the game, so Generate is off with a visible reason until the review is applied or discarded. "Add a game" is off
+  while the scheduler runs.
+- **The list keeps the applied review until the saved schedule is read again** (review item 6). The slots an Apply
+  made are read into the grid before the save, and the effect that copies the saved rows into the list does nothing
+  while those rows are known to be stale (`savedIsStale`), so a slot read landing late cannot put the list back to the
+  schedule before the save.
 - **Divisions offered** are those that play games; their teams are the run's teams and the season's outside clubs.
-- **A failed save after a slot was made** keeps the slot and names it in the error; the review then names the
-  database's slot, so a second Apply does not ask again.
-- **Plant evidence** (executed, 2026-11-13): each plant turned its cases red (3, 3 and 1 of 21, re-run after the review's fix round)
-  and the restored code is green; a plant removing only the Apply-time check turned its one case red, and one removing
-  the same-pair refusal its one; the E2E refusal scenario fails
-  under the first plant. "Arriving Published" is caught on the staged game; once saved, the database cannot be told to
-  publish it through this save, so the post-Apply assertions hold under the plant too (said, not hidden).
+- **A failed save after a slot was made** keeps the slot and names it in the error. When the outcome is unknown (a
+  timeout, an unreadable answer) the error says instead that whether the game was saved into it is being checked. The
+  review then names the database's slot, so a second Apply does not ask again.
+- **Plant evidence** (executed, 2026-11-13, re-run in full after the review round): sixteen plants, each turning its
+  cases red against the 31 cases of `tests/gameAddByHand.test.jsx`, the restored code green. The plan's three: a
+  Published slot addable (4 red), a double booking blocked (5 red), a new game arriving Published (2 red). The E2E
+  refusal scenario fails under the first. "Arriving Published" is caught on the staged game; once saved, the database
+  cannot be told to publish it through this save, so the post-Apply assertions hold under that plant too (said, not
+  hidden).
 
 ### PR 9: Practice import I, the fixture and the pure core (L; no migration; Review: (c); added 2026-11-06)
 

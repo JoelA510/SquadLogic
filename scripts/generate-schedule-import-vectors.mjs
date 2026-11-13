@@ -67,6 +67,12 @@ const withLength = (over) => {
   delete r['End Time'];
   return r;
 };
+/** The header row with the Game ID moved to column `at`, after filler columns the import does not read. */
+const gameIdAt = (at) => [
+  ...HEADERS.filter((h) => h !== 'Game ID'),
+  ...Array.from({ length: at - HEADERS.length }, (_, i) => `Extra ${i}`),
+  'Game ID',
+];
 
 /** The inputs: a name, a season, a header row, rows, and how many rows came before. */
 export const SCHEDULE_IMPORT_VECTOR_INPUTS = [
@@ -234,6 +240,18 @@ export const SCHEDULE_IMPORT_VECTOR_INPUTS = [
     headers: HEADERS,
     rowOffset: 2399,
     rows: [row({ 'Game ID': 'V-2400' }), row({ 'Game ID': 'V-2401', 'Home Team': 'U05B Team 03' })],
+  },
+  {
+    name: 'a recognised column at 200 (the Game ID) is read: every column of the cap is kept',
+    season: season(LA),
+    headers: gameIdAt(200),
+    rows: [row()],
+  },
+  {
+    name: 'file refused: a recognised column at 201 (the Game ID); the header row is never cut',
+    season: season(LA),
+    headers: gameIdAt(201),
+    rows: [row()],
   },
   {
     name: 'file refused: a missing column',

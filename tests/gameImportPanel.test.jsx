@@ -164,6 +164,27 @@ describe('upload: the file is read by the server, and what it kept or refused is
     expect(await table('import_jobs')).toHaveLength(0);
   });
 
+  it('refuses a file whose Game ID is its 201st column on upload, in words; no job is made, nothing staged', async () => {
+    const rpc = vi.spyOn(mockSupabase, 'rpc');
+    const invoke = vi.spyOn(mockSupabase.functions, 'invoke');
+    render(<ScheduleImportPanel />);
+    const extra = Array.from({ length: 201 - FILE_HEADERS.length }, (_, i) => `Extra ${i}`);
+    const headers = [...FILE_HEADERS.filter((h) => h !== 'Game ID'), ...extra, 'Game ID'];
+    expect(headers).toHaveLength(201);
+    const cell = (v) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+    upload(
+      [headers.join(','), headers.map((h) => cell(FILE_ROWS[0][h] ?? '')).join(',')].join('\n'),
+      'wide.csv'
+    );
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toMatch(/201 columns; one import reads at most 200/);
+    expect(step()).toMatch(/1 of 4/);
+    expect(rpc.mock.calls.filter(([name]) => name === 'create_import_job')).toEqual([]);
+    expect(invoke).not.toHaveBeenCalled();
+    expect(await table('import_jobs')).toHaveLength(0);
+    expect(await table('staging_import_rows')).toEqual([]);
+  });
+
   it('reads no file in a demo: the notice is asked for instead', async () => {
     const onDemoBlocked = vi.fn();
     render(<ScheduleImportPanel isDemo onDemoBlocked={onDemoBlocked} />);

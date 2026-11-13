@@ -85,6 +85,7 @@ describe('the vector table is core’s', () => {
             'missing-column',
             'duplicate-column',
             'too-many-rows',
+            'too-many-columns',
             'no-season-clock',
             'imported-without-time',
           ].includes(code)
@@ -92,6 +93,7 @@ describe('the vector table is core’s', () => {
       'ok',
       'tbd',
       'file:too-many-rows',
+      'file:too-many-columns',
       'file:missing-column',
       'file:no-season-clock',
       'file:missing-week',

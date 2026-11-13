@@ -169,6 +169,7 @@ describe('schedule import: the reason codes', () => {
         'missing-column',
         'duplicate-column',
         'too-many-rows',
+        'too-many-columns',
         'no-season-clock',
         'missing-week',
       ].sort()
@@ -186,7 +187,11 @@ describe('schedule import: the reason codes', () => {
       ].sort()
     );
     expect(SCHEDULE_IMPORT_REASON.IMPORTED_WITHOUT_TIME).toBe('imported-without-time');
-    expect(SCHEDULE_IMPORT_LIMITS).toEqual({ MAX_ROWS: 2400, MAX_GAME_ID_LENGTH: 40 });
+    expect(SCHEDULE_IMPORT_LIMITS).toEqual({
+      MAX_ROWS: 2400,
+      MAX_GAME_ID_LENGTH: 40,
+      MAX_COLUMNS: 200,
+    });
   });
 
   it('keeps the barrel complete: every public name of every module is exported by the index', () => {
@@ -962,6 +967,26 @@ describe('schedule import: the file', () => {
     const exact = parse(many(2400));
     expect(exact.ok).toBe(true);
     expect(exact.rows).toHaveLength(2400);
+  });
+
+  it('takes 200 columns and refuses 201, never cutting a column it reads (the follow-up of PR 11’s C5)', () => {
+    const filler = (n) => Array.from({ length: n }, (_, i) => `Extra ${i}`);
+    // A Game ID at column 200 is read: the row keeps its key.
+    const at200 = [...HEADERS.filter((h) => h !== 'Game ID'), ...filler(190), 'Game ID'];
+    expect(at200).toHaveLength(200);
+    const ok = parseScheduleRows({ headers: at200, rows: [row()], season: SEASON });
+    expect(ok.ok).toBe(true);
+    expect(ok.rows[0].gameId).toBe('G-1');
+    // ...and at column 201 the file is refused, in words, with nothing read (a cut would drop the Game ID and keep
+    // the row, so a later import could not match it).
+    const at201 = [...HEADERS.filter((h) => h !== 'Game ID'), ...filler(191), 'Game ID'];
+    expect(at201).toHaveLength(201);
+    const over = parseScheduleRows({ headers: at201, rows: [row()], season: SEASON });
+    expect(over.ok).toBe(false);
+    expect(over.refusal.code).toBe('too-many-columns');
+    expect(over.refusal.message).toMatch(/201 columns; one import reads at most 200/);
+    expect(over.rows).toEqual([]);
+    reached.add('too-many-columns');
   });
 
   it('refuses when the season has no clock, with the explanation the Games page gives', () => {

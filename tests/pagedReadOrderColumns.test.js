@@ -440,6 +440,19 @@ describe('every read of the saved schedule names real columns and real foreign k
     expect(found.every((read) => read.select !== null)).toBe(true);
   });
 
+  it('the bounded card reads (review R9) filter and order by columns of game_assignments, and are found', () => {
+    const text = readFileSync(path.join(ROOT, 'frontend/src/utils/savedGamesClient.js'), 'utf8');
+    const body = text.slice(text.indexOf('export async function fetchGameCards'));
+    const used = [
+      ...body.slice(0, body.indexOf('\n}\n')).matchAll(/\.(lte|gte|order)\(\s*'(\w+)'/g),
+    ];
+    expect(used.map(([, method]) => method).sort()).toEqual(['gte', 'lte', 'order']);
+    for (const [, , column] of used) expect(RELATIONS.get('game_assignments')).toContain(column);
+    expect(
+      reads().some((read) => read.select?.includes('home_team:teams!home_team_id(id, name'))
+    ).toBe(true);
+  });
+
   it('each names only columns its relations have, and embeds only through a key', () => {
     expect(judgeReads(reads())).toEqual([]);
   });

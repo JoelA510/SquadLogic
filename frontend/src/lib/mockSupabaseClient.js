@@ -50,6 +50,7 @@ import {
 import { handleHeatSettingsRpc } from './mockHeatSettings.js';
 import { handleEvaluationImportRpc } from './mockEvaluations.js';
 import { handleGameImportFunction, handleGameImportRpc } from './mockGameImport.js';
+import { handlePracticeImportRpc } from './mockPracticeImport.js';
 import { validateEvaluationRow } from '../utils/importEvaluations.js';
 import { handleScheduleTbdRpc } from './mockScheduleTbd.js';
 import {
@@ -2631,6 +2632,15 @@ export const mockSupabase = {
         if (!gameImport.error && gameImport.data?.dry_run !== true) saveDB(db);
         return gameImport;
       }
+      // The practice schedule import: map, preview and apply, roll back (migration 20261123010000), refusals included.
+      const practiceImport = handlePracticeImportRpc(db, name, params, {
+        isOrgAdmin,
+        currentUserId: storedSession ? currentUserId : null,
+      });
+      if (practiceImport) {
+        if (!practiceImport.error && practiceImport.data?.dry_run !== true) saveDB(db);
+        return practiceImport;
+      }
       // Heat forecast settings (migration 20261006000000), refusals included.
       const heat = handleHeatSettingsRpc(db, name, params, { currentUserId });
       if (heat) {
@@ -4490,6 +4500,7 @@ export const mockSupabase = {
           'practice_preferences',
           'evaluations',
           'games',
+          'practice_schedule',
         ].includes(importType)
       ) {
         return { data: null, error: { message: `invalid import type: ${p_import_type}` } };
@@ -4554,7 +4565,9 @@ export const mockSupabase = {
               ? 'evaluations'
               : importType === 'games'
                 ? 'games'
-                : 'registration';
+                : importType === 'practice_schedule'
+                  ? 'practice_schedule'
+                  : 'registration';
       const job = {
         id: mockId('import-job-'),
         organization_id: p_organization_id,
@@ -4890,13 +4903,14 @@ export const mockSupabase = {
           'practice_preferences',
           'evaluations',
           'games',
+          'practice_schedule',
         ].includes(importType)
       ) {
         return {
           data: null,
           error: {
             message:
-              'Only coach, field, field_availability, practice_preferences, evaluations, and games imports support deferred apply',
+              'Only coach, field, field_availability, practice_preferences, evaluations, games, and practice_schedule imports support deferred apply',
           },
         };
       }
@@ -4911,6 +4925,9 @@ export const mockSupabase = {
       }
       if (importType === 'games' && job.job_type !== 'games') {
         return { data: null, error: { message: 'Import job is not games' } };
+      }
+      if (importType === 'practice_schedule' && job.job_type !== 'practice_schedule') {
+        return { data: null, error: { message: 'Import job is not practice_schedule' } };
       }
       if (importType === 'fields' && job.job_type !== 'fields') {
         return { data: null, error: { message: 'Import job is not fields' } };
@@ -4978,13 +4995,14 @@ export const mockSupabase = {
           'practice_preferences',
           'evaluations',
           'games',
+          'practice_schedule',
         ].includes(importType)
       ) {
         return {
           data: null,
           error: {
             message:
-              'Only coach, field, field_availability, practice_preferences, evaluations, and games imports support deferred cancellation',
+              'Only coach, field, field_availability, practice_preferences, evaluations, games, and practice_schedule imports support deferred cancellation',
           },
         };
       }
@@ -4993,6 +5011,9 @@ export const mockSupabase = {
       }
       if (importType === 'games' && job.job_type !== 'games') {
         return { data: null, error: { message: 'Import job is not games' } };
+      }
+      if (importType === 'practice_schedule' && job.job_type !== 'practice_schedule') {
+        return { data: null, error: { message: 'Import job is not practice_schedule' } };
       }
       // 20261122010000: only a staged import that has not been applied is cancelled, as the SQL now says (it marked
       // ANY job of the right type `failed`, an applied one too, and the mock mirrored that while it did).

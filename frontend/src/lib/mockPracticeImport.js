@@ -2075,8 +2075,9 @@ const ISO_DATE_TEXT = /^\d{4}-\d{2}-\d{2}$/;
  * The mock's `import-validation` for `import_type: 'practice_schedule'` (the Edge function's practice arm,
  * `supabase/functions/import-validation/index.ts`; plan 4.11, PR 11, task L1).
  *
- * **Mirrored.** The caller is signed in and an admin of the organization; the request's shape (at most 2,400 rows, the
- * two dates `YYYY-MM-DD` or null); the job is a practice schedule job of the organization. `action: 'stage'`: the job
+ * **Mirrored.** The caller is signed in and an admin of the organization; the request's shape (at most 2,400 rows, at
+ * most 200 headers, as `PracticeImportPayload.headers` answers more with a 400 `Invalid payload`, the two dates
+ * `YYYY-MM-DD` or null); the job is a practice schedule job of the organization. `action: 'stage'`: the job
  * is still `importing` (a staged job is never staged again); the season's window is the JOB's; the file is read whole
  * by core's `stagePracticeFile` (the function the Edge mirror is held to); only a date that is not a calendar date
  * (`PracticeImportDateError`) is refused as `bad-date`, and any other error is thrown; a refused file stages nothing
@@ -2108,7 +2109,7 @@ export function handlePracticeImportFunction(db, body, ctx) {
     !body?.import_job_id ||
     !['stage', 'apply'].includes(action) ||
     !Array.isArray(headers) ||
-    headers.length > PRACTICE_IMPORT_STAGE_LIMITS.MAX_HEADERS ||
+    headers.length > PRACTICE_IMPORT_STAGE_LIMITS.MAX_COLUMNS ||
     !Array.isArray(rows) ||
     rows.length > PRACTICE_IMPORT_STAGE_LIMITS.MAX_ROWS ||
     (dates !== null &&

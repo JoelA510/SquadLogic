@@ -29,10 +29,13 @@ import {
 import {
   PRACTICE_IMPORT_COLUMNS,
   PRACTICE_IMPORT_HEADER_ALIASES,
+  describePracticeDuplicateColumn,
   parsePracticeRows,
+  practiceImportColumnOf,
   practiceImportReadsHeader,
 } from './parseRows.js';
 import { PRACTICE_IMPORT_LIMITS, PRACTICE_IMPORT_REASON as R } from './reasonCodes.js';
+import { describeTooManyColumns } from '../scheduleImport/reasonCodes.js';
 import { practiceLabelKey } from './slotKey.js';
 
 /** The keys of a staged practice row, in the order the allowlist lists them. */
@@ -125,8 +128,96 @@ export function toStagedPracticeRow(row) {
 export const PRACTICE_IMPORT_STAGE_LIMITS = Object.freeze({
   MAX_ROWS: PRACTICE_IMPORT_LIMITS.MAX_ROWS,
   MAX_CELL_LENGTH: 500,
-  MAX_HEADERS: PRACTICE_IMPORT_LIMITS.MAX_COLUMNS,
+  /**
+   * The headers one request may SEND (the Edge request shape refuses more with a 400; the stage and the parse refuse
+   * more with `too-many-columns`). The browser sends only the columns the import reads, found by name
+   * (`preparePracticeImportFile`), so a wide file is never cut by position and never refused for its width.
+   */
+  MAX_COLUMNS: PRACTICE_IMPORT_LIMITS.MAX_COLUMNS,
 });
+
+/**
+ * The words of the browser's `too-many-columns`: more headers it READS than one request may send. A file's width is
+ * never the cause (the columns it does not read are not sent); only a column the import reads given many times over
+ * reaches it. The stage and the parse, which count what they are sent, say `describeTooManyColumns`.
+ *
+ * @param {number} count  the headers the import reads
+ * @param {number} max  the cap
+ * @returns {string}
+ */
+export function describeTooManyReadColumns(count, max) {
+  return `The file has ${count} columns the import reads; one import takes at most ${max}. A column it reads is given more than once: remove the repeats and choose the file again.`;
+}
+
+/**
+ * A practice file as the browser sends it (the follow-up of #734, and the review of #739): the header row cleaned ONCE,
+ * here, by the stage's own cleaner, and each column the import reads found by that cleaned name (its own name or an
+ * alias). The panel's early parse and the request both use what this returns, so the browser and the stage read one
+ * header row: a `<b>Day</b>` is `Day` to both, a header whose raw text is longer than a request takes is sent by its
+ * cleaned name, and two headers that clean to one column (`Team` and `<i>Team</i>`) are refused here, before a job is
+ * made, as the parse would refuse them. Nothing is cut by position, so a column the import reads is read wherever it
+ * stands, and a file's width is never a reason to refuse it.
+ *
+ * - `headers`: the cleaned names of the columns the import reads, in the file's order.
+ * - `rows`: each row keyed by those names, with the cell as the file wrote it (the stage cleans every cell), and
+ *   nothing of a column the import does not read.
+ * - `dropped`: every other header that is not blank, cleaned, the way the parse names a column it drops. A blank
+ *   header is in neither list.
+ * - `refusal`: `too-many-columns` for more headers it reads than one request may send; `duplicate-column` for two that
+ *   clean to one column. With a refusal, `headers` and `rows` are empty.
+ *
+ * @param {{ headers: unknown[], rows: Array<Record<string, unknown>>,
+ *   clean: (value: unknown, maxLength: number) => string }} input  `clean` is `sanitizeImportText`
+ * @returns {{ refusal: { code: string, message: string, column?: string } | null, headers: string[],
+ *   rows: Array<Record<string, unknown>>, dropped: string[] }}
+ */
+export function preparePracticeImportFile({ headers, rows, clean }) {
+  if (!Array.isArray(headers)) {
+    throw new TypeError('preparePracticeImportFile: headers must be an array');
+  }
+  if (!Array.isArray(rows)) throw new TypeError('preparePracticeImportFile: rows must be an array');
+  if (typeof clean !== 'function') {
+    throw new TypeError('preparePracticeImportFile: clean must be the cell cleaner');
+  }
+  /** @type {Array<{ raw: string, name: string, column: string }>} */
+  const read = [];
+  /** @type {string[]} */
+  const dropped = [];
+  for (const header of headers) {
+    const name = clean(header, PRACTICE_IMPORT_STAGE_LIMITS.MAX_CELL_LENGTH);
+    if (name.trim() === '') continue;
+    const column = practiceImportColumnOf(name);
+    if (column === undefined) dropped.push(name.trim());
+    else read.push({ raw: String(header ?? ''), name, column });
+  }
+  /** @param {string} code @param {string} message @param {string} [column] */
+  const refused = (code, message, column) => ({
+    refusal: column === undefined ? { code, message } : { code, message, column },
+    headers: [],
+    rows: [],
+    dropped,
+  });
+  if (read.length > PRACTICE_IMPORT_STAGE_LIMITS.MAX_COLUMNS) {
+    return refused(
+      R.TOO_MANY_COLUMNS,
+      describeTooManyReadColumns(read.length, PRACTICE_IMPORT_STAGE_LIMITS.MAX_COLUMNS)
+    );
+  }
+  /** @type {Set<string>} */
+  const seen = new Set();
+  for (const { column } of read) {
+    if (seen.has(column)) {
+      return refused(R.DUPLICATE_COLUMN, describePracticeDuplicateColumn(column), column);
+    }
+    seen.add(column);
+  }
+  return {
+    refusal: null,
+    headers: read.map((h) => h.name),
+    rows: rows.map((row) => Object.fromEntries(read.map((h) => [h.name, row?.[h.raw] ?? '']))),
+    dropped,
+  };
+}
 
 /**
  * A practice file as the Edge function stages it (PR 11, task L1), and as the mock's `import-validation` does: the
@@ -156,9 +247,33 @@ export function stagePracticeFile({ headers, rows, season, dates, clean }) {
   if (!Array.isArray(rows)) throw new TypeError('stagePracticeFile: rows must be an array');
   /** @param {unknown} value */
   const cleanCell = (value) => clean(value, PRACTICE_IMPORT_STAGE_LIMITS.MAX_CELL_LENGTH);
+  const empty = {
+    rows: 0,
+    placements: 0,
+    open: 0,
+    holds: 0,
+    refused: 0,
+    flagged: 0,
+    by_reason: {},
+    dropped_columns: [],
+    warnings: [],
+    refused_rows: [],
+  };
+  // More headers than one request may send is refused, never cut. Counted as SENT, a blank header included, as the
+  // Edge request shape counts them (which refuses such a request with a 400 before this runs: this is the backstop).
+  if (headers.length > PRACTICE_IMPORT_STAGE_LIMITS.MAX_COLUMNS) {
+    return {
+      refusal: {
+        code: R.TOO_MANY_COLUMNS,
+        message: describeTooManyColumns(headers.length, PRACTICE_IMPORT_STAGE_LIMITS.MAX_COLUMNS),
+      },
+      staged: [],
+      summary: empty,
+    };
+  }
   // A value is read by the header as the file wrote it (the row is keyed by that); the cleaned name says which column.
-  // Every header is read: a file with more than the cap is refused by the parse, never cut (a column the import reads
-  // past the cap would be dropped while its values stayed).
+  // Every header sent is read: nothing cuts the row by position (a column the import reads past a cap would be dropped
+  // while its values stayed).
   const named = headers
     .map((h) => ({ original: String(h ?? ''), cleaned: cleanCell(h) }))
     .filter((h) => h.cleaned.trim() !== '');
@@ -178,18 +293,6 @@ export function stagePracticeFile({ headers, rows, season, dates, clean }) {
     for (const h of keptNames) out[h.cleaned] = cleanCell(row?.[h.original]);
     return out;
   });
-  const empty = {
-    rows: 0,
-    placements: 0,
-    open: 0,
-    holds: 0,
-    refused: 0,
-    flagged: 0,
-    by_reason: {},
-    dropped_columns: [],
-    warnings: [],
-    refused_rows: [],
-  };
   const parsed = parsePracticeRows({ headers: fileHeaders, rows: allowlisted, season, dates });
   if (!parsed.ok) return { refusal: parsed.refusal, staged: [], summary: empty };
   const staged = parsed.rows.map((row, i) => {

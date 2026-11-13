@@ -606,7 +606,7 @@ const PracticeImportPayload = z.object({
   import_job_id: z.string().uuid(),
   headers: z
     .array(z.string().max(PRACTICE_IMPORT_LIMITS.MAX_CELL_LENGTH))
-    .max(PRACTICE_IMPORT_LIMITS.MAX_HEADERS)
+    .max(PRACTICE_IMPORT_LIMITS.MAX_COLUMNS)
     .optional()
     .default([]),
   rows: z

@@ -221,19 +221,35 @@ const KINDS = Object.freeze({
     columns:
       'Team, Division, Day, Start, End (or Length in minutes), Location (or Venue), Field. Optional: Subunit (or Half, Side), Valid From, Valid Until, Capacity, Use ("hold" for a cell held for a non-team activity). A row with no Team is an open slot. Any other column is dropped and never stored.',
     // The practice parser is loaded when a practice file is read, not with the panel the Games tab loads.
+    // The header as the stage reads it: cleaned first, so a column the CSV reader renamed for a repeat of
+    // `<b>Team</b>` is caught as a repeat of Team (review of PR 739).
     headerReader: () =>
       import('@squadlogic/core/practiceImport/parseRows.js').then(
-        (m) => m.practiceImportReadsHeader
+        (m) => (/** @type {string} */ name) =>
+          m.practiceImportReadsHeader(sanitizeImportText(name, 500))
       ),
+    // The early reading is of what the client SENDS (`preparePracticeImportFile`: the columns the import reads, found
+    // and keyed by their cleaned name), so a wide file is read whole and never refused for its width, and the browser
+    // reads `<b>Day</b>` as the stage does. Its refusals (two headers of one column, more read headers than a request
+    // takes) are the client's own words.
     parseFile: (/** @type {any} */ input) =>
-      import('@squadlogic/core/practiceImport/parseRows.js').then((m) =>
-        m.parsePracticeRows({
+      Promise.all([
+        import('@squadlogic/core/practiceImport/parseRows.js'),
+        import('@squadlogic/core/practiceImport/staging.js'),
+      ]).then(([m, staging]) => {
+        const sent = staging.preparePracticeImportFile({
           headers: input.headers,
           rows: input.rows,
+          clean: sanitizeImportText,
+        });
+        if (sent.refusal) return { ok: false, refusal: sent.refusal };
+        return m.parsePracticeRows({
+          headers: sent.headers,
+          rows: sent.rows,
           season: { startDate: input.season?.startDate, endDate: input.season?.endDate },
           dates: input.dates,
-        })
-      ),
+        });
+      }),
     start: practiceCall('startPracticeImport'),
     readStaged: practiceCall('readStagedPracticeRows'),
     readLeague: practiceCall('readPracticeImportLeague'),

@@ -75,6 +75,13 @@ const row = (cells) => ({
   ...cells,
 });
 
+/** A header row of `at` SENT headers, the Team last, after filler columns the import does not read. */
+const teamAt = (at) => [
+  ...HEAD.filter((h) => h !== 'Team'),
+  ...Array.from({ length: at - HEAD.length }, (_, i) => `Extra ${i}`),
+  'Team',
+];
+
 /** The named vectors: each a small file that reaches one or more outcomes. Placeholder values only. */
 function vectorInputs() {
   const v = (name, rows, extra = {}) => ({
@@ -228,13 +235,23 @@ function vectorInputs() {
       headers: HEAD.filter((h) => h !== 'Division'),
     }),
     v('the same column twice by an alias', [row({})], { headers: [...HEAD, 'Venue'] }),
-    v('too many columns: Team in column 201 is refused, never cut', [row({})], {
-      headers: [
-        ...HEAD.filter((h) => h !== 'Team'),
-        ...Array.from({ length: 201 - HEAD.length }, (_, i) => `Extra ${i}`),
-        'Team',
-      ],
+    // The browser sends only the columns the import reads, so these reach the stage only from a caller that sends
+    // more: the backstop, counted as SENT, a blank header included, as the request shape counts them.
+    v(
+      '200 headers sent, a recognised column (the Team) the 200th: every header sent is read',
+      [row({})],
+      {
+        headers: teamAt(200),
+      }
+    ),
+    v('too many columns: 201 headers sent, Team the 201st, is refused, never cut', [row({})], {
+      headers: teamAt(201),
     }),
+    v(
+      'too many columns: 201 headers sent, two of them blank; counted as sent, as the request shape counts them',
+      [row({})],
+      { headers: [...teamAt(199), '', '   '] }
+    ),
     v(
       'too many rows',
       Array.from({ length: 2401 }, (_, i) => row({ Team: `T-${i}` }))

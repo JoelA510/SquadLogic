@@ -419,9 +419,8 @@ describe('division settings: only the practice settings are written (F11-4b B3, 
   });
 });
 
-describe('a file with more columns than the import reads (Codex C5 on #732)', () => {
-  it('is refused in words before a job is made, and nothing is staged: Team in column 201 is never cut', async () => {
-    const rpc = vi.spyOn(client, 'rpc');
+describe('a file wider than 200 columns (Codex C5 on #732; the follow-up of #734)', () => {
+  it('imports through the real mock: Team in column 201 is sent by name, staged, and never cut', async () => {
     const invoke = vi.spyOn(client.functions, 'invoke');
     const headers = [
       'Division',
@@ -435,34 +434,32 @@ describe('a file with more columns than the import reads (Codex C5 on #732)', ()
     ];
     expect(headers).toHaveLength(201);
     expect(headers[200]).toBe('Team');
-    await expect(
-      C.startPracticeImport(client, {
-        organizationId: ORG,
-        seasonSettingsId: SEASON,
-        fileName: 'wide.csv',
-        headers,
-        rows: [
-          {
-            Team: 'U10B-01',
-            Division: 'U10 Boys',
-            Day: 'Tue',
-            Start: '16:00',
-            End: '17:00',
-            Location: 'Venue A',
-            Field: 'Field 1',
-          },
-        ],
-        dates: null,
-      })
-    ).rejects.toMatchObject({
-      code: 'too-many-columns',
-      message: expect.stringMatching(/201 columns; one import reads at most 200/),
+    const started = await C.startPracticeImport(client, {
+      organizationId: ORG,
+      seasonSettingsId: SEASON,
+      fileName: 'wide.csv',
+      headers,
+      rows: [
+        {
+          Team: 'U10B-01',
+          Division: 'U10 Boys',
+          Day: 'Tue',
+          Start: '16:00',
+          End: '17:00',
+          Location: 'Venue A',
+          Field: 'Field 1',
+          'Extra 0': 'unread value',
+        },
+      ],
+      dates: null,
     });
-    expect(rpc.mock.calls.filter(([name]) => name === 'create_import_job')).toEqual([]);
-    expect(invoke).not.toHaveBeenCalled();
-    expect(
-      (await client.from('staging_import_rows').select('id').eq('organization_id', ORG)).data
-    ).toEqual([]);
+    // only the seven columns the import reads were sent; the 194 others are named, not sent
+    const body = /** @type {any} */ (invoke.mock.calls[0])[1].body;
+    expect(body.headers).toEqual(['Division', 'Day', 'Start', 'End', 'Location', 'Field', 'Team']);
+    expect(JSON.stringify(body)).not.toContain('unread value');
+    expect(started.summary.dropped_columns).toHaveLength(194);
+    const rows = await C.readStagedPracticeRows(client, started.jobId);
+    expect(rows.map((r) => [r.status, r.teamLabel])).toEqual([['placement', 'U10B-01']]);
     vi.restoreAllMocks();
   });
 });

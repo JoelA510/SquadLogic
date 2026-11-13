@@ -684,7 +684,8 @@ coordinator's brief ride along. What differs from the text above, each a decisio
   Docker); the owner's D1 is (a), and A needs no migration. The readers are repointed; there is no `games` view.
 - **One reader module.** `frontend/src/utils/savedGamesClient.js` holds the select (`SAVED_GAME_SELECT`) and three
   reads: a season's (or an organization's) current runs from `current_game_runs`, their games, and one team's games
-  filtered to the current runs. The team page and its files, the Dashboard, the Player record, Scores and Standings
+  read from its current runs (and, since the review round, bounded card reads). The team page and its files, the
+  Dashboard, the Player record, Scores and Standings
   call it; the feed (`teamFeed.ts`) makes the same two reads under the service role, scoped by organization, with
   the read cap and "said, never swallowed" of the exceptions read beside it.
 - **Hints.** `game_assignments` has two foreign keys to `teams` as well as to `game_slots`, so the sides are embedded
@@ -708,6 +709,20 @@ coordinator's brief ride along. What differs from the text above, each a decisio
 - **C6** reads the saved schedule again after any 409 `GAME_IDENTITY` of an Apply or a roll back.
 - **E3.** A switch of organization forgets the import context's job in flight and each type's last import; a switch
   of season changes nothing (both are read by organization, and a job carries its own season to its apply).
+
+**Review round (2026-11-13, the one adversarial review of #726, ten findings, all taken).** R1: after a 409
+`GAME_IDENTITY` the staged review is matched again to the saved schedule as read now (`utils/gameReviewRekey.js`), or
+discarded in words when nothing changed, so the same refusal is never sent twice. R2 and R5: the import context resets
+only when one organization is replaced by another (null is not one), and every await of its load is guarded, logs
+cleared on a switch. R3: a failed count of earlier results is said; the games still show. R4 and R10: one draft hook
+(`hooks/useScoreDrafts.js`) for Scores and Standings, one save of a game at a time (its boxes take no edit while it is
+in flight). R6: one rule for when a game ends, for the feed and the team page, over one table of rows
+(`_shared/tests/game-end-cases.ts`): its own end, else the slot's length from its own start, else no end on the page and
+an hour (`DEFAULT_GAME_MINUTES`) in the feed; DTEND is never before DTSTART. R7: a score is a whole number from 0, or
+nothing is sent, in words. R8: a team's schedule is one definition (its organization and its division's season name
+the current runs; the team's games are read from those runs only) for the team page, the Player record and the feed.
+R9: Recent Games and the Dashboard read only what they show, bounded on the server (`fetchGameCards`,
+`countCurrentGames`).
 
 **What F11-5 still has to do:** drop `games`, its policies and triggers, the four SQL arms that name it
 (`admin_delete_team`, `field_bookings`, `rollback_field_import_job`, `copy_legacy_game_scores`), the mock's arms

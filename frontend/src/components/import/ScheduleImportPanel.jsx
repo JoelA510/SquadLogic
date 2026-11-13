@@ -54,12 +54,34 @@ import {
 } from '../../utils/gameImportMapping.js';
 
 // G5: recording an import as the publication baseline reads the whole saved schedule and makes the master export, so
-// it is its own chunk, loaded only when an import records or is rolled back.
-const ImportBaselineRecorder = lazy(() =>
-  import('./ImportBaseline.jsx').then((m) => ({ default: m.ImportBaselineRecorder }))
+// it is its own chunk, loaded only when an import records or is rolled back. A chunk that cannot be loaded (a new
+// deploy, a dropped connection) is said through the same callback as any other failure, never left to throw in render.
+/** @param {string} name @param {(error: any) => (props: any) => null} onFailure */
+const lazyBaseline = (name, onFailure) =>
+  lazy(() =>
+    import('./ImportBaseline.jsx').then(
+      (m) => ({ default: m[name] }),
+      (error) => {
+        logger.error('The baseline module could not be loaded:', error);
+        return { default: onFailure(error) };
+      }
+    )
+  );
+/** A component that reports `outcome` once, through the prop `report` names. */
+const reportOnce = (report, outcome) =>
+  function ChunkFailed(props) {
+    const callback = props[report];
+    useEffect(() => callback(outcome), [callback]);
+    return null;
+  };
+const ImportBaselineRecorder = lazyBaseline('ImportBaselineRecorder', (error) =>
+  reportOnce('onDone', {
+    status: 'failed',
+    message: `The import is applied, but no publication baseline was recorded: this page could not load what records it (${String(error?.message ?? error)}). Reload the page; uploading the files on the Exports page records a baseline.`,
+  })
 );
-const ImportBaselineLookup = lazy(() =>
-  import('./ImportBaseline.jsx').then((m) => ({ default: m.ImportBaselineLookup }))
+const ImportBaselineLookup = lazyBaseline('ImportBaselineLookup', (error) =>
+  reportOnce('onResult', { status: 'unchecked', message: String(error?.message ?? error) })
 );
 
 /**
@@ -1325,8 +1347,8 @@ function ScheduleImportWorkflow({
               <span>
                 Record this schedule as the baseline for Changes since publication
                 <span className="block text-xs text-text-muted">
-                  Once the import is applied, the schedule as it then stands is recorded as the
-                  Exports page records the files it uploads, so the Changes since publication report
+                  Once the import is applied, the schedule as it then stands is recorded: the rows
+                  the Exports page records when it uploads its files. Changes since publication then
                   shows what changes from here. Ticked when the games arrive Published.
                 </span>
               </span>

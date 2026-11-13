@@ -35,6 +35,9 @@ const failed = (why) => ({
   message: `The import is applied, but no publication baseline was recorded: ${why}. "Changes since publication" has nothing from this import to compare with; uploading the files on the Exports page records a baseline.`,
 });
 
+/** How long the reads may take before the recording is given up and said (a team run still running keeps one open). */
+const READ_WAIT_MS = 60000;
+
 /** The source names `useDashboardData().errors` uses, in the words the Exports page uses for them. */
 const SOURCE_WORDS = Object.freeze({ team: 'teams', practice: 'practices', game: 'games' });
 
@@ -56,6 +59,17 @@ export function ImportBaselineRecorder({ jobId, fileName, client, onDone }) {
   const started = useRef(false);
   // Every read the Exports page waits for, finished (a read still in flight is not "none").
   const waiting = Boolean(loading.team || loading.practice || loading.game);
+
+  // A read that never settles (a team run still running is polled, not finished) must not hold the result screen,
+  // whose buttons wait for the recording: after a minute the recording is given up, and said.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (started.current) return;
+      started.current = true;
+      onDone(failed('the saved schedule was still being read after a minute'));
+    }, READ_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [onDone]);
 
   useEffect(() => {
     if (started.current || waiting) return;

@@ -436,6 +436,34 @@ describe('the import’s baseline recorder (G5, ImportBaseline.jsx) says a faile
     );
   });
 
+  it('a read that never settles: given up after a minute, and said (the result screen is not held)', async () => {
+    const { act } = await import('@testing-library/react');
+    const { ImportBaselineRecorder } =
+      await import('../frontend/src/components/import/ImportBaseline.jsx');
+    vi.useFakeTimers();
+    try {
+      dash.value = {
+        ...dashboardData(null),
+        loading: { team: true, practice: false, game: false },
+      };
+      const onDone = vi.fn();
+      render(<ImportBaselineRecorder jobId="job-1" client={null} onDone={onDone} />);
+      await act(async () => {
+        vi.advanceTimersByTime(59000);
+      });
+      expect(onDone).not.toHaveBeenCalled();
+      await act(async () => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(onDone).toHaveBeenCalledTimes(1);
+      expect(onDone.mock.calls[0][0].message).toMatch(
+        /no publication baseline was recorded: the saved schedule was still being read after a minute/
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('negative twin: with every read sound, it does not say one failed', async () => {
     // (nothing is scheduled in this fixture, so nothing is recorded either: said as that)
     const outcome = await recordWith(null);

@@ -1887,7 +1887,11 @@ requirements of the PR 10 review and by this PR:
     ground only a hold names is stored as its exact existing ground (a hold creates nothing), so the database knows it
     and flags a hold over a slot; a `map` that leaves its label's scope goes back to undecided in the choices, the scope judged with the proposal
     made again under the updated choices at each level (Codex's C4: a location remapped to another with a field of the
-    same name moves that field, and a half chosen under it goes); the stage
+    same name moves that field, and a half chosen under it goes); a file of more than 200 columns is refused
+    (`too-many-columns`, by the parse in core and the mirror, and by the client before a job is made), never cut, so a
+    Team past the cap cannot turn a placement into an open slot (C5; the games import cuts its header row at 200 the
+    same way, a follow-up); every probable-move team has its own tick, the first 25 listed and "Show all N teams" for
+    the rest (C6); the stage
     answers `bad-date` only for `PracticeImportDateError` and audits and rethrows anything else; the words helper catches
     nothing; the header-to-column map is made once per file in core and the mirror; the clients share
     `utils/importClientCommon.js`; the panel's kind checks are `KINDS` fields (`Steps`, `takesDates`,

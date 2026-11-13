@@ -21,6 +21,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ALIAS_CSV,
+  FILE_HEADERS,
   DIVISIONS,
   HALF_A,
   HALF_CA,
@@ -531,5 +532,41 @@ describe('the review round of #732', () => {
     await toPreview();
     const mapping = await storedMapping();
     expect(JSON.stringify(mapping.subunits)).not.toContain(HALF_A);
+  });
+});
+
+describe('Codex C5 and C6 on #732', () => {
+  it('C5: a file whose Team is its 201st column is refused on upload, and no job is made', async () => {
+    const rpc = vi.spyOn(mockSupabase, 'rpc');
+    render(<ScheduleImportPanel kind="practices" />);
+    const extra = Array.from({ length: 188 }, (_, i) => `Extra ${i}`);
+    const headers = [...FILE_HEADERS.filter((h) => h !== 'Team'), ...extra, 'Team'];
+    expect(headers).toHaveLength(201);
+    const line = headers.map((h) =>
+      h === 'Team'
+        ? 'U10B-01'
+        : h === 'Division'
+          ? 'U10 Boys'
+          : h === 'Day'
+            ? 'Tue'
+            : h === 'Start'
+              ? '16:00'
+              : h === 'End'
+                ? '17:00'
+                : h === 'Location'
+                  ? 'Venue A'
+                  : h === 'Field'
+                    ? 'Field 1'
+                    : ''
+    );
+    upload(`${headers.join(',')}\r\n${line.join(',')}\r\n`, 'wide.csv');
+    await waitFor(() =>
+      expect(screen.getByTestId('schedule-import-error').textContent).toMatch(
+        /201 columns; one import reads at most 200/
+      )
+    );
+    expect(step()).toMatch(/1 of 4/);
+    expect(rpc.mock.calls.filter(([name]) => name === 'create_import_job')).toEqual([]);
+    expect(await table('staging_import_rows')).toEqual([]);
   });
 });

@@ -136,6 +136,15 @@ export async function startPracticeImport(
       'too-many-rows'
     );
   }
+  // A file with more columns than the import reads is refused here, before a job is made, and never cut: a column the
+  // import reads past the cap (a Team) would be dropped while its values stayed, and a placement would read as an
+  // open slot (Codex on #732).
+  if (headers.length > PRACTICE_IMPORT_STAGE_LIMITS.MAX_HEADERS) {
+    throw refusal(
+      `The file has ${headers.length} columns; one import reads at most ${PRACTICE_IMPORT_STAGE_LIMITS.MAX_HEADERS}. Remove the columns it does not need and choose it again.`,
+      'too-many-columns'
+    );
+  }
   const created = await client.rpc('create_import_job', {
     p_organization_id: organizationId,
     p_import_type: TYPE,
@@ -158,7 +167,7 @@ export async function startPracticeImport(
       action: 'stage',
       organization_id: organizationId,
       import_job_id: jobId,
-      headers: headers.slice(0, PRACTICE_IMPORT_STAGE_LIMITS.MAX_HEADERS),
+      headers,
       rows: sentRows,
       dates: {
         valid_from: dates?.validFrom || null,

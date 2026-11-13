@@ -37,6 +37,7 @@ export const PRACTICE_IMPORT_REASON = Object.freeze({
   MISSING_COLUMN: 'missing-column',
   DUPLICATE_COLUMN: 'duplicate-column',
   TOO_MANY_ROWS: 'too-many-rows',
+  TOO_MANY_COLUMNS: 'too-many-columns',
   BAD_USE: 'bad-use',
   BAD_DAY: 'bad-day',
   BAD_TIME: 'bad-time',
@@ -239,6 +240,12 @@ export function parsePracticeRows({
 }): PracticeImportParseResult {
   if (!Array.isArray(headers)) throw new TypeError('parsePracticeRows: headers must be an array');
   if (!Array.isArray(rows)) throw new TypeError('parsePracticeRows: rows must be an array');
+  if (headers.length > PRACTICE_IMPORT_LIMITS.MAX_HEADERS) {
+    return fileRefusal(
+      R.TOO_MANY_COLUMNS,
+      `The file has ${headers.length} columns; one import reads at most ${PRACTICE_IMPORT_LIMITS.MAX_HEADERS}. Remove the columns it does not need and choose it again.`
+    );
+  }
 
   const header = new Map<string, string>();
   const droppedColumns: string[] = [];
@@ -703,8 +710,8 @@ export function stagePracticeFile({
   if (!Array.isArray(rows)) throw new TypeError('stagePracticeFile: rows must be an array');
   const cleanCell = (value: unknown): string =>
     clean(value, PRACTICE_IMPORT_LIMITS.MAX_CELL_LENGTH);
+  // Every header is read: a file with more than the cap is refused by the parse, never cut.
   const named = headers
-    .slice(0, PRACTICE_IMPORT_LIMITS.MAX_HEADERS)
     .map((h) => ({ original: String(h ?? ''), cleaned: cleanCell(h) }))
     .filter((h) => h.cleaned.trim() !== '');
   const fileHeaders = named.map((h) => h.cleaned);

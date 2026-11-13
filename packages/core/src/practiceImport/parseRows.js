@@ -262,6 +262,12 @@ function callerDate(value, what) {
 export function parsePracticeRows({ headers, rows, season, dates }) {
   if (!Array.isArray(headers)) throw new TypeError('parsePracticeRows: headers must be an array');
   if (!Array.isArray(rows)) throw new TypeError('parsePracticeRows: rows must be an array');
+  if (headers.length > PRACTICE_IMPORT_LIMITS.MAX_COLUMNS) {
+    return fileRefusal(
+      R.TOO_MANY_COLUMNS,
+      `The file has ${headers.length} columns; one import reads at most ${PRACTICE_IMPORT_LIMITS.MAX_COLUMNS}. Remove the columns it does not need and choose it again.`
+    );
+  }
 
   // Columns: match by the shared normaliser (trim, collapse, fold case; a byte-order mark is
   // whitespace to it), drop every name that is not on the list, and refuse a name given twice.

@@ -384,3 +384,51 @@ describe('division settings: the roster rules are sent back only when unchanged 
     vi.restoreAllMocks();
   });
 });
+
+describe('a file with more columns than the import reads (Codex C5 on #732)', () => {
+  it('is refused in words before a job is made, and nothing is staged: Team in column 201 is never cut', async () => {
+    const rpc = vi.spyOn(client, 'rpc');
+    const invoke = vi.spyOn(client.functions, 'invoke');
+    const headers = [
+      'Division',
+      'Day',
+      'Start',
+      'End',
+      'Location',
+      'Field',
+      ...Array.from({ length: 194 }, (_, i) => `Extra ${i}`),
+      'Team',
+    ];
+    expect(headers).toHaveLength(201);
+    expect(headers[200]).toBe('Team');
+    await expect(
+      C.startPracticeImport(client, {
+        organizationId: ORG,
+        seasonSettingsId: SEASON,
+        fileName: 'wide.csv',
+        headers,
+        rows: [
+          {
+            Team: 'U10B-01',
+            Division: 'U10 Boys',
+            Day: 'Tue',
+            Start: '16:00',
+            End: '17:00',
+            Location: 'Venue A',
+            Field: 'Field 1',
+          },
+        ],
+        dates: null,
+      })
+    ).rejects.toMatchObject({
+      code: 'too-many-columns',
+      message: expect.stringMatching(/201 columns; one import reads at most 200/),
+    });
+    expect(rpc.mock.calls.filter(([name]) => name === 'create_import_job')).toEqual([]);
+    expect(invoke).not.toHaveBeenCalled();
+    expect(
+      (await client.from('staging_import_rows').select('id').eq('organization_id', ORG)).data
+    ).toEqual([]);
+    vi.restoreAllMocks();
+  });
+});

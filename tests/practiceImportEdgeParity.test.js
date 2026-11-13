@@ -228,6 +228,13 @@ function vectorInputs() {
       headers: HEAD.filter((h) => h !== 'Division'),
     }),
     v('the same column twice by an alias', [row({})], { headers: [...HEAD, 'Venue'] }),
+    v('too many columns: Team in column 201 is refused, never cut', [row({})], {
+      headers: [
+        ...HEAD.filter((h) => h !== 'Team'),
+        ...Array.from({ length: 201 - HEAD.length }, (_, i) => `Extra ${i}`),
+        'Team',
+      ],
+    }),
     v(
       'too many rows',
       Array.from({ length: 2401 }, (_, i) => row({ Team: `T-${i}` }))

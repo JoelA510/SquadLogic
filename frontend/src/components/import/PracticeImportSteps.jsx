@@ -1,4 +1,4 @@
-import React, { useId, useMemo } from 'react';
+import React, { useId, useMemo, useState } from 'react';
 import Papa from 'papaparse';
 import { PRACTICE_ALIAS_COLUMNS } from '@squadlogic/core/practiceImport/aliases.js';
 import { practiceLabelKey } from '@squadlogic/core/practiceImport/slotKey.js';
@@ -58,6 +58,9 @@ const readable = readablePracticeDetail;
 const capital = (text) => (text ? `${text[0].toUpperCase()}${text.slice(1)}` : text);
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const sameList = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
+
+/** How many probable-move teams are listed before "Show all N teams". */
+const MOVES_SHOWN = 25;
 
 /** What each checked rule of the coverage sentence is called. */
 const CHECKED_WORDS = Object.freeze({
@@ -182,6 +185,10 @@ function patchWords(patch, label) {
 export default function PracticeImportSteps(props) {
   const { step, rows, league, choices, practice, preview } = props;
   const aliasInputId = useId();
+  const movesListId = useId();
+  // Every probable-move team is ticked on its own: the first few are shown, and the rest one press away (Codex on #732:
+  // a list cut at a number left the teams past it with no tick of their own).
+  const [showAllMoves, setShowAllMoves] = useState(false);
   const ackId = useId();
 
   // The alias file, read in this browser against the league (never uploaded or stored).
@@ -939,8 +946,23 @@ export default function PracticeImportSteps(props) {
                 Tick all probable moves
               </Button>
             </div>
-            <ul className="mt-2 space-y-2 text-sm text-text-secondary">
-              {moves.slice(0, 200).map((m) => {
+            <p
+              className="text-sm text-text-secondary mt-2"
+              data-testid="practice-import-moves-count"
+            >
+              {`${plural(
+                moves.filter((m) => m.arriving.every((a) => ticked.includes(String(a.row_key))))
+                  .length,
+                'team',
+                'teams'
+              )} of ${moves.length} ticked. ${
+                showAllMoves || moves.length <= MOVES_SHOWN
+                  ? `Showing all ${plural(moves.length, 'team', 'teams')}.`
+                  : `Showing the first ${MOVES_SHOWN} of ${moves.length} teams.`
+              }`}
+            </p>
+            <ul id={movesListId} className="mt-2 space-y-2 text-sm text-text-secondary">
+              {(showAllMoves ? moves : moves.slice(0, MOVES_SHOWN)).map((m) => {
                 const keys = m.arriving.map((a) => String(a.row_key));
                 const on = keys.every((k) => ticked.includes(k));
                 return (
@@ -967,8 +989,20 @@ export default function PracticeImportSteps(props) {
                 );
               })}
             </ul>
-            {moves.length > 200 && (
-              <p className="text-xs text-text-muted mt-1">{`and ${moves.length - 200} more teams (Tick all ticks them too)`}</p>
+            {moves.length > MOVES_SHOWN && (
+              <div className="mt-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-expanded={showAllMoves}
+                  aria-controls={movesListId}
+                  onClick={() => setShowAllMoves((open) => !open)}
+                >
+                  {showAllMoves
+                    ? `Show only the first ${MOVES_SHOWN} teams`
+                    : `Show all ${moves.length} teams`}
+                </Button>
+              </div>
             )}
           </section>
         )}

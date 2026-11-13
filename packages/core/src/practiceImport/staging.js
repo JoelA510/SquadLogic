@@ -125,7 +125,7 @@ export function toStagedPracticeRow(row) {
 export const PRACTICE_IMPORT_STAGE_LIMITS = Object.freeze({
   MAX_ROWS: PRACTICE_IMPORT_LIMITS.MAX_ROWS,
   MAX_CELL_LENGTH: 500,
-  MAX_HEADERS: 200,
+  MAX_HEADERS: PRACTICE_IMPORT_LIMITS.MAX_COLUMNS,
 });
 
 /**
@@ -157,8 +157,9 @@ export function stagePracticeFile({ headers, rows, season, dates, clean }) {
   /** @param {unknown} value */
   const cleanCell = (value) => clean(value, PRACTICE_IMPORT_STAGE_LIMITS.MAX_CELL_LENGTH);
   // A value is read by the header as the file wrote it (the row is keyed by that); the cleaned name says which column.
+  // Every header is read: a file with more than the cap is refused by the parse, never cut (a column the import reads
+  // past the cap would be dropped while its values stayed).
   const named = headers
-    .slice(0, PRACTICE_IMPORT_STAGE_LIMITS.MAX_HEADERS)
     .map((h) => ({ original: String(h ?? ''), cleaned: cleanCell(h) }))
     .filter((h) => h.cleaned.trim() !== '');
   const fileHeaders = named.map((h) => h.cleaned);

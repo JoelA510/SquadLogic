@@ -1743,8 +1743,17 @@ the mock `frontend/src/lib/mockPracticeImport.js` and `tests/mockPracticeImport.
    file does not hold (`leaving`) and the file's new rows (`arriving`), and an arriving row of a team that also has one
    leaving is a probable move and is **not inserted unless its row key is in the job's stored mapping**
    (`map_practice_import_job`, `options.add_moved_rows`, the ticked rows). A client that sends nothing gets the safe
-   default (unticked). The rule is core's `pairProbableMoves` at team level, and `tests/mockPracticeImport.test.js` holds
-   the dry run's flags equal to core's pairing over the two lists the dry run returns. Its slot is still made (supply).
+   default (unticked). Its slot is still made (supply). **Dates (review round, 2026-11-13):** a saved practice is
+   `leaving` only when its range, cut to its slot's validity, meets the file's first-to-last date for that team (a team
+   the file does not place has nothing leaving), and a new row is a probable move only when it meets the dates of one
+   of its team's leaving rows. So a spring file for teams the solver placed in the fall inserts normally, and a move
+   within the same dates is held back. Core's `pairProbableMoves` pairs at team level and sees no dates: PR 11's panel
+   shows the database's `probable_move` and `added`, and does not pair again (`tests/mockPracticeImport.test.js` holds
+   the two equal on the fixture's move, where the dates meet).
+3. **Review round (2026-11-13), the rest.** The apply judges the job after its locks (a second caller replays a
+   completed job), applies only a `ready_to_apply` job (the mapping can be stored while it imports, as the games
+   mapping can), refuses a row whose found slot differs in End, Capacity or Valid Until (`slot-differs`, the slot never
+   changed), and the parse refuses a blank Location, Field or (on a placement) Division as that row's reason.
 
 ### PR 11: Practice import III, validation, the Practices tab, E2E (L; Edge and UI; rule 14; Review: (c); added 2026-11-06)
 

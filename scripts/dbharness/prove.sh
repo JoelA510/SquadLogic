@@ -5790,7 +5790,9 @@ plant "R71 the revert does not refuse while a score is recorded" "$R71" \
 #   - the flag step hands the gate only the file's auto rows, so the manual rows go unflagged;
 #   - the rollback no longer refuses after a practice it wrote has changed;
 #   - an arriving row of a probable move is added without its tick;
-#   - the rollback reads no reference, so a field an admin gave a blackout since is deleted with the blackout.
+#   - the rollback reads no reference, so a field an admin gave a blackout since is deleted with the blackout;
+#   and two the review round asked for: the job's status not judged after the locks (a completed job applied again), and a
+#   slot found by its key not compared with the row (a practice could outlive its slot).
 plant "M80 the dry run's sentinel is removed (a preview writes)" "$M80" \
   "        IF v_dry THEN
             RAISE EXCEPTION 'practice import dry run: every write is undone' USING ERRCODE = 'SLD01';
@@ -5821,6 +5823,31 @@ plant "M80 the rollback no longer refuses after a change" "$M80" \
 plant "M80 a probable move is added without its tick" "$M80" \
   "SET probable_move = true, held_back = NOT (a.row_key = ANY (v_add))" \
   "SET probable_move = true, held_back = false" \
+  "smoke 20261123010000"
+
+plant "M80 the job's status is not judged after the locks (review round)" "$M80" \
+  "    -- A finished job answers with the result it stored (a retry after a lost response writes nothing).
+    IF v_job.status IN ('completed', 'completed_with_warnings') THEN
+        IF v_job.warning_summary ? 'practice_import' THEN
+            RETURN (v_job.warning_summary -> 'practice_import') || jsonb_build_object('replayed', true);
+        END IF;
+        RAISE EXCEPTION 'Import job % is already %', p_import_job_id, v_job.status USING ERRCODE = '22023';
+    END IF;
+    IF v_job.status IN ('failed', 'needs_fix') THEN
+        RAISE EXCEPTION '% import job % cannot be applied: a new file is a new job', initcap(v_job.status), p_import_job_id
+            USING ERRCODE = '22023', DETAIL = 'import_not_ready_to_apply';
+    END IF;
+    -- Only a job whose staging finished (mark_import_job_ready_to_apply) is applied: one still importing may be missing rows.
+    IF v_job.status <> 'ready_to_apply' THEN
+        RAISE EXCEPTION 'Import job % is %, not ready_to_apply: stage the whole file first', p_import_job_id, v_job.status
+            USING ERRCODE = '22023', DETAIL = 'import_not_ready_to_apply';
+    END IF;" \
+  "" \
+  "smoke 20261123010000"
+
+plant "M80 a found slot is not compared with the row (review round)" "$M80" \
+  "         WHERE ps.id = g.slot_id AND NOT g.created" \
+  "         WHERE ps.id = g.slot_id AND false" \
   "smoke 20261123010000"
 
 plant "M80 the rollback reads no reference" "$M80" \

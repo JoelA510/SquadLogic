@@ -162,7 +162,7 @@
     "persist_practice_schedule(run_data jsonb, assignments jsonb, allow_empty boolean, unlock jsonb, closes jsonb, exceptions jsonb, withdraw_exceptions jsonb, base_fingerprint text) returns jsonb",
     "persist_team_schedule(run_data jsonb, teams jsonb, team_players jsonb) returns uuid",
     "player_buddies_same_season() returns trigger",
-    "practice_import_referenced(p_table regclass, p_id uuid) returns boolean",
+    "practice_import_referenced_ids(p_table regclass, p_ids uuid[]) returns SETOF uuid",
     "practice_new_auto_row_refusals(p_organization_id uuid, p_assignment_ids uuid[]) returns TABLE(assignment_id uuid, team_id uuid, practice_slot_id uuid, rule text, detail text)",
     "practice_preference_minutes_ok(p_minutes integer[]) returns boolean",
     "practice_preference_set_ok(p_values anyarray) returns boolean",

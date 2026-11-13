@@ -187,22 +187,25 @@ describe('the schedule downloads', () => {
     const group = await exportsGroup();
     // Now the games read fails for the export.
     // Team B's games (the saved schedule, `game_assignments`) cannot be read; Team A's can.
-    vi.spyOn(mockSupabase, 'from').mockImplementation((table) =>
-      table === 'game_assignments'
-        ? /** @type {any} */ ({
-            select: (columns) => ({
-              or: (filter) =>
-                filter.includes('t2')
-                  ? {
-                      order: () => ({
-                        range: () => Promise.resolve({ data: null, error: { message: 'boom' } }),
-                      }),
-                    }
-                  : realFrom('game_assignments').select(columns).or(filter),
-            }),
-          })
-        : realFrom(table)
-    );
+    vi.spyOn(mockSupabase, 'from').mockImplementation((table) => {
+      const builder = realFrom(table);
+      if (table !== 'game_assignments') return builder;
+      const realSelect = builder.select.bind(builder);
+      builder.select = (...args) => {
+        const query = realSelect(...args);
+        const realOr = query.or.bind(query);
+        query.or = (filter) => {
+          if (!filter.includes('t2')) return realOr(filter);
+          const refused = {
+            order: () => refused,
+            range: () => Promise.resolve({ data: null, error: { message: 'boom' } }),
+          };
+          return refused;
+        };
+        return query;
+      };
+      return builder;
+    });
     fireEvent.click(within(group).getByRole('button', { name: 'CSV' }));
     expect(
       await within(group).findByText(

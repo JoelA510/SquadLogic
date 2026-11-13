@@ -68,28 +68,41 @@ export async function fetchCurrentSavedGames({ organizationId, seasonId = null, 
 }
 
 /**
- * One team's games in the saved schedule: the games it plays in whose run is its season's current one. The team's
- * games are read first (they name their runs), then `current_game_runs` says which of those runs is a schedule; a
- * game left behind in an older run is not returned. Either read failing throws.
+ * One team's games in the saved schedule: the definition the calendar feed uses too (`teamFeed.ts`, review R8). The
+ * team's organization and its division's season name the current runs (`current_game_runs`; every season of the
+ * organization when the division names none), and the team's games are read from those runs only, so the read does not
+ * grow with history. Any read failing throws.
  *
  * @param {string} teamId
  */
 export async function fetchTeamSavedGames(teamId) {
+  const { data: teams, error: teamError } = await supabase
+    .from('teams')
+    .select('id, organization_id, division_id')
+    .eq('id', teamId);
+  if (teamError) throw teamError;
+  const team = teams?.[0];
+  if (!team?.organization_id) return [];
+  let seasonId = null;
+  if (team.division_id) {
+    const { data: divisions, error: divisionError } = await supabase
+      .from('divisions')
+      .select('id, season_settings_id')
+      .eq('id', team.division_id);
+    if (divisionError) throw divisionError;
+    seasonId = divisions?.[0]?.season_settings_id ?? null;
+  }
+  const runIds = await fetchCurrentGameRunIds({ organizationId: team.organization_id, seasonId });
+  if (runIds.length === 0) return [];
   const rows = await fetchAllPages(() =>
     supabase
       .from('game_assignments')
       .select(SAVED_GAME_SELECT)
+      .eq('organization_id', team.organization_id)
+      .in('run_id', runIds)
       .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`)
   );
-  const runIds = [...new Set(rows.map((row) => row.run_id).filter(Boolean))];
-  if (runIds.length === 0) return [];
-  const { data, error } = await supabase
-    .from('current_game_runs')
-    .select('run_id')
-    .in('run_id', runIds);
-  if (error) throw error;
-  const current = new Set((data ?? []).map((row) => String(row.run_id)));
-  return rows.filter((row) => current.has(String(row.run_id))).map(withScore);
+  return rows.map(withScore);
 }
 
 /**

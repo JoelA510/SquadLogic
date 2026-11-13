@@ -21,15 +21,28 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
       const result = mocks.failing.includes(table)
         ? { data: null, error: { message: `${table}: synthetic read failure` } }
         : { data: mocks.tables[table] || [], error: null };
+      // `eq` and `in` filter the rows, as the server does (the reads scope by them); the rest pass.
+      const filters = [];
+      const answer = () =>
+        result.error
+          ? result
+          : {
+              ...result,
+              data: result.data.filter((row) =>
+                filters.every(([column, values]) =>
+                  row[column] === undefined ? true : values.includes(String(row[column]))
+                )
+              ),
+            };
       const builder = {
         select: () => builder,
-        eq: () => builder,
-        in: () => builder,
+        eq: (column, value) => (filters.push([column, [String(value)]]), builder),
+        in: (column, values) => (filters.push([column, values.map(String)]), builder),
         or: () => builder,
         order: () => builder,
-        limit: () => Promise.resolve(result),
-        range: () => Promise.resolve(result),
-        then: (resolve) => resolve(result),
+        limit: () => Promise.resolve(answer()),
+        range: () => Promise.resolve(answer()),
+        then: (resolve) => resolve(answer()),
       };
       return builder;
     },

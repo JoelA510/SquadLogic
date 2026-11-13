@@ -251,6 +251,7 @@ describe('ScoresPage: results that are not in the saved schedule are counted, no
 });
 
 describe('ScoresPage: one save of a game at a time, and only scores are sent (F11-3 review R4, R7)', () => {
+  afterEach(() => vi.restoreAllMocks());
   /** Holds every update_game_score until released, in any order. */
   async function holdSaves() {
     const supabase = await client();

@@ -12,7 +12,8 @@ import { divisionDisplayName } from '../utils/divisions.js';
 import { logger } from '../lib/logger.js';
 import LoadingScreen from '../components/LoadingScreen.jsx';
 import ScoreNotSavedAlert from '../components/ScoreNotSavedAlert.jsx';
-import { isHalfEntered, scoreRefusalText, typeScore } from '../utils/scoreEntry.js';
+import { scoreRefusalText } from '../utils/scoreEntry.js';
+import { useScoreDrafts } from '../hooks/useScoreDrafts.js';
 import { fetchCurrentGameRunIds, fetchSavedGames, hasStarted } from '../utils/savedGamesClient.js';
 
 /**
@@ -45,8 +46,6 @@ export default function ScoresPage() {
   const { genderModel } = useFeatures();
   const toast = useToast();
   const [games, setGames] = useState([]);
-  // What is typed and not saved yet, by game: one number of a score whose other is still empty.
-  const [drafts, setDrafts] = useState(/** @type {Record<string, any>} */ ({}));
   const [notSaved, setNotSaved] = useState(/** @type {string | null} */ (null));
   const [loadFailed, setLoadFailed] = useState(false);
   const [outsideSchedule, setOutsideSchedule] = useState(0);
@@ -80,7 +79,7 @@ export default function ScoresPage() {
       if (!orgId) return;
       setLoading(true);
       setLoadFailed(false);
-      setDrafts({});
+      resetDrafts();
       try {
         // With no season selected there is no schedule to list.
         const runIds = seasonId
@@ -111,68 +110,67 @@ export default function ScoresPage() {
     };
   }, [orgId, seasonId]);
 
-  const forgetDraft = useCallback(
-    (gameId) =>
-      setDrafts((current) =>
-        Object.fromEntries(Object.entries(current).filter(([id]) => id !== gameId))
-      ),
-    []
-  );
+  // What is typed and not saved yet, one game at a time (hooks/useScoreDrafts.js, shared with the Standings page).
+  const {
+    type: typeScoreBox,
+    stateOf,
+    reset: resetDrafts,
+    isSaving,
+  } = useScoreDrafts({
+    save: async (game, entry) => {
+      const { error } = await supabase.rpc('update_game_score', {
+        p_organization_id: orgId,
+        p_game_id: game.id,
+        p_score_home: entry.score_home,
+        p_score_away: entry.score_away,
+      });
+      if (error) throw error;
+    },
+    onSaved: (game, entry) => {
+      setGames((current) =>
+        current.map((row) => (row.id === game.id ? { ...row, ...entry } : row))
+      );
+      setNotSaved(null);
+      toast(entry.score_home === null ? 'Score cleared' : 'Score saved', 'success');
+    },
+    onRefused: (err) => {
+      logger.error('[ScoresPage] score update failed:', err);
+      // The row goes back to the saved score, and why is said in words that stay on the page.
+      setNotSaved(scoreRefusalText(err));
+    },
+  });
 
   const enterScore = useCallback(
-    async (gameId, side, value) => {
+    (gameId, side, value) => {
       const saved = games.find((game) => game.id === gameId);
       if (!saved || isCompletedSeasonGame(saved)) return;
-      const { entry, send } = typeScore(saved, drafts[gameId], side, value);
-      // One number without the other is not a result: it is held here and nothing is sent.
-      setDrafts((current) => ({ ...current, [gameId]: entry }));
-      if (!send) {
-        // Typed back to what is saved: there is nothing unsaved to hold.
-        if (!isHalfEntered(entry)) forgetDraft(gameId);
-        return;
-      }
-      try {
-        const { error } = await supabase.rpc('update_game_score', {
-          p_organization_id: orgId,
-          p_game_id: gameId,
-          p_score_home: entry.score_home,
-          p_score_away: entry.score_away,
-        });
-        if (error) throw error;
-        setGames((current) =>
-          current.map((game) => (game.id === gameId ? { ...game, ...entry } : game))
-        );
-        forgetDraft(gameId);
-        setNotSaved(null);
-        toast(entry.score_home === null ? 'Score cleared' : 'Score saved', 'success');
-      } catch (err) {
-        logger.error('[ScoresPage] score update failed:', err);
-        // The row goes back to the saved score, and why is said in words that stay on the page.
-        forgetDraft(gameId);
-        setNotSaved(scoreRefusalText(err));
-      }
+      typeScoreBox(saved, side, value);
     },
-    [games, drafts, orgId, toast, isCompletedSeasonGame, forgetDraft]
+    [games, isCompletedSeasonGame, typeScoreBox]
   );
 
   const rows = useMemo(
     () =>
-      games.map((game) => ({
-        ...game,
+      games.map((game) => {
         // What the boxes hold: the saved score with what is typed and unsaved over it.
-        ...(drafts[game.id] ?? {}),
-        _half: isHalfEntered(drafts[game.id]),
-        _date: game.start ? new Date(game.start).toLocaleDateString() : '—',
-        _division: divisionDisplayName(
-          game.home_team?.division?.name || game.home_team?.division || '',
-          genderModel
-        ),
-        _home: game.home_team?.name || '—',
-        _away: game.away_team?.name || '—',
-        _final:
-          !isHalfEntered(drafts[game.id]) && game.score_home != null && game.score_away != null,
-      })),
-    [games, drafts, genderModel]
+        const state = stateOf(game);
+        return {
+          ...game,
+          score_home: state.score_home,
+          score_away: state.score_away,
+          _state: state,
+          _date: game.start ? new Date(game.start).toLocaleDateString() : '—',
+          _division: divisionDisplayName(
+            game.home_team?.division?.name || game.home_team?.division || '',
+            genderModel
+          ),
+          _home: game.home_team?.name || '—',
+          _away: game.away_team?.name || '—',
+          _final:
+            !state.half && !state.notAScore && state.score_home != null && state.score_away != null,
+        };
+      }),
+    [games, stateOf, genderModel]
   );
 
   const columns = useMemo(
@@ -195,6 +193,8 @@ export default function ScoresPage() {
           num: true,
           min: 0,
           max: 99,
+          step: 1,
+          inputMode: 'numeric',
           placeholder: '–',
         },
         {
@@ -206,6 +206,8 @@ export default function ScoresPage() {
           num: true,
           min: 0,
           max: 99,
+          step: 1,
+          inputMode: 'numeric',
           placeholder: '–',
         },
         { key: '_away', label: 'Away', width: 180 },
@@ -215,7 +217,11 @@ export default function ScoresPage() {
           width: 90,
           sortable: false,
           render: (row) =>
-            row._half ? (
+            row._state.saving ? (
+              <Badge tone="info">Saving</Badge>
+            ) : row._state.notAScore ? (
+              <Badge tone="warning">Not a score</Badge>
+            ) : row._state.half ? (
               <Badge tone="warning">Enter both scores</Badge>
             ) : row._final ? (
               <Badge tone="success">Final</Badge>
@@ -278,7 +284,7 @@ export default function ScoresPage() {
       )}
       <DataGrid
         label="Scores grid"
-        isRowReadOnly={isCompletedSeasonGame}
+        isRowReadOnly={(row) => isCompletedSeasonGame(row) || isSaving(row)}
         columns={columns}
         rows={rows}
         selectable={false}

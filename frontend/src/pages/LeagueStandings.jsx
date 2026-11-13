@@ -8,7 +8,8 @@ import { useFeatures } from '../hooks/useFeatures.js';
 import { FEATURE_FLAGS } from '../constants/featureFlags.js';
 import { divisionDisplayName } from '../utils/divisions.js';
 import ScoreNotSavedAlert from '../components/ScoreNotSavedAlert.jsx';
-import { isHalfEntered, scoreRefusalText, typeScore } from '../utils/scoreEntry.js';
+import { NOT_A_SCORE_TEXT, scoreRefusalText } from '../utils/scoreEntry.js';
+import { useScoreDrafts } from '../hooks/useScoreDrafts.js';
 import { fetchCurrentSavedGames, hasStarted } from '../utils/savedGamesClient.js';
 
 /** How many played games the page lists for score entry, newest first. */
@@ -37,9 +38,6 @@ export default function LeagueStandings() {
   const [games, setGames] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [updatingGameId, setUpdatingGameId] = useState(null);
-  // What is typed and not saved yet, by game: one number of a score whose other is still empty.
-  const [drafts, setDrafts] = useState(/** @type {Record<string, any>} */ ({}));
   const [scoreNotSaved, setScoreNotSaved] = useState(/** @type {string | null} */ (null));
 
   const { genderModel, isEnabled } = useFeatures();
@@ -48,6 +46,36 @@ export default function LeagueStandings() {
   const canEditScores =
     hasPermission(orgMember?.role, PERMISSIONS.MANAGE_SCHEDULE) &&
     isEnabled(FEATURE_FLAGS.SCORE_ENTRY);
+
+  // A score is both numbers or none (the database refuses one without the other): what is typed is held, one game at a
+  // time, by the hook the Scores page uses (hooks/useScoreDrafts.js), and the two numbers are sent together.
+  const {
+    type: handleScoreUpdate,
+    stateOf,
+    reset: resetDrafts,
+  } = useScoreDrafts({
+    save: async (game, entry) => {
+      const { error } = await supabase.rpc('update_game_score', {
+        p_organization_id: currentOrganization.id,
+        p_game_id: game.id,
+        p_score_home: entry.score_home,
+        p_score_away: entry.score_away,
+      });
+      if (error) throw error;
+    },
+    onSaved: async (game, entry) => {
+      setScoreNotSaved(null);
+      setGames((prev) => prev.map((g) => (g.id === game.id ? { ...g, ...entry } : g)));
+      // Refresh Standings View since data changed
+      const { data: standingsData } = await fetchStandings(currentOrganization.id, seasonId);
+      if (standingsData) setStandings(standingsData);
+    },
+    onRefused: (err) => {
+      logger.error(err);
+      // The boxes go back to the saved score, and why is said on the page, in the Scores page's words.
+      setScoreNotSaved(scoreRefusalText(err));
+    },
+  });
 
   useEffect(() => {
     async function loadData() {
@@ -70,7 +98,7 @@ export default function LeagueStandings() {
           ? await fetchCurrentSavedGames({ organizationId: currentOrganization.id, seasonId })
           : [];
         const now = Date.now();
-        setDrafts({});
+        resetDrafts();
         setGames(
           saved
             .filter((game) => hasStarted(game, now))
@@ -85,50 +113,7 @@ export default function LeagueStandings() {
       }
     }
     loadData();
-  }, [currentOrganization?.id, seasonId]);
-
-  const forgetDraft = (gameId) =>
-    setDrafts((current) =>
-      Object.fromEntries(Object.entries(current).filter(([id]) => id !== gameId))
-    );
-
-  // A score is both numbers or none (the database refuses one without the other): one number is held on the page
-  // until the other is entered, and the two are sent together.
-  const handleScoreUpdate = async (game, side, value) => {
-    if (!currentOrganization?.id) return;
-    const { entry, send } = typeScore(game, drafts[game.id], side, value);
-    setDrafts((current) => ({ ...current, [game.id]: entry }));
-    if (!send) {
-      if (!isHalfEntered(entry)) forgetDraft(game.id);
-      return;
-    }
-    try {
-      setUpdatingGameId(game.id);
-      const { error } = await supabase.rpc('update_game_score', {
-        p_organization_id: currentOrganization.id,
-        p_game_id: game.id,
-        p_score_home: entry.score_home,
-        p_score_away: entry.score_away,
-      });
-
-      if (error) throw error;
-      setScoreNotSaved(null);
-      setGames((prev) => prev.map((g) => (g.id === game.id ? { ...g, ...entry } : g)));
-      forgetDraft(game.id);
-
-      // Refresh Standings View since data changed
-      const { data: standingsData } = await fetchStandings(currentOrganization.id, seasonId);
-
-      if (standingsData) setStandings(standingsData);
-    } catch (err) {
-      logger.error(err);
-      // The boxes go back to the saved score, and why is said on the page, in the Scores page's words.
-      forgetDraft(game.id);
-      setScoreNotSaved(scoreRefusalText(err));
-    } finally {
-      setUpdatingGameId(null);
-    }
-  };
+  }, [currentOrganization?.id, seasonId, resetDrafts]);
 
   // Group standings by division (co-ed display model folds U10B/U10G → U10)
   const displayDivision = (name) =>
@@ -259,8 +244,8 @@ export default function LeagueStandings() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {games.map((saved) => {
             // What the boxes hold: the saved score with what is typed and unsaved over it.
-            const game = { ...saved, ...(drafts[saved.id] ?? {}) };
-            const half = isHalfEntered(drafts[saved.id]);
+            const state = stateOf(saved);
+            const game = { ...saved, score_home: state.score_home, score_away: state.score_away };
             return (
               <div
                 key={game.id}
@@ -281,18 +266,24 @@ export default function LeagueStandings() {
                         <input
                           type="number"
                           className="w-12 h-10 bg-bg-surface border border-border-highlight text-center rounded text-text-primary font-bold focus:border-color-primary focus:ring-1 focus:ring-color-primary"
+                          min={0}
+                          step={1}
+                          inputMode="numeric"
                           value={game.score_home ?? ''}
                           onChange={(e) => handleScoreUpdate(saved, 'score_home', e.target.value)}
-                          disabled={updatingGameId === game.id}
+                          disabled={state.saving}
                           aria-label="Home Score"
                         />
                         <span className="text-text-muted font-bold">-</span>
                         <input
                           type="number"
                           className="w-12 h-10 bg-bg-surface border border-border-highlight text-center rounded text-text-primary font-bold focus:border-color-primary focus:ring-1 focus:ring-color-primary"
+                          min={0}
+                          step={1}
+                          inputMode="numeric"
                           value={game.score_away ?? ''}
                           onChange={(e) => handleScoreUpdate(saved, 'score_away', e.target.value)}
-                          disabled={updatingGameId === game.id}
+                          disabled={state.saving}
                           aria-label="Away Score"
                         />
                       </>
@@ -307,14 +298,24 @@ export default function LeagueStandings() {
                     {game.away_team?.name}
                   </span>
                 </div>
-                {half && (
+                {state.notAScore ? (
                   <p
-                    className="text-xs text-text-secondary text-center"
-                    data-testid="score-needs-both"
+                    className="text-xs text-status-warning-text text-center"
+                    data-testid="score-not-a-score"
                     role="status"
                   >
-                    Enter both scores to save.
+                    {NOT_A_SCORE_TEXT}
                   </p>
+                ) : (
+                  state.half && (
+                    <p
+                      className="text-xs text-text-secondary text-center"
+                      data-testid="score-needs-both"
+                      role="status"
+                    >
+                      Enter both scores to save.
+                    </p>
+                  )
                 )}
               </div>
             );

@@ -24,6 +24,7 @@ import {
   fileCsv,
   seedGameImportWorld,
 } from './helpers/gameImportWorld.js';
+import { seedMockDb } from './helpers/seedMockDb.js';
 
 vi.mock('../frontend/src/lib/supabaseClient.js', async () => {
   const { mockSupabase } = await import('../frontend/src/lib/mockSupabaseClient.js');
@@ -113,40 +114,45 @@ async function baselineNotice() {
  */
 async function seedWorld() {
   seedGameImportWorld();
-  const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__'));
-  db.schedule_tbd.push({
-    id: '0a000000-0000-4000-8000-000000000090',
-    organization_id: ORG,
-    season_settings_id: SEASON,
-    division_id: DIVISION,
-    kind: 'game',
-    home_team_id: TEAMS.t5,
-    away_team_id: TEAMS.t6,
-    week_index: 8,
-    reason: 'no-slot-available',
-  });
-  db.scheduler_runs.push({
-    id: '0a000000-0000-4000-8000-000000000031',
-    organization_id: ORG,
-    run_type: 'team',
-    status: 'completed',
-    season_settings_id: SEASON,
-    completed_at: '2026-08-20T12:00:00Z',
-    created_at: '2026-08-20T12:00:00Z',
-    results: {
-      teamsByDivision: {
-        'U05 Boys': [
-          {
-            id: TEAMS.t1,
-            name: 'U05B Team 01',
-            coachName: 'Placeholder Coach',
-            coachEmail: 'coach@example.test',
-          },
-        ],
+  // Appended to the world (the helper's own append-only seeder): the scheduler's TIME TBD game and a team run.
+  seedMockDb({
+    schedule_tbd: [
+      {
+        id: '0a000000-0000-4000-8000-000000000090',
+        organization_id: ORG,
+        season_settings_id: SEASON,
+        division_id: DIVISION,
+        kind: 'game',
+        home_team_id: TEAMS.t5,
+        away_team_id: TEAMS.t6,
+        week_index: 8,
+        reason: 'no-slot-available',
       },
-    },
+    ],
+    scheduler_runs: [
+      {
+        id: '0a000000-0000-4000-8000-000000000031',
+        organization_id: ORG,
+        run_type: 'team',
+        status: 'completed',
+        season_settings_id: SEASON,
+        completed_at: '2026-08-20T12:00:00Z',
+        created_at: '2026-08-20T12:00:00Z',
+        results: {
+          teamsByDivision: {
+            'U05 Boys': [
+              {
+                id: TEAMS.t1,
+                name: 'U05B Team 01',
+                coachName: 'Placeholder Coach',
+                coachEmail: 'coach@example.test',
+              },
+            ],
+          },
+        },
+      },
+    ],
   });
-  sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
   delete window.__MOCK_DB__;
   const cancelled = await mockSupabase.rpc('admin_cancel_game_assignment', {
     p_assignment_id: SAVED.untouched,

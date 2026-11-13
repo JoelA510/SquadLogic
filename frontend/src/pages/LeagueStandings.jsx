@@ -10,7 +10,7 @@ import { divisionDisplayName } from '../utils/divisions.js';
 import ScoreNotSavedAlert from '../components/ScoreNotSavedAlert.jsx';
 import { NOT_A_SCORE_TEXT, scoreRefusalText } from '../utils/scoreEntry.js';
 import { useScoreDrafts } from '../hooks/useScoreDrafts.js';
-import { fetchCurrentSavedGames, hasStarted } from '../utils/savedGamesClient.js';
+import { fetchGameCards } from '../utils/savedGamesClient.js';
 
 /** How many played games the page lists for score entry, newest first. */
 const RECENT_GAMES = 50;
@@ -94,17 +94,18 @@ export default function LeagueStandings() {
 
         // The season's saved games whose start has passed, newest first (F11-3: the saved schedule and its
         // scores, the rows the standings above are computed from).
-        const saved = seasonId
-          ? await fetchCurrentSavedGames({ organizationId: currentOrganization.id, seasonId })
+        // Bounded on the server (review R9): the current run's started games, newest first, at most 50.
+        const recent = seasonId
+          ? await fetchGameCards({
+              organizationId: currentOrganization.id,
+              seasonId,
+              now: new Date().toISOString(),
+              limit: RECENT_GAMES,
+              played: true,
+            })
           : [];
-        const now = Date.now();
         resetDrafts();
-        setGames(
-          saved
-            .filter((game) => hasStarted(game, now))
-            .sort((a, b) => Date.parse(b.start) - Date.parse(a.start))
-            .slice(0, RECENT_GAMES)
-        );
+        setGames(recent);
       } catch (err) {
         logger.error(err);
         setError('Failed to load standings and games data.');

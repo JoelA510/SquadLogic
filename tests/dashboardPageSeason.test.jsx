@@ -28,10 +28,36 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
             if (method === 'then') {
               return (resolve, reject) => {
                 mocks.reads.push({ table, eqs: [...eqs] });
-                const data = (mocks.tables[table] || []).filter((row) =>
+                // The filters, order and limit a read asks the server for, applied as the server applies them.
+                let data = (mocks.tables[table] || []).filter((row) =>
                   eqs.every(([column, value]) => String(row[column]) === String(value))
                 );
-                return Promise.resolve({ data, error: null }).then(resolve, reject);
+                for (const [method, column, value] of calls) {
+                  if (method === 'in') data = data.filter((row) => value.includes(row[column]));
+                  if (method === 'gte') data = data.filter((row) => row[column] >= value);
+                  if (method === 'lte') data = data.filter((row) => row[column] <= value);
+                  if (method === 'order') {
+                    const up = value?.ascending !== false;
+                    data = [...data].sort((a, b) =>
+                      a[column] < b[column]
+                        ? up
+                          ? -1
+                          : 1
+                        : a[column] > b[column]
+                          ? up
+                            ? 1
+                            : -1
+                          : 0
+                    );
+                  }
+                  if (method === 'limit') data = data.slice(0, column);
+                }
+                // A `select(columns, { count, head })` read answers its count, and no rows with `head`.
+                const options = calls.find(([m]) => m === 'select')?.[2];
+                const answer = options?.count
+                  ? { data: options.head ? null : data, count: data.length, error: null }
+                  : { data, error: null };
+                return Promise.resolve(answer).then(resolve, reject);
               };
             }
             if (method === 'eq') return (column, value) => (eqs.push([column, value]), builder);

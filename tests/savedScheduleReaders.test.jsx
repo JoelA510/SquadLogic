@@ -27,8 +27,14 @@ vi.mock('../frontend/src/lib/logger.js', () => ({
 }));
 
 const { mockSupabase } = await import('../frontend/src/lib/mockSupabaseClient.js');
-const { fetchCurrentGameRunIds, fetchCurrentSavedGames, fetchSavedGames, fetchTeamSavedGames } =
-  await import('../frontend/src/utils/savedGamesClient.js');
+const {
+  countCurrentGames,
+  fetchCurrentGameRunIds,
+  fetchCurrentSavedGames,
+  fetchGameCards,
+  fetchSavedGames,
+  fetchTeamSavedGames,
+} = await import('../frontend/src/utils/savedGamesClient.js');
 const { fetchTeamEvents } = await import('../frontend/src/hooks/useTeamPortal.js');
 const { confirmPreview, stageMapPreview } = await import('./helpers/gameImportFlow.js');
 const { rollbackGameImport } = await import('../frontend/src/utils/gameImportClient.js');
@@ -37,8 +43,8 @@ const { composeTeamFeed } = await import('../supabase/functions/_shared/calendar
 /** Every product file that reads the saved schedule, and the reader it calls. */
 const READERS = {
   'frontend/src/hooks/useTeamPortal.js': 'fetchTeamSavedGames',
-  'frontend/src/pages/DashboardPage.jsx': 'fetchCurrentSavedGames',
-  'frontend/src/pages/LeagueStandings.jsx': 'fetchCurrentSavedGames',
+  'frontend/src/pages/DashboardPage.jsx': 'countCurrentGames,fetchGameCards',
+  'frontend/src/pages/LeagueStandings.jsx': 'fetchGameCards',
   'frontend/src/pages/PlayerRecordPage.jsx': 'fetchTeamSavedGames',
   'frontend/src/pages/ScoresPage.jsx': 'fetchSavedGames',
 };
@@ -104,6 +110,28 @@ async function readersAgree(org, season, teams, timeZone) {
   // The Scores page asks for the run first and then its games.
   const runIds = await fetchCurrentGameRunIds({ organizationId: org, seasonId: season });
   expect(shown(await fetchSavedGames({ runIds }))).toEqual(expected);
+  // The Dashboard's count, and the cards of Standings and the Dashboard: the played and the coming, each bounded on
+  // the server, are the schedule between them (the ids and scores a card shows).
+  expect(await countCurrentGames({ organizationId: org, seasonId: season })).toBe(expected.length);
+  const now = new Date('2026-09-25T00:00:00Z').toISOString();
+  const cards = [
+    ...(await fetchGameCards({
+      organizationId: org,
+      seasonId: season,
+      now,
+      limit: 500,
+      played: true,
+    })),
+    ...(await fetchGameCards({
+      organizationId: org,
+      seasonId: season,
+      now,
+      limit: 500,
+      played: false,
+    })),
+  ];
+  const card = (rows) => rows.map((g) => [g.id, g.score_home, g.score_away]).sort();
+  expect(card(cards)).toEqual(expected.map((g) => [g.id, ...g.score]).sort());
   for (const team of teams) {
     const mine = expected.filter((game) => game.home === team || game.away === team);
     expect(shown(await fetchTeamSavedGames(team)), `team ${team}`).toEqual(mine);
@@ -122,20 +150,24 @@ describe('the readers are found by scan and each is run', () => {
       const full = path.join(dir, name);
       return statSync(full).isDirectory() ? walk(full) : /\.(js|jsx)$/.test(name) ? [full] : [];
     });
-  const CALL = /\b(fetchCurrentSavedGames|fetchTeamSavedGames|fetchSavedGames)\(/g;
+  const CALL =
+    /\b(fetchCurrentSavedGames|fetchTeamSavedGames|fetchSavedGames|fetchGameCards|countCurrentGames)\(/g;
 
   it('every caller of a saved-schedule reader is listed with the reader it calls', () => {
     const found = {};
     for (const file of walk(SRC)) {
       const rel = path.relative(process.cwd(), file);
       if (rel.endsWith('utils/savedGamesClient.js')) continue;
-      const calls = [...new Set([...readFileSync(file, 'utf8').matchAll(CALL)].map((m) => m[1]))];
+      const calls = [
+        ...new Set([...readFileSync(file, 'utf8').matchAll(CALL)].map((m) => m[1])),
+      ].sort();
       if (calls.length > 0) found[rel] = calls.join(',');
     }
     expect(found).toEqual(READERS);
     // Each reader named above is one this file runs (`readersAgree`).
-    expect([...new Set(Object.values(READERS))].sort()).toEqual([
-      'fetchCurrentSavedGames',
+    expect([...new Set(Object.values(READERS).flatMap((r) => r.split(',')))].sort()).toEqual([
+      'countCurrentGames',
+      'fetchGameCards',
       'fetchSavedGames',
       'fetchTeamSavedGames',
     ]);

@@ -67,6 +67,52 @@ export async function fetchCurrentSavedGames({ organizationId, seasonId = null, 
   return fetchSavedGames({ runIds, teamId });
 }
 
+/** What a game's card shows (Standings' Recent Games, the Dashboard's upcoming list): no slot, no ground. */
+export const GAME_CARD_SELECT =
+  'id, start, home_team_id, away_team_id, ' +
+  'home_team:teams!home_team_id(id, name, division:divisions(name)), ' +
+  'away_team:teams!away_team_id(id, name), ' +
+  'game_scores(score_home, score_away)';
+
+/**
+ * A season's games of its current run, bounded on the server (review R9): those that have started (`start` at or
+ * before `now`, newest first) or those still to come (soonest first), at most `limit`, with only what a card shows.
+ *
+ * @param {{ organizationId: string, seasonId: string, now: string, limit: number, played: boolean }} scope
+ */
+export async function fetchGameCards({ organizationId, seasonId, now, limit, played }) {
+  const runIds = await fetchCurrentGameRunIds({ organizationId, seasonId });
+  if (runIds.length === 0) return [];
+  const base = supabase
+    .from('game_assignments')
+    .select(GAME_CARD_SELECT)
+    .eq('organization_id', organizationId)
+    .in('run_id', runIds);
+  const { data, error } = await (played ? base.lte('start', now) : base.gte('start', now))
+    .order('start', { ascending: !played })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []).map(withScore);
+}
+
+/**
+ * How many games a season's current run holds, counted by the server (review R9).
+ *
+ * @param {{ organizationId: string, seasonId: string }} scope
+ * @returns {Promise<number>}
+ */
+export async function countCurrentGames({ organizationId, seasonId }) {
+  const runIds = await fetchCurrentGameRunIds({ organizationId, seasonId });
+  if (runIds.length === 0) return 0;
+  const { count, error } = await supabase
+    .from('game_assignments')
+    .select('id', { count: 'exact', head: true })
+    .eq('organization_id', organizationId)
+    .in('run_id', runIds);
+  if (error) throw error;
+  return count ?? 0;
+}
+
 /**
  * One team's games in the saved schedule: the definition the calendar feed uses too (`teamFeed.ts`, review R8). The
  * team's organization and its division's season name the current runs (`current_game_runs`; every season of the

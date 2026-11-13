@@ -1911,6 +1911,16 @@ const createMockQuery = (table, data = null) => {
       results = results.filter((item) => String(item[col]) !== String(val));
       return proxy;
     },
+    // PostgREST `gte`, by instant when both sides are dates (the Dashboard's upcoming games), else by value.
+    gte: (col, val) => {
+      results = results.filter((item) => {
+        if (item[col] === undefined || item[col] === null) return false;
+        const a = new Date(item[col]).getTime();
+        const b = new Date(val).getTime();
+        return !isNaN(a) && !isNaN(b) ? a >= b : item[col] >= val;
+      });
+      return proxy;
+    },
     // PostgREST `is`: `null` matches a NULL (or, in the mock, absent) column.
     is: (col, val) => {
       results = results.filter((item) =>

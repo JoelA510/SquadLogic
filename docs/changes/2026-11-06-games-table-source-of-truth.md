@@ -609,13 +609,13 @@ done. What differs from the text above, each a decision of the build:
   the Scores and Standings pages read the legacy table until F11-3. **On a real database the Scores page can score
   nothing between F11-2 and F11-3** (it lists legacy rows, and it saves one cell at a time, which D10 refuses):
   F11-3's C3 must make it list saved games and send both scores together.
-- **F11-3's C3 is BLOCKING for turning score entry on (2026-11-12).** No league may be told to turn `score_entry`
-  on until F11-3 has made the Scores page list saved games and send both scores together. Until then the page says so
+- **F11-3's C3 was BLOCKING for turning score entry on (2026-11-12); F11-3 has done it (2026-11-13).** Once F11-3's
+  client is deployed, score entry may be turned on: the Scores page and the Standings page list saved games and send
+  both scores together. Before that deploy no league may be told to turn `score_entry` on. Until then the page says so
   itself: a save the database refuses for either reason shows an alert in words ("The score was not saved. Scores are
   now kept against the saved schedule ... it cannot save a score yet. Nothing was changed."), `tests/scoresPage.test.jsx`.
-- **To remove after this migration is deployed (noted 2026-11-12):** the fallback in `readScheduleTbd`
-  (`frontend/src/utils/scheduleTbdClient.js`), which reads `game_date` from the table when `get_schedule_tbd` answers
-  rows without that key (the body before `20261122010000`). Once production runs the new body it is dead code.
+- **Removed by F11-3 (2026-11-13, the migration deployed and verified 2026-11-12):** the fallback in `readScheduleTbd`
+  for a `get_schedule_tbd` body without `game_date`.
 - **Fix round 1 (2026-11-12, Codex on #725, two findings, both taken).** (1) `useGameAssignments` paged `game_scores`
   with the helper's default order, `id`, a column the table does not have: PostgREST refuses it, so a saved schedule
   would not have loaded on a real database. It orders by `game_id`; the mock's score rows no longer carry an `id` of
@@ -639,10 +639,8 @@ done. What differs from the text above, each a decision of the build:
   alert (no `window.alert`) and says its list is of the earlier table. R6: the import preview lists a kept-and-changed
   row once. R8 and R10: a cancel refused for a job that is no longer waiting settles from the job, in words.
   R9: `isHeld` and `holdReason` take the game alone.
-- **To remove after this migration is deployed (noted 2026-11-12), beside the `readScheduleTbd` fallback above:** the
-  fallback in `useGameAssignments` (`fetchRunGames`) that reads the games without scores when PostgREST answers
-  PGRST200, PGRST205 or 42P01 for the embed (the client is deployed at merge, the migration applied later). The
-  Standings page needs none (`results_not_counted` missing reads as 0), `current_game_runs` has no reader yet.
+- **Removed by F11-3 (2026-11-13):** the fallback in `useGameAssignments` that read the games without scores when
+  PostgREST answered PGRST200, PGRST205 or 42P01 for the embed; such an answer is now an error the page says.
 - The plan's parity test for `current_game_runs` against `useSchedulerRun` stays C5 of F11-3; F11-2 holds the view
   and the mock's copy to the same cases (`supabase/tests/game_scores.sql`, `tests/mockGameScores.test.js`).
 
@@ -656,28 +654,65 @@ removed by any path the table in "Acts and states" lists.
 Depends on: F11-2 deployed. If the spike (U1) shows a view embeds cleanly and the owner prefers C, this pull request
 becomes "create the `games` view" and is smaller.
 
-- [ ] C1 (M) `fetchTeamEvents` reads the saved schedule through `current_game_runs`; the per-team CSV and XLSX follow. Test
+- [x] C1 (M) `fetchTeamEvents` reads the saved schedule through `current_game_runs`; the per-team CSV and XLSX follow. Test
       `tests/teamPageSavedSchedule.test.jsx`: a league saved through the real save shows its games on the team page and in
       the file, a team in two games sees two, a moved game appears once at its new time.
-- [ ] C2 (M) The feed (`teamFeed.ts`) reads the same. Test: the existing `ics-feed_test.ts` suite plus a case from a saved
+- [x] C2 (M) The feed (`teamFeed.ts`) reads the same. Test: the existing `ics-feed_test.ts` suite plus a case from a saved
       schedule; a failed read is still reported, not swallowed.
-- [ ] C3 (M) **BLOCKING for turning score entry on (2026-11-12; see "As built" under F11-2):** the Scores page lists
+- [x] C3 (M) **BLOCKING for turning score entry on (2026-11-12; see "As built" under F11-2):** the Scores page lists
       saved games and sends both scores of a game together (it saves one cell at a time today, which the database
       refuses), and the mock's legacy score arm and stored standings rows go. Dashboard, Player record, Scores and Standings read the saved schedule and scores. Tests: the existing
       `tests/scoresPage.test.jsx`, `tests/leagueStandingsSeason.test.jsx` (re-seeded through the save), plus a Dashboard case
       (count and list from a saved schedule).
-- [ ] C4 (S) The census `tests/gamesTableReaders.test.js` (from the code); it is red while any reader names `games`.
-- [ ] C5 (S) The parity test `tests/currentGameRunsParity.test.js`: the SQL view and `useSchedulerRun` pick the same run
+- [x] C4 (S) The census `tests/gamesTableReaders.test.js` (from the code); it is red while any reader names `games`.
+- [x] C5 (S) The parity test `tests/currentGameRunsParity.test.js`: the SQL view and `useSchedulerRun` pick the same run
       over two seasons, a run with no season and an older run.
-- [ ] C6 (S) (owner, 2026-11-09) The Games page reads the saved schedule once more after a 409 `GAME_IDENTITY`. Test: a page
+- [x] C6 (S) (owner, 2026-11-09) The Games page reads the saved schedule once more after a 409 `GAME_IDENTITY`. Test: a page
       test that answers the save with that 409 and asserts the extra read (the file is named when it is written).
-- [ ] C7 (S) (owner, 2026-11-09) Remove `publishedOmissions` and `changesPublishedPlacement` (`packages/core/src/gamePublished.js`)
+- [x] C7 (S) (owner, 2026-11-09) Remove `publishedOmissions` and `changesPublishedPlacement` (`packages/core/src/gamePublished.js`)
       if still without a shipped caller (today only tests call them, statically searched 2026-11-09; two page tests use
       `publishedOmissions` as an oracle and move or go with it). Test: `npm run check:unused` green and their own tests gone.
 
 Plants: a reader still on `games` (the census); the team page reading every run instead of the current one (a moved game
 appears twice); the feed swallowing a failed read. Stop and report if any reader's markup changes, or if an embed needs a
 hint beyond `game_slots!game_slot_id`.
+
+**As built (2026-11-13; no migration; the pull request has the detail).** C1 to C7 are done; E1 to E3 of the
+coordinator's brief ride along. What differs from the text above, each a decision of the build:
+
+- **Option A, not C, and no spike.** U1's spike needs a local PostgREST, which the build machine does not have (no
+  Docker); the owner's D1 is (a), and A needs no migration. The readers are repointed; there is no `games` view.
+- **One reader module.** `frontend/src/utils/savedGamesClient.js` holds the select (`SAVED_GAME_SELECT`) and three
+  reads: a season's (or an organization's) current runs from `current_game_runs`, their games, and one team's games
+  filtered to the current runs. The team page and its files, the Dashboard, the Player record, Scores and Standings
+  call it; the feed (`teamFeed.ts`) makes the same two reads under the service role, scoped by organization, with
+  the read cap and "said, never swallowed" of the exceptions read beside it.
+- **Hints.** `game_assignments` has two foreign keys to `teams` as well as to `game_slots`, so the sides are embedded
+  as `teams!home_team_id` and `teams!away_team_id` (the legacy reads named the same columns). No other hint is used.
+- **A game is placed at its own start and end** (E2), read on the season clock (`reports/wall.js`); with no clock,
+  the slot's wall reading stands in. The calendar download and the feed pass the instants to the feed's builder,
+  which places them before the slot's. A saved game always has its own instants, so the files' "game with no slot"
+  rows (`GAME_SLOT_MISSING`) no longer arise from the saved schedule; the export keeps the arm.
+- **Scores (C3).** The page lists the season's current-run games whose start has passed, newest first; a score is
+  typed one box at a time and SENT only when both boxes hold a number (or both are empty, a clear): a half-entered
+  score is held on the page with "Enter both scores" in its status (Standings: "Enter both scores to save."). A
+  refusal is said in words (`utils/scoreEntry.js`, `scoreRefusalText`), and the row goes back to the saved score.
+  The results of the season outside its current run are counted in one sentence ("N earlier results are not listed
+  here ..."), not hidden. These are the only markup changes, and each is the task's.
+- **The mock.** The legacy score arm, the stored standings rows and the legacy `games` seed rows are gone; the
+  standings are computed for every own team (zeros with no result, as the view's LEFT JOIN gives); a saved game's
+  embeds are resolved by the schema's keys and refused as PostgREST refuses them (`mockSavedGames.js`).
+- **C7.** `publishedOmissions` and `changesPublishedPlacement` had no shipped caller; they moved, with their cases,
+  to a test oracle (`tests/helpers/publishedOmissions.js`, `tests/publishedOmissions.test.js`) that the page tests
+  and the identity oracle use, rather than being deleted with their tests.
+- **C6** reads the saved schedule again after any 409 `GAME_IDENTITY` of an Apply or a roll back.
+- **E3.** A switch of organization forgets the import context's job in flight and each type's last import; a switch
+  of season changes nothing (both are read by organization, and a job carries its own season to its apply).
+
+**What F11-5 still has to do:** drop `games`, its policies and triggers, the four SQL arms that name it
+(`admin_delete_team`, `field_bookings`, `rollback_field_import_job`, `copy_legacy_game_scores`), the mock's arms
+behind them (`mockSupabaseClient.js`, `mockSeasons.js`), the seeds and pgTAP that insert into it, and every entry of
+`tests/gamesTableReaders.test.js` (the census lists them by class).
 
 ### F11-4: Settings scope (M; migration, or inside PR 12; rule 14; Review: (c))
 

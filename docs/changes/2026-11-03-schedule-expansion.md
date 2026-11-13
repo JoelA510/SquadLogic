@@ -1581,8 +1581,14 @@ clocks skip, and the import refuses a file that names one, so the export has no 
 1. `ImportContext` keeps `activeJob` and `imported*.importJobId` across a switch of organization or season, for the
    coach, field, field availability and evaluations imports (statically read, not reproduced): the same class as the
    schedule panel's Codex P1, in another component.
+   **Closed by F11-3 (2026-11-13):** reproduced for a switch of organization (`tests/importContextScopeSwitch.test.jsx`),
+   and the context now forgets that state then; a switch of season shows nothing of another scope (both reads are by
+   organization, and a job carries its own season), so nothing is reset for it.
 2. The calendar feed (`supabase/functions/_shared/calendar/teamFeed.ts`) and `useTeamPortal.js` read the SLOT's times,
    not the game's own `start` and `end`: an imported game whose end differs from its slot's shows the slot's end.
+   **Closed by F11-3 (2026-11-13):** both read the saved game's own instants on the season clock (the feed's builder
+   places them before the slot's); `tests/teamPageSavedSchedule.test.jsx` and the feed's cases in
+   `tests/calendarFeed.test.js` (Vitest) and `_shared/tests/ics-feed_test.ts` (Deno, run in CI only).
 3. At the next replacement of `apply_game_import_job` or `get_schedule_tbd` (the three lines above): the staged-flag
    list for `bad-time` and `bad-week`, `game_date` returned by the RPC, the preview-stale check inside the RPC.
    **Two of the three closed by F11-2 (2026-11-11); the preview-stale check inside the RPC stays open.**
@@ -2625,23 +2631,19 @@ owner's answers of 2026-11-09 and of 2026-11-09 evening and 2026-11-10 follow th
 (statically read from `git log` at `ad18861`; whether each migration is deployed was not checked): PR 4 (#706), PR 1
 (#707), PR 9 (#708), PR 2 (#709), PR 3 (#710), PR 13 (#711), PR 7 (#713), the F11 plan's F11-1 (#712), and PR 5 (#719,
 `ad18861`). **Updated 2026-11-11:** PR 6 is merged (#722, `53c79cc`; task G5 not built, see "As built" under PR 6 in
-section 7). **In review:** the F11 plan's F11-2 (scores, the held rule, standings; migration `20261122010000`; it also
-closes follow-ups 3 (two of its three lines) and 5 of PR 6's review). **Not merged:** PR 8, 10, 11 and 12, and F11-3
-to F11-5. PR 14 stays held. Next after F11-2 deploys: F11-3, whose task C3 is **BLOCKING for turning score entry on**:
-it must make the Scores page list saved games and send both scores together (the F11 plan, "As built" under F11-2).
-Until then the page refuses in words and no league is to be told to turn `score_entry` on. Also after F11-2 deploys:
-remove the `game_date` fallback in `readScheduleTbd` and the no-`game_scores` fallback in `useGameAssignments` (both
-noted 2026-11-12).
+section 7). **Updated 2026-11-13:** F11-2 is merged (#725, `dcb54ff`) and its migration `20261122010000` is deployed
+(verified by the coordinator on 2026-11-12; it closed follow-ups 3 (two of its three lines) and 5 of PR 6's review).
+**In review:** F11-3 (every reader on the saved schedule; no migration; it closes follow-ups 1 and 2 and removes the
+two pre-migration fallbacks F11-2 left). Its task C3 was the blocker for turning score entry on: **once F11-3's client is
+deployed, `score_entry` may be turned on.** **Not merged:** PR 8, 10, 11 and 12, F11-4 and F11-5. PR 14 stays held.
 
 - **Order and the dependency rule.** Section 7 ("Dependencies and order") has the dependency table and the one priority
   rule: at most two PRs in flight; a free slot takes the first PR, in the order PR 1; PR 4; PR 2; PR 5; PR 3; PR 9;
   PR 6; PR 10; PR 7; PR 13; PR 8; PR 11; PR 12, whose dependencies are merged and deployed. There are no waves. PR 14 is
-  held (decision 28). Left, with the F11 plan's pull requests in their places: PR 6 (in review; PR 5's migration
-  `20261121010000` was deployed first; its task list grew on 2026-11-10, F5 to F9 and F3b), then F11-2, F11-3,
+  held (decision 28). Left, with the F11 plan's pull requests in their places (2026-11-13): F11-3 (in review),
   PR 6b (baseline at import, task G5, deferred from PR 6 on 2026-11-10; it is on no dependency path),
-  and the four follow-ups of PR 6's review, listed under PR 6 in section 7 (the scope switch in `ImportContext`; slot
-  times in the calendar feed and the team portal; the three changes for the next function replacement; a SQL sweep
-  for abandoned games jobs), none with a pull request number yet,
+  and the follow-ups of PR 6's review still open, listed under PR 6 in section 7 (the preview-stale check inside the
+  RPC at the next replacement; a SQL sweep for abandoned games jobs), none with a pull request number yet,
   PR 10, PR 8, PR 11, F11-4, PR 12. F11-5 and PR 14 are the coordinating agent's call when their turn comes (section 10, the 2026-11-10
   answers, entry 5). Later, with no PR number: the B5.10 discovery pass and its plan-change (registration state and
   optional-data features), which the owner agreed to on 2026-11-09 (section 10, the 2026-11-09 answers, entry 2). Outside

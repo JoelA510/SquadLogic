@@ -373,7 +373,13 @@ any save. The plan is `docs/changes/2026-11-06-games-table-source-of-truth.md`; 
 the saved game's id and its two sides; `update_game_score` writes it and nothing else does. A scored game is held where
 it is (`game_held_ids`: Published or scored). `view_league_standings` is computed from `game_scores` and leaves outside
 clubs out; `current_game_runs` names each season's current game run. The legacy `games` table is kept, commented as
-legacy, and no longer written; the pages that still read it are repointed by F11-3.
+legacy, and no longer written.
+
+**Update, 2026-11-13 (F11-3, no migration).** Every reader is on the saved schedule: the team page and its files, the
+calendar feed, the Dashboard, the Player record, Scores and Standings read `game_assignments` of each season's
+current run (`current_game_runs`) with their `game_scores`, through `frontend/src/utils/savedGamesClient.js` (the feed
+reads the same two relations under the service role), and place a game at its own `start` and `end`. Nothing in the
+product reads `games`; `tests/gamesTableReaders.test.js` keeps it that way, and F11-5 drops the table.
 
 `game_assignments` is what the scheduler writes (§2.5). `games` is the older table, still carrying
 `score_home`/`score_away` and used by the scores path (`admin_update_game_score` RPC,

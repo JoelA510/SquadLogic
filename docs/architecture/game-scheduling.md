@@ -45,7 +45,7 @@
 
 ## Data Persistence & Output
 
-- Persist assignments in the `games` table with references to `game_slot_id`, week index, and conflict flags.
+- Persist assignments in `game_assignments` (one row per saved game, kept by its id across saves; a season's schedule is its current game run, `current_game_runs`), with references to `game_slot_id` and the week index; a game's score is a row of `game_scores`. The legacy `games` table is read by nothing since F11-3.
 - Record unscheduled matchups and the reason code (`no-slot`, `coach-conflict`, `no-compatible-field`) in a `scheduling_exceptions` table for administrative follow-up.
 - Emit per-week and per-team summaries for the Evaluation agent to analyze fairness metrics.
 

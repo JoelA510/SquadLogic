@@ -1726,8 +1726,10 @@ answers; none adds scope):
   review, the banner reads the generated snapshot with the flags added, which is what the run saved (review C3). A clash
   between two added games is said once. **A slot reserved for another division** is flagged the same way, not refused
   (owner: warnings, not blockers).
-- **A new time's week** is `scheduleWeekOf(date, season_start)`, the import's rule. A date before the season starts, or
-  a season with no start date, is refused (no week can be given). A daylight-saving gap is refused in the season
+- **A new time's week** is `scheduleWeekOf(date, season_start)`, the import's rule. A date before the season starts (the
+  date compared with the start itself first, as the import does: the week rounds back to the Monday, so an earlier day
+  of the start's own week would otherwise be week 1; Codex C6), or a season with no start date, is refused (no week can
+  be given). A daylight-saving gap is refused in the season
   clock's words. The form waits, with its reason, for two different teams and an end after the start.
 - **Generating waits while an added game is staged** (review item 7): a new schedule replaces the review and would
   drop the game, so Generate is off with a visible reason until the review is applied or discarded. "Add a game" is off
@@ -1744,14 +1746,20 @@ answers; none adds scope):
   its times are read when the warnings are, never kept from when it was added, so a move into a reserved slot raises the
   flag, a move out clears it, and Apply records what holds at Apply. A drop that would put two games in one slot is
   refused for an added game, either way round (the move handler's existing rule).
+- **The saved summary is the summary of the games saved** (Codex C7): on Apply after a generation it is worked out
+  again from the final review with the page's own `summarizeGameResult` (the function the save falls back to), keeping
+  the generator's byes and unscheduled games, so a game added by hand is counted; the readiness panel reads the same.
+- **Every slot of an Apply the page has not read is read before the save** (Codex C8): the ones it made, and one the
+  database already had that another admin made after the page loaded, so the saved game's card has its row in Manual
+  Override without a reload.
 - **Divisions offered** are those that play games; their teams are the run's teams and the season's outside clubs.
 - **A failed save after a slot was made** keeps the slot and names it in the error. When the outcome is unknown (a
   timeout, an unreadable answer) the error says instead that whether the game was saved into it is being checked. The
   review then names the database's slot, so a second Apply does not ask again.
-- **Plant evidence** (executed, 2026-11-13, re-run in full after the review round): nineteen plants after the Codex
-  re-review, each turning its cases red against the 35 cases of `tests/gameAddByHand.test.jsx`, the restored code green.
-  The plan's three: a Published slot addable (4 red), a double booking blocked (6 red), a new game arriving Published
-  (6 red). The E2E
+- **Plant evidence** (executed, 2026-11-13, re-run in full after the review round): twenty-two plants after the
+  third Codex round, each turning its cases red against the 38 cases of `tests/gameAddByHand.test.jsx`, the restored
+  code green. The plan's three: a Published slot addable (4 red), a double booking blocked (6 red), a new game arriving
+  Published (6 red). The E2E
   refusal scenario fails under the first. "Arriving Published" is caught on the staged game; once saved, the database
   cannot be told to publish it through this save, so the post-Apply assertions hold under that plant too (said, not
   hidden).

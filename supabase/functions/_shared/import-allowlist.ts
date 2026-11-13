@@ -24,7 +24,8 @@
  *
  * The practice preference import (Phase D C1, `PRACTICE_PREFERENCE_IMPORT_KEYS`) and the
  * evaluations import (E3c, `EVALUATION_IMPORT_KEYS`: the registration id and the three values it
- * sets) and the games import (PR 5, `GAME_IMPORT_KEYS`: the staged keys a schedule file becomes) are
+ * sets), the games import (PR 5, `GAME_IMPORT_KEYS`: the staged keys a schedule file becomes) and the
+ * practice schedule import (PR 10, `PRACTICE_SCHEDULE_IMPORT_KEYS`: the staged keys a practice file becomes) are
  * filtered the same way, each against its own short list; none declares fields of the organization's,
  * so (c) does not apply to them.
  *
@@ -201,6 +202,37 @@ export const GAME_IMPORT_KEYS: readonly string[] = Object.freeze([
   'away_key',
 ]);
 
+/**
+ * Keys `apply_practice_import_job` reads (PR 10 of the schedule expansion, plan 4.11.2 and 4.11.4): the STAGED payload
+ * of a practice schedule import, which `import-validation` (PR 11) builds with core's `toStagedPracticeRow` after the
+ * practice parser (`packages/core/src/practiceImport/parseRows.js`) has kept only the columns of plan 4.11.2: the
+ * status (a team's placement, an open slot or a hold), the weekday, the wall times, the two dates, the capacity, the
+ * division, location, field, subunit and team labels (each with the decision key the mapping step uses), and the
+ * parse's one staged flag. Payload keys, not file headers: nothing else of the file (a coach, an email, a phone, a
+ * note) is ever read or staged. A practice file declares no fields of the organization's.
+ */
+export const PRACTICE_SCHEDULE_IMPORT_KEYS: readonly string[] = Object.freeze([
+  'row_key',
+  'status',
+  'day',
+  'start_time',
+  'end_time',
+  'valid_from',
+  'valid_until',
+  'capacity',
+  'flags',
+  'division',
+  'division_key',
+  'location',
+  'location_key',
+  'field',
+  'field_key',
+  'subunit',
+  'subunit_key',
+  'team',
+  'team_key',
+]);
+
 /** The import types the allowlist applies to, and the schema entity each declares fields for. */
 export const ALLOWLIST_ENTITY_TYPES: Readonly<Record<string, string>> = Object.freeze({
   players: 'player',
@@ -212,6 +244,7 @@ const KEYS_BY_TYPE: Readonly<Record<string, readonly string[]>> = Object.freeze(
   coaches: COACH_IMPORT_KEYS,
   evaluations: EVALUATION_IMPORT_KEYS,
   games: GAME_IMPORT_KEYS,
+  practice_schedule: PRACTICE_SCHEDULE_IMPORT_KEYS,
   // No declared fields: a preference file has no entity in Settings, so only these keys are kept.
   practice_preferences: PRACTICE_PREFERENCE_IMPORT_KEYS,
 });

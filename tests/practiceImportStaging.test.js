@@ -128,6 +128,40 @@ describe('a staged practice row carries the allowlisted keys and nothing else', 
   });
 });
 
+describe('a blank ground or Division refuses that row, not the whole apply (PR 10 review)', () => {
+  const pick = fixture.schedule.rows.filter((r) => r.Team.trim() !== '').slice(0, 3);
+  it.each([
+    ['Field', 'unknown-field', 'The Field is blank.'],
+    ['Location', 'unknown-location', 'The Location is blank.'],
+    ['Division', 'unknown-division', 'The Division is blank.'],
+  ])('a blank %s on one placement among good rows', (column, reason, message) => {
+    const rows = pick.map((r, i) => (i === 1 ? { ...r, [column]: '   ' } : r));
+    const out = parsePracticeRows({
+      headers: fixture.schedule.headers,
+      rows,
+      season: fixture.season,
+    });
+    expect(out.ok).toBe(true);
+    expect(out.rows.map((r) => r.status)).toEqual(['placement', 'refused', 'placement']);
+    expect([out.rows[1].reason, out.rows[1].message]).toEqual([reason, message]);
+    const staged = out.rows.map((r) => toStagedPracticeRow(/** @type {any} */ (r)));
+    expect(staged[1].normalized_payload).toBeNull();
+    expect(staged[1].validation_errors).toEqual([{ code: reason, message }]);
+    for (const i of [0, 2])
+      expect(sqlAccepts(/** @type {any} */ (staged[i].normalized_payload))).toBe(true);
+  });
+
+  it('control: a blank Division on an open row is no refusal (an open slot has no team)', () => {
+    const open = fixture.schedule.rows.find((r) => r.Team.trim() === '' && r.Use.trim() === '');
+    const out = parsePracticeRows({
+      headers: fixture.schedule.headers,
+      rows: [{ ...open, Division: '' }],
+      season: fixture.season,
+    });
+    expect(out.rows[0].status).toBe('open');
+  });
+});
+
 describe('every row of the fixtures stages in the shape the SQL accepts', () => {
   it('the schedule: every accepted row passes the shape check', () => {
     const staged = parsed.rows.map((r) => toStagedPracticeRow(/** @type {any} */ (r)));

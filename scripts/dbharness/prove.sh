@@ -5824,7 +5824,7 @@ plant "M80 a probable move is added without its tick" "$M80" \
   "smoke 20261123010000"
 
 plant "M80 the rollback reads no reference" "$M80" \
-  "                   AND NOT public.practice_import_referenced('public.fields'::regclass, x.id)" \
+  "                   AND NOT (x.id = ANY (v_refd))" \
   "                   AND true" \
   "smoke 20261123010000"
 

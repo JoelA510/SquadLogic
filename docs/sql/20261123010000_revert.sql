@@ -48,7 +48,7 @@ DROP FUNCTION IF EXISTS public.apply_practice_import_job(uuid, boolean);
 DROP FUNCTION IF EXISTS public.rollback_practice_import_job(uuid);
 DROP FUNCTION IF EXISTS public.map_practice_import_job(uuid, jsonb);
 DROP FUNCTION IF EXISTS public.ensure_practice_slot(uuid, uuid, uuid, public.day_of_week, time, time, date, date, smallint);
-DROP FUNCTION IF EXISTS public.practice_import_referenced(regclass, uuid);
+DROP FUNCTION IF EXISTS public.practice_import_referenced_ids(regclass, uuid[]);
 
 -- ---------------------------------------------------------------------------
 -- 2. The bookkeeping, then the lists.

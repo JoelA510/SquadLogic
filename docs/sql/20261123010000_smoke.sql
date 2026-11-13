@@ -77,6 +77,7 @@ DECLARE
     v_pa0     uuid := gen_random_uuid();
     v_job     uuid;
     v_job2    uuid;
+    v_job3    uuid;
     v_map     jsonb;
     v_dry     jsonb;
     v_apply   jsonb;
@@ -103,7 +104,7 @@ BEGIN
        AND NOT EXISTS (SELECT 1 FROM aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a WHERE a.grantee = 0);
     IF v_n <> 3 THEN RAISE EXCEPTION '% of the 3 client RPCs are definer functions with a pinned search path, open to authenticated and closed to anon and PUBLIC', v_n; END IF;
     SELECT count(*) INTO v_n FROM pg_proc p
-     WHERE p.pronamespace = 'public'::regnamespace AND p.proname IN ('ensure_practice_slot', 'practice_import_referenced')
+     WHERE p.pronamespace = 'public'::regnamespace AND p.proname IN ('ensure_practice_slot', 'practice_import_referenced_ids')
        AND NOT p.prosecdef AND NOT has_function_privilege('authenticated', p.oid, 'EXECUTE') AND NOT has_function_privilege('anon', p.oid, 'EXECUTE');
     IF v_n <> 2 THEN RAISE EXCEPTION '% of the 2 internal helpers are closed to every client role', v_n; END IF;
     IF cardinality(public.import_allowed_keys('practice_schedule')) <> 19 THEN RAISE EXCEPTION 'import_allowed_keys(practice_schedule) is not the 19 staged keys'; END IF;
@@ -148,6 +149,17 @@ BEGIN
         'teams', jsonb_build_object('["smoke u10","alpha"]', jsonb_build_object('action', 'map', 'id', v_a),
                                     '["smoke u10","mover"]', jsonb_build_object('action', 'map', 'id', v_m)));
     PERFORM public.map_practice_import_job(v_job, v_map);
+    -- Only a job whose staging finished is applied.
+    BEGIN
+        PERFORM public.apply_practice_import_job(v_job, true);
+        v_state := 'no error';
+    EXCEPTION WHEN SQLSTATE '22023' THEN
+        GET STACKED DIAGNOSTICS v_state = PG_EXCEPTION_DETAIL;
+    END;
+    IF v_state IS DISTINCT FROM 'import_not_ready_to_apply' THEN
+        RAISE EXCEPTION 'a job still importing was not refused: %', v_state;
+    END IF;
+    PERFORM public.mark_import_job_ready_to_apply(v_job, 'practice_schedule');
     v_fp := pg_temp.fp();
     v_dry := public.apply_practice_import_job(v_job, true);
     IF pg_temp.fp() IS DISTINCT FROM v_fp THEN
@@ -173,8 +185,16 @@ BEGIN
        OR EXISTS (SELECT 1 FROM public.practice_assignments WHERE team_id = v_m AND id <> v_pa0) THEN
         RAISE EXCEPTION 'Mover''s new row was not held back as a probable move: %', v_apply -> 'arriving';
     END IF;
-    v_checks := v_checks + 4;
-    RAISE NOTICE 'apply: a dry run writes nothing and is the apply; 2 manual practices in no run, 4 slots (an open one too), a location and 2 fields made; the weekday rule flagged for manual rows; a probable move held back';
+    -- The second caller: it finds the job completed (judged after the locks) and replays it; nothing is written again.
+    SELECT md5(warning_summary::text) INTO v_msg FROM public.import_jobs WHERE id = v_job;
+    SELECT count(*) INTO v_n FROM public.audit_log WHERE action = 'import.completed' AND resource_id = v_job;
+    IF (public.apply_practice_import_job(v_job, false) ->> 'replayed') IS DISTINCT FROM 'true'
+       OR (SELECT md5(warning_summary::text) FROM public.import_jobs WHERE id = v_job) IS DISTINCT FROM v_msg
+       OR (SELECT count(*) FROM public.audit_log WHERE action = 'import.completed' AND resource_id = v_job) <> v_n OR v_n <> 1 THEN
+        RAISE EXCEPTION 'a second apply of a completed job was not a replay that writes nothing';
+    END IF;
+    v_checks := v_checks + 6;
+    RAISE NOTICE 'apply: an importing job is refused; a dry run writes nothing and is the apply; a second apply replays and writes nothing; 2 manual practices in no run, 4 slots (an open one too), a location and 2 fields made; the weekday rule flagged for manual rows; a probable move held back';
 
     -- ---- 3. the same file again ---------------------------------------------------------------------------
     v_job2 := (public.create_import_job(v_org, 'practice_schedule', 'smoke-again.csv')).id;
@@ -182,6 +202,7 @@ BEGIN
     PERFORM pg_temp.stage(v_org, v_job2, 2, 'Alpha', 'mon', '17:00', '18:00', 'Field B');
     PERFORM pg_temp.stage(v_org, v_job2, 3, NULL, 'mon', '18:00', '19:00', 'Field A');
     PERFORM pg_temp.stage(v_org, v_job2, 4, 'Mover', 'wed', '17:00', '18:00', 'Field A');
+    PERFORM public.mark_import_job_ready_to_apply(v_job2, 'practice_schedule');
     PERFORM public.map_practice_import_job(v_job2, jsonb_set(jsonb_set(v_map, '{locations,smoke park}',
         jsonb_build_object('action', 'map', 'id', (SELECT id FROM public.locations WHERE organization_id = v_org AND name = 'Smoke Park'))),
         '{fields}', jsonb_build_object(
@@ -194,8 +215,23 @@ BEGIN
     IF (v_again -> 'flags') IS DISTINCT FROM (v_apply -> 'flags') THEN
         RAISE EXCEPTION 'a re-import reported other flags: % against %', v_again -> 'flags', v_apply -> 'flags';
     END IF;
-    v_checks := v_checks + 2;
-    RAISE NOTICE 're-import: nothing inserted, 2 unchanged, 4 slots found, the same flags';
+    v_job3 := (public.create_import_job(v_org, 'practice_schedule', 'smoke-differs.csv')).id;
+    INSERT INTO public.staging_import_rows (organization_id, import_job_id, import_type, source_row_number, raw_payload, normalized_payload, validation_errors)
+    VALUES (v_org, v_job3, 'practice_schedule', 1, '{}'::jsonb,
+            jsonb_build_object('row_key', 'row-1', 'status', 'open', 'day', 'sat', 'start_time', '09:00', 'end_time', '10:30',
+                'valid_from', '2026-09-07', 'valid_until', '2026-11-20', 'capacity', 1, 'flags', '[]'::jsonb, 'division', '', 'division_key', '',
+                'location', 'Old Park', 'location_key', 'old park', 'field', 'Old Field', 'field_key', '["old park","old field"]',
+                'subunit', '', 'subunit_key', '', 'team', '', 'team_key', ''), '[]'::jsonb);
+    PERFORM public.mark_import_job_ready_to_apply(v_job3, 'practice_schedule');
+    PERFORM public.map_practice_import_job(v_job3, jsonb_build_object(
+        'locations', jsonb_build_object('old park', jsonb_build_object('action', 'map', 'id', v_loc0)),
+        'fields', jsonb_build_object('["old park","old field"]', jsonb_build_object('action', 'map', 'id', v_f0))));
+    v_again := public.apply_practice_import_job(v_job3, true);
+    IF v_again #>> '{refused,0,reason}' IS DISTINCT FROM 'slot-differs' OR v_again #>> '{counts,slots_found}' IS DISTINCT FROM '0' THEN
+        RAISE EXCEPTION 'a row naming a saved slot with another end was not refused slot-differs: %', v_again -> 'refused';
+    END IF;
+    v_checks := v_checks + 3;
+    RAISE NOTICE 're-import: nothing inserted, 2 unchanged, 4 slots found, the same flags; a row naming a saved slot with another end is refused slot-differs';
 
     -- ---- 4. the rollback --------------------------------------------------------------------------------
     PERFORM set_config('request.jwt.claim.sub', '', true);

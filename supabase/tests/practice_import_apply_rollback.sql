@@ -33,7 +33,7 @@ BEGIN;
 \set squadlogic_practice_fixture_include 1
 \ir _practice_import_fixture.sql
 
-SELECT plan(99);
+SELECT plan(111);
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
 SET client_min_messages = warning;
@@ -132,6 +132,11 @@ CREATE FUNCTION pg_temp.same(p_res jsonb) RETURNS jsonb LANGUAGE sql AS $f$ SELE
 CREATE FUNCTION pg_temp.job(p_name text) RETURNS uuid LANGUAGE sql AS $f$
     SELECT (public.create_import_job('a1111111-1111-1111-1111-111111111111', 'practice_schedule', p_name)).id
 $f$;
+-- ready: the job's staging is finished (only a ready_to_apply job is applied).
+CREATE FUNCTION pg_temp.ready(p_job uuid) RETURNS jsonb LANGUAGE sql AS $f$
+    SELECT public.mark_import_job_ready_to_apply(p_job, 'practice_schedule')
+$f$;
+GRANT EXECUTE ON FUNCTION pg_temp.ready(uuid) TO PUBLIC;
 GRANT EXECUTE ON FUNCTION pg_temp.u(int), pg_temp.err(text), pg_temp.errm(text), pg_temp.val(text), pg_temp.fp(), pg_temp.before_rows(),
     pg_temp.k(text), pg_temp.k2(text, text), pg_temp.k3(text, text, text),
     pg_temp.stage(uuid, int, text, text, text, text, text, text, text, text, text, text, text, int),
@@ -180,8 +185,8 @@ SELECT is(pg_temp.val($$SELECT string_agg(p.proname || '=' || md5(replace(p.pros
     'persist_practice_schedule=f33e164711af7a1412ab9596608f9531,practice_new_auto_row_refusals=5a6658441b95a7444bfcb99fef293042,refresh_schedule_tbd_practices=cd22827ffadb16a363deb06c5b3ef8b7,sync_schedule_tbd_practices=210bd955a160a980ba12e1bec62ca58c',
     'K1: the writer, its gate, the TIME TBD refresh and its sync are the bodies they were');
 SELECT is(pg_temp.val($$SELECT string_agg(p.proname || ':' || has_function_privilege('authenticated', p.oid, 'EXECUTE')::text, ',' ORDER BY p.proname)
-                        FROM pg_proc p WHERE p.proname IN ('ensure_practice_slot', 'practice_import_referenced')$$),
-    'ensure_practice_slot:false,practice_import_referenced:false', 'the two helpers are internal: no client role may execute them');
+                        FROM pg_proc p WHERE p.proname IN ('ensure_practice_slot', 'practice_import_referenced_ids')$$),
+    'ensure_practice_slot:false,practice_import_referenced_ids:false', 'the two helpers are internal: no client role may execute them');
 
 -- ── 1. The writer's own gap (finding 13) and the canonical range ────────────
 -- One team, two slots on one weekday at one time, both manual, in ONE payload: the writer accepts both (its double-booking
@@ -281,9 +286,33 @@ SELECT is(pg_temp.before_rows(), :'before_rows', 'every row that existed before 
 SELECT is(pg_temp.val($$SELECT count(*) || '/' || sum(missing_count) FROM public.schedule_tbd s JOIN public.teams t ON t.id = s.team_id
                          WHERE s.kind = 'practice' AND t.name ~ '^U\d\d[BG]-'$$), CASE WHEN current_date <= '2026-11-20' THEN '29/29' ELSE '132/264' END,
     'the TIME TBD list holds the 29 short teams of the file, each short by one');
+-- The second caller (C1): it took the locks after the first one committed, so it finds the job completed and replays.
+SELECT pg_temp.val($$SELECT md5(warning_summary::text) FROM public.import_jobs WHERE id = (SELECT id FROM t_job WHERE k = 'J1')$$) AS ws1 \gset
+SELECT pg_temp.val($$SELECT count(*) FROM public.audit_log WHERE action = 'import.completed'$$) AS done1 \gset
 SET LOCAL ROLE authenticated;
 SELECT is(pg_temp.n(public.apply_practice_import_job((SELECT id FROM t_job WHERE k = 'J1'), false), 'replayed'), 'true', 'a second apply of the job replays its result and writes nothing');
 RESET ROLE;
+SELECT is(pg_temp.val($$SELECT md5(warning_summary::text) FROM public.import_jobs WHERE id = (SELECT id FROM t_job WHERE k = 'J1')$$)
+          || ' ' || pg_temp.val($$SELECT count(*) FROM public.audit_log WHERE action = 'import.completed'$$), :'ws1' || ' ' || :'done1',
+    'the replay leaves the completed job''s warning_summary and the import.completed audit count as they were');
+-- A job cancelled underneath the caller (status failed, as cancel_ready_import_job leaves it) refuses, judged after the locks;
+-- one still importing refuses too, and its mapping can still be stored (map_game_import_job's contract).
+INSERT INTO t_job VALUES ('J6', pg_temp.job('cancelled.csv'));
+SELECT pg_temp.stage((SELECT id FROM t_job WHERE k = 'J6'), 1, 'open', NULL, NULL, 'mon', '20:00', '21:00', 'Before Park', 'Before Field', NULL, '2026-09-07', '2026-11-20');
+SELECT is(pg_temp.n(public.map_practice_import_job((SELECT id FROM t_job WHERE k = 'J6'), jsonb_build_object(
+        'locations', jsonb_build_object(pg_temp.k('Before Park'), jsonb_build_object('action', 'map', 'id', pg_temp.u(910))),
+        'fields', jsonb_build_object(pg_temp.k2('Before Park', 'Before Field'), jsonb_build_object('action', 'map', 'id', pg_temp.u(911))))), 'fields'), '1',
+    'a job still importing takes its mapping');
+SELECT is(pg_temp.err($$SELECT public.apply_practice_import_job((SELECT id FROM t_job WHERE k = 'J6'), true)$$), '22023:import_not_ready_to_apply',
+    'and refuses the apply until it is ready_to_apply (a preview too)');
+SELECT pg_temp.ready((SELECT id FROM t_job WHERE k = 'J6')) IS NOT NULL AS quiet \gset
+SET LOCAL "request.jwt.claims" TO '{}';
+UPDATE public.import_jobs SET status = 'failed' WHERE id = (SELECT id FROM t_job WHERE k = 'J6');
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SELECT pg_temp.fp() AS fp6 \gset
+SELECT is(pg_temp.err($$SELECT public.apply_practice_import_job((SELECT id FROM t_job WHERE k = 'J6'), false)$$), '22023:import_not_ready_to_apply',
+    'a job cancelled underneath the caller is refused, not applied');
+SELECT is(pg_temp.fp(), :'fp6', 'and nothing is written');
 -- The same canonical daterange text as the writer's: one row through persist_practice_schedule, one through the import.
 SELECT is(pg_temp.val($$SELECT DISTINCT effective_date_range::text FROM public.practice_assignments WHERE id IN (SELECT target_id FROM public.import_application_records
                          WHERE import_job_id = (SELECT id FROM t_job WHERE k = 'J1') AND target_table = 'practice_assignments')$$),
@@ -311,6 +340,7 @@ SELECT is(pg_temp.val($$SELECT md5(string_agg((to_jsonb(pa) - 'updated_at' - 'ru
 -- ── 4. A re-import, and the probable moves ─────────────────────────────────
 INSERT INTO t_job VALUES ('J2', pg_temp.job('practice-schedule-again.csv'));
 SELECT pg_temp.stage_fixture((SELECT id FROM t_job WHERE k = 'J2')) IS NOT NULL AS quiet \gset
+SELECT pg_temp.ready((SELECT id FROM t_job WHERE k = 'J2')) IS NOT NULL AS quiet \gset
 SELECT public.map_practice_import_job((SELECT id FROM t_job WHERE k = 'J2'), pg_temp.fixture_mapping()) IS NOT NULL AS quiet \gset
 SELECT pg_temp.val($$SELECT count(*) FROM public.scheduler_runs$$) AS runs0 \gset
 SET LOCAL ROLE authenticated;
@@ -320,8 +350,8 @@ SELECT is(pg_temp.n(r, 'counts,inserted') || ' ' || pg_temp.n(r, 'counts,unchang
     '0 236 0 705', 'a re-import inserts nothing: 236 unchanged, 705 slots found') FROM t_res WHERE k = 're';
 SELECT is((SELECT r -> 'flags' FROM t_res WHERE k = 're'), (SELECT r -> 'flags' FROM t_res WHERE k = 'apply'), 'and reports the same flags (read from the rows the file names)');
 SELECT is(pg_temp.val($$SELECT count(*) FROM public.scheduler_runs$$), :'runs0', 'and makes no run');
-SELECT is(pg_temp.n(r, 'counts,leaving') || ' ' || pg_temp.n(r, 'leaving,0,assignment_id'), '1 ' || pg_temp.u(900)::text,
-    'the one saved practice the file does not hold (A-Team''s) is listed leaving, not deleted') FROM t_res WHERE k = 're';
+SELECT is(pg_temp.n(r, 'counts,leaving'), '0',
+    'A-Team''s saved practice is not leaving: the file places no A-Team, so it has no dates for that team (section 7b holds the date rule)') FROM t_res WHERE k = 're';
 SELECT is(pg_temp.before_rows(), :'before_rows', 'every row that existed before is byte-equal after the re-import');
 
 -- J3: the file again, with one team moved to another cell (row 3 of the file, a placement, onto the open cell of row 2's half
@@ -329,6 +359,7 @@ SELECT is(pg_temp.before_rows(), :'before_rows', 'every row that existed before 
 -- probable move, held back until ticked.
 INSERT INTO t_job VALUES ('J3', pg_temp.job('practice-schedule-moved.csv'));
 SELECT pg_temp.stage_fixture((SELECT id FROM t_job WHERE k = 'J3')) IS NOT NULL AS quiet \gset
+SELECT pg_temp.ready((SELECT id FROM t_job WHERE k = 'J3')) IS NOT NULL AS quiet \gset
 CREATE TEMP TABLE t_move ON COMMIT DROP AS
 SELECT (SELECT s.source_row_number FROM public.staging_import_rows s WHERE s.import_job_id = (SELECT id FROM t_job WHERE k = 'J3')
           AND s.normalized_payload ->> 'status' = 'placement' ORDER BY s.source_row_number LIMIT 1) AS moved,
@@ -380,6 +411,7 @@ SELECT is(pg_temp.errm(format($$SELECT public.apply_practice_import_job(%L, true
 -- A malformed staged row refuses the whole apply (a defect of the Edge function, never a row to guess at).
 INSERT INTO t_job VALUES ('J4', pg_temp.job('bad.csv'));
 SELECT pg_temp.stage((SELECT id FROM t_job WHERE k = 'J4'), 1, 'open', NULL, NULL, 'mon', '18:00', '17:00', 'Before Park', 'Before Field', NULL, '2026-09-07', '2026-11-20');
+SELECT pg_temp.ready((SELECT id FROM t_job WHERE k = 'J4')) IS NOT NULL AS quiet \gset
 SELECT public.map_practice_import_job((SELECT id FROM t_job WHERE k = 'J4'), '{}'::jsonb) IS NOT NULL AS quiet \gset
 SELECT is(pg_temp.err($$SELECT public.apply_practice_import_job((SELECT id FROM t_job WHERE k = 'J4'), true)$$), '22023:practice_import_staged_invalid',
     'a staged row whose end is not after its start refuses the whole apply');
@@ -431,6 +463,9 @@ SELECT pg_temp.stage((SELECT id FROM t_job WHERE k = 'J5'), 2, 'open', NULL, NUL
 SELECT pg_temp.stage((SELECT id FROM t_job WHERE k = 'J5'), 3, 'placement', 'A-Team', 'Org A U10', 'wed', '17:00', '18:00', 'W Park', 'W Field', 'B', '2026-09-07', '2026-11-20');
 SELECT pg_temp.stage((SELECT id FROM t_job WHERE k = 'J5'), 4, 'placement', 'A-Team', 'Org A U10', 'sat', '09:30', '10:30', 'Before Park', 'Before Field', NULL, '2026-09-07', '2026-11-20');
 SELECT pg_temp.stage((SELECT id FROM t_job WHERE k = 'J5'), 5, 'hold', NULL, NULL, 'tue', '17:00', '18:00', 'W Park', 'W Field', 'B', '2026-09-07', '2026-11-20');
+-- Row 6 names the saved Sunday slot by its key (field, whole, sun, 09:00, from 2026-09-07) with another End and Capacity.
+SELECT pg_temp.stage((SELECT id FROM t_job WHERE k = 'J5'), 6, 'open', NULL, NULL, 'sun', '09:00', '10:30', 'Before Park', 'Before Field', NULL, '2026-09-07', '2026-11-20', 2);
+SELECT pg_temp.ready((SELECT id FROM t_job WHERE k = 'J5')) IS NOT NULL AS quiet \gset
 SELECT public.map_practice_import_job((SELECT id FROM t_job WHERE k = 'J5'), jsonb_build_object(
     'divisions', jsonb_build_object(pg_temp.k('W Div'), jsonb_build_object('action', 'create'), pg_temp.k('Org A U10'), jsonb_build_object('action', 'map', 'id', 'a1111111-1111-1111-1111-11111111abcd')),
     'locations', jsonb_build_object(pg_temp.k('W Park'), jsonb_build_object('action', 'create'), pg_temp.k('Before Park'), jsonb_build_object('action', 'map', 'id', pg_temp.u(910))),
@@ -446,6 +481,10 @@ SELECT is(pg_temp.n(r, 'counts,divisions_created') || pg_temp.n(r, 'counts,locat
     '11121 3 1 1', 'W creates a division, a location, a field, two halves and a shell, three slots and one practice; A-Team''s new row is a probable move (its saved row leaves) and is held back') FROM t_res WHERE k = 'w';
 SELECT ok(pg_temp.n(r, 'refused,0,message') ~ ('overlaps the saved slot ' || pg_temp.u(901)::text), 'the row overlapping the saved Saturday slot is refused, naming that slot') FROM t_res WHERE k = 'w';
 SELECT is(pg_temp.n(r, 'flags,hold-over-open-slot,rows'), '1', 'the hold over the open slot of the same cell is flagged') FROM t_res WHERE k = 'w';
+SELECT is(pg_temp.n(r, 'refused,1,reason') || ': ' || pg_temp.n(r, 'refused,1,message'),
+    'slot-differs: The slot this row names is saved already (' || pg_temp.u(902)::text || ') and differs: its end is 10:00, the row''s 10:30; its capacity is 1, the row''s 2. An import never changes a saved slot: change the slot on Field Management, or make the row match it.',
+    'a row naming a saved slot with another End and Capacity is refused slot-differs, naming both, and the slot is not changed') FROM t_res WHERE k = 'w';
+SELECT is(pg_temp.val(format($$SELECT end_time || ' ' || capacity FROM public.practice_slots WHERE id = %L$$, pg_temp.u(902))), '10:00:00 1', 'the saved slot keeps its end and capacity');
 SELECT is(pg_temp.val($$SELECT f.supports_halves::text FROM public.fields f WHERE f.name = 'W Field'$$), 'true', 'a field the import creates with halves supports halves');
 -- PR 5's two checks of 4.5 for the shell: the team writer took a payload with teams and no team_players, and the shell is in
 -- the run's results the pages read, beside the division's other teams.
@@ -522,18 +561,89 @@ SELECT is(pg_temp.n(r, 'deleted') || ' ' || pg_temp.n(r, 'team_runs_deleted'),
 SELECT is(pg_temp.before_rows(), :'before_rows', 'and every row that existed before is byte-equal');
 
 -- The catalogue census of what the rollback deletes from: every foreign key onto those tables is either read by
--- practice_import_referenced (all of them, by construction) or on its two-entry list with a reason; a new table joins
+-- practice_import_referenced_ids (all of them, by construction) or on its two-entry list with a reason; a new table joins
 -- without an edit. PLANT: a table made here with a key onto fields makes a W field "referenced".
 SELECT is(pg_temp.val($$SELECT (SELECT count(*) FROM pg_constraint c WHERE c.contype = 'f'
                          AND c.confrelid IN ('public.practice_slots'::regclass, 'public.field_subunits'::regclass, 'public.fields'::regclass,
                                              'public.locations'::regclass, 'public.teams'::regclass, 'public.divisions'::regclass)) >= 25$$), 'true',
     'the census finds the keys onto the six tables (a census over nothing would pass)');
+-- (Its subject is a field nothing names yet: a field with a slot is named already, and a plant on it would prove nothing.)
+INSERT INTO public.fields (id, organization_id, location_id, name) VALUES (pg_temp.u(912), 'a1111111-1111-1111-1111-111111111111', pg_temp.u(910), 'Unnamed Field');
+SELECT is((SELECT count(*) FROM public.practice_import_referenced_ids('public.fields'::regclass, ARRAY[pg_temp.u(912)]))::text, '0',
+    'control: a field nothing names is not referenced');
 CREATE TABLE public.zz_planted_ref (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), field_id uuid REFERENCES public.fields(id) ON DELETE CASCADE);
-INSERT INTO public.zz_planted_ref (field_id) VALUES (pg_temp.u(911));
-SELECT is(public.practice_import_referenced('public.fields'::regclass, pg_temp.u(911)), true, 'PLANT: a new table with a cascading key onto fields is read as a reference');
+INSERT INTO public.zz_planted_ref (field_id) VALUES (pg_temp.u(912));
+SELECT is((SELECT array_agg(x) FROM public.practice_import_referenced_ids('public.fields'::regclass, ARRAY[pg_temp.u(912), pg_temp.u(911)]) x
+            WHERE x = pg_temp.u(912))::text, '{' || pg_temp.u(912)::text || '}',
+    'PLANT: a new table with a cascading key onto fields is read as a reference, by the one set query');
 DROP TABLE public.zz_planted_ref;
-SELECT is(public.practice_import_referenced('public.teams'::regclass, 'aaaaaaaa-0000-0000-0000-000000000002'), false,
+DELETE FROM public.fields WHERE id = pg_temp.u(912);
+SELECT is('aaaaaaaa-0000-0000-0000-000000000002'::uuid IN (SELECT public.practice_import_referenced_ids('public.teams'::regclass, ARRAY['aaaaaaaa-0000-0000-0000-000000000002'::uuid])), false,
     'control: a team nothing names (its calendar token aside) is not referenced');
+
+-- ── 7b. The coach overlap reads each slot's dates; leaving and moves read dates; a hold's ground must stand ─
+-- CX (in the file, Sep 7 to Sep 30), CY (saved on a slot valid Oct 1 to Nov 20, its range the whole season) and CZ (saved on
+-- a slot valid Sep 7 to Sep 20) share coach K, all on Tuesday 07:00 to 08:30. CY's practice is never live while CX's is: no
+-- conflict (C2). CZ's is: the control. FT's saved practice runs Sep 7 to Sep 30, MT's the whole season; the file moves both
+-- from Oct 1: MT's is a probable move, FT's is not leaving at all (item 7). H: a half that clashed and a field never made.
+INSERT INTO public.divisions (id, organization_id, season_settings_id, name) VALUES (pg_temp.u(920), 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111aaa', 'C Div');
+INSERT INTO public.teams (id, organization_id, division_id, name) VALUES
+    (pg_temp.u(921), 'a1111111-1111-1111-1111-111111111111', pg_temp.u(920), 'CX'), (pg_temp.u(922), 'a1111111-1111-1111-1111-111111111111', pg_temp.u(920), 'CY'),
+    (pg_temp.u(923), 'a1111111-1111-1111-1111-111111111111', pg_temp.u(920), 'CZ'), (pg_temp.u(924), 'a1111111-1111-1111-1111-111111111111', pg_temp.u(920), 'FT'),
+    (pg_temp.u(925), 'a1111111-1111-1111-1111-111111111111', pg_temp.u(920), 'MT');
+INSERT INTO public.coaches (id, organization_id, season_settings_id, full_name, email, status) VALUES
+    (pg_temp.u(926), 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111aaa', 'CoachFirstK CoachLastK', 'coachk@example.com', 'active');
+INSERT INTO public.team_coach_assignments (organization_id, team_id, coach_id, role, effective_from, started_via) VALUES
+    ('a1111111-1111-1111-1111-111111111111', pg_temp.u(921), pg_temp.u(926), 'lead', '2026-09-07', 'admin'),
+    ('a1111111-1111-1111-1111-111111111111', pg_temp.u(922), pg_temp.u(926), 'lead', '2026-09-07', 'admin'),
+    ('a1111111-1111-1111-1111-111111111111', pg_temp.u(923), pg_temp.u(926), 'lead', '2026-09-07', 'admin');
+INSERT INTO public.fields (id, organization_id, location_id, name) VALUES (pg_temp.u(913), 'a1111111-1111-1111-1111-111111111111', pg_temp.u(910), 'Coach Field');
+INSERT INTO public.practice_slots (id, organization_id, field_id, day_of_week, start_time, end_time, capacity, valid_from, valid_until) VALUES
+    (pg_temp.u(930), 'a1111111-1111-1111-1111-111111111111', pg_temp.u(911), 'tue', '07:00', '08:00', 1, '2026-10-01', '2026-11-20'),
+    (pg_temp.u(931), 'a1111111-1111-1111-1111-111111111111', pg_temp.u(913), 'tue', '07:30', '08:30', 1, '2026-09-07', '2026-09-20'),
+    (pg_temp.u(932), 'a1111111-1111-1111-1111-111111111111', pg_temp.u(913), 'wed', '07:00', '08:00', 1, '2026-09-07', '2026-11-20'),
+    (pg_temp.u(933), 'a1111111-1111-1111-1111-111111111111', pg_temp.u(913), 'thu', '07:00', '08:00', 1, '2026-09-07', '2026-11-20');
+INSERT INTO public.practice_assignments (organization_id, team_id, slot_id, practice_slot_id, effective_date_range, source, assigned_via) VALUES
+    ('a1111111-1111-1111-1111-111111111111', pg_temp.u(922), pg_temp.u(930), pg_temp.u(930), '[2026-09-07,2026-11-20]', 'manual', 'manual'),
+    ('a1111111-1111-1111-1111-111111111111', pg_temp.u(923), pg_temp.u(931), pg_temp.u(931), '[2026-09-07,2026-11-20]', 'manual', 'manual'),
+    ('a1111111-1111-1111-1111-111111111111', pg_temp.u(924), pg_temp.u(932), pg_temp.u(932), '[2026-09-07,2026-09-30]', 'manual', 'manual'),
+    ('a1111111-1111-1111-1111-111111111111', pg_temp.u(925), pg_temp.u(933), pg_temp.u(933), '[2026-09-07,2026-11-20]', 'manual', 'manual');
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+INSERT INTO t_job VALUES ('J7', pg_temp.job('dates.csv'));
+SELECT pg_temp.stage((SELECT id FROM t_job WHERE k = 'J7'), 1, 'placement', 'CX', 'C Div', 'tue', '07:00', '08:00', 'Before Park', 'Before Field', NULL, '2026-09-07', '2026-09-30');
+SELECT pg_temp.stage((SELECT id FROM t_job WHERE k = 'J7'), 2, 'placement', 'FT', 'C Div', 'fri', '07:00', '08:00', 'Before Park', 'Coach Field', NULL, '2026-10-01', '2026-11-20');
+SELECT pg_temp.stage((SELECT id FROM t_job WHERE k = 'J7'), 3, 'placement', 'MT', 'C Div', 'sat', '07:00', '08:00', 'Before Park', 'Coach Field', NULL, '2026-10-01', '2026-11-20');
+SELECT pg_temp.stage((SELECT id FROM t_job WHERE k = 'J7'), 4, 'open', NULL, NULL, 'tue', '17:00', '18:00', 'H Park', 'H Field', NULL, '2026-09-07', '2026-11-20');
+SELECT pg_temp.stage((SELECT id FROM t_job WHERE k = 'J7'), 5, 'open', NULL, NULL, 'tue', '17:00', '18:00', 'H Park', 'H Field', 'C', '2026-09-07', '2026-11-20');
+SELECT pg_temp.stage((SELECT id FROM t_job WHERE k = 'J7'), 6, 'hold', NULL, NULL, 'tue', '17:00', '18:00', 'H Park', 'H Field', 'C', '2026-09-07', '2026-11-20');
+SELECT pg_temp.stage((SELECT id FROM t_job WHERE k = 'J7'), 7, 'hold', NULL, NULL, 'tue', '17:00', '18:00', 'H Park', 'Ghost Field', NULL, '2026-09-07', '2026-11-20');
+SELECT pg_temp.stage((SELECT id FROM t_job WHERE k = 'J7'), 8, 'hold', NULL, NULL, 'tue', '17:00', '18:00', 'H Park', 'H Field', NULL, '2026-09-07', '2026-11-20');
+SELECT pg_temp.ready((SELECT id FROM t_job WHERE k = 'J7')) IS NOT NULL AS quiet \gset
+SELECT public.map_practice_import_job((SELECT id FROM t_job WHERE k = 'J7'), jsonb_build_object(
+    'divisions', jsonb_build_object(pg_temp.k('C Div'), jsonb_build_object('action', 'map', 'id', pg_temp.u(920))),
+    'locations', jsonb_build_object(pg_temp.k('Before Park'), jsonb_build_object('action', 'map', 'id', pg_temp.u(910)), pg_temp.k('H Park'), jsonb_build_object('action', 'create')),
+    'fields', jsonb_build_object(pg_temp.k2('Before Park', 'Before Field'), jsonb_build_object('action', 'map', 'id', pg_temp.u(911)),
+                                 pg_temp.k2('Before Park', 'Coach Field'), jsonb_build_object('action', 'map', 'id', pg_temp.u(913)),
+                                 pg_temp.k2('H Park', 'H Field'), jsonb_build_object('action', 'create'),
+                                 pg_temp.k2('H Park', 'Ghost Field'), jsonb_build_object('action', 'create')),
+    'subunits', jsonb_build_object(pg_temp.k3('H Park', 'H Field', 'C'), jsonb_build_object('action', 'create')),
+    'teams', jsonb_build_object(pg_temp.k2('C Div', 'CX'), jsonb_build_object('action', 'map', 'id', pg_temp.u(921)),
+                                pg_temp.k2('C Div', 'FT'), jsonb_build_object('action', 'map', 'id', pg_temp.u(924)),
+                                pg_temp.k2('C Div', 'MT'), jsonb_build_object('action', 'map', 'id', pg_temp.u(925))))) IS NOT NULL AS quiet \gset
+SET LOCAL ROLE authenticated;
+INSERT INTO t_res VALUES ('dates', public.apply_practice_import_job((SELECT id FROM t_job WHERE k = 'J7'), true));
+RESET ROLE;
+SELECT is((SELECT string_agg(e ->> 'row' || ':' || (e ->> 'detail' ~ 'CZ')::text || (e ->> 'detail' ~ 'CY')::text, ',') FROM jsonb_array_elements(r -> 'flagged') e WHERE e ->> 'code' = 'coach-conflict'),
+    '1:truefalse', 'C2: the coach overlap reads each slot''s own dates: CX meets CZ (the control), never CY, whose slot starts the day after CX''s ends') FROM t_res WHERE k = 'dates';
+SELECT is(pg_temp.n(r, 'counts,leaving') || ' ' || pg_temp.n(r, 'leaving,0,team') || ' ' || pg_temp.n(r, 'counts,held_back') || ' ' || pg_temp.n(r, 'counts,inserted')
+          || ' ' || pg_temp.n(r, 'counts,probable_move_teams'),
+    '1 MT 1 2 1', 'item 7: FT''s September practice is not leaving an October file (FT''s row is inserted); MT''s whole-season one is, and MT''s October row is a probable move, held back') FROM t_res WHERE k = 'dates';
+SELECT is((SELECT string_agg((e ->> 'row') || ':' || (e ->> 'probable_move') || '/' || (e ->> 'added'), ',' ORDER BY (e ->> 'row')::int) FROM jsonb_array_elements(r -> 'arriving') e),
+    '1:false/true,2:false/true,3:true/false', 'the arriving rows say so') FROM t_res WHERE k = 'dates';
+SELECT is((SELECT string_agg((e ->> 'row') || ':' || (e ->> 'ground_known'), ',' ORDER BY (e ->> 'row')::int) FROM jsonb_array_elements(r -> 'holds') e)
+          || ' ' || pg_temp.n(r, 'flags,hold-over-open-slot,rows') || ' ' || pg_temp.n(r, 'refused,0,row') || pg_temp.n(r, 'refused,0,reason'),
+    '6:false,7:false,8:true 1 5slot-overlaps-another',
+    'item 6: a hold on a half taken out again (its only slot clashed) and on a field never made has no ground; the hold on the field that stands does, and is flagged') FROM t_res WHERE k = 'dates';
 
 -- ── 8. Everything this migration grants to a signed-in user, used AS one ───
 SELECT is(pg_temp.val($$SELECT string_agg(p.proname, ',' ORDER BY p.proname) FROM pg_proc p

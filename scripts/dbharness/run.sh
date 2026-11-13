@@ -4213,7 +4213,7 @@ PROBE
                WHEN (SELECT count(*) FROM public.import_jobs WHERE id = '2a000000-0000-4000-8000-0000000000d1') <> 0 THEN 'job-left'
                WHEN (SELECT count(*) FROM public.import_application_records WHERE import_job_id = '2a000000-0000-4000-8000-0000000000d1') <> 0 THEN 'records-left'
                WHEN to_regprocedure('public.apply_practice_import_job(uuid, boolean)') IS NOT NULL OR to_regprocedure('public.rollback_practice_import_job(uuid)') IS NOT NULL
-                    OR to_regprocedure('public.map_practice_import_job(uuid, jsonb)') IS NOT NULL OR to_regprocedure('public.practice_import_referenced(regclass, uuid)') IS NOT NULL THEN 'function-left'
+                    OR to_regprocedure('public.map_practice_import_job(uuid, jsonb)') IS NOT NULL OR to_regprocedure('public.practice_import_referenced_ids(regclass, uuid[])') IS NOT NULL THEN 'function-left'
                WHEN (SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'import_jobs_job_type_check') ~ 'practice_schedule' THEN 'list-left'
                WHEN cardinality(public.import_allowed_keys('practice_schedule')) <> 0 THEN 'allowlist-left'
                ELSE 'restored' END;" \

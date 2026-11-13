@@ -17,8 +17,8 @@
 --     fields import's own key, `(field, subunit or the whole field, weekday, start, valid from)`, or made, unless the
 --     supply rule (`practice_slot_conflicts`, turnover 0) finds a slot it would overlap. A slot that exists is found and
 --     never modified.
---   * `practice_import_referenced(regclass, uuid)` (internal): is a row the rollback would delete named by any row of
---     any table, read from the foreign keys in the catalogue (so a table added later is covered without a list).
+--   * `practice_import_referenced_ids(regclass, uuid[])` (internal): which of the rows the rollback would delete are
+--     named by any row of any table, read from the foreign keys in the catalogue (so a table added later is covered without a list).
 --   * `map_practice_import_job`, `apply_practice_import_job(job, dry_run)` and `rollback_practice_import_job`: admin RPCs.
 --
 -- **No change to `persist_practice_schedule`, its gate, `refresh_schedule_tbd_practices`, or any column of
@@ -378,7 +378,7 @@ COMMENT ON FUNCTION public.ensure_practice_slot(uuid, uuid, uuid, public.day_of_
     'Internal (the practice import calls it as its owner): find a practice slot by the fields import''s key (field, subunit or the whole field, weekday, start, valid_from), never modifying it, or make one unless practice_slot_conflicts (turnover 0) finds a slot it would overlap, which it names. 20261123010000.';
 
 -- ---------------------------------------------------------------------------
--- 4. practice_import_referenced: does any row anywhere name this one.
+-- 4. practice_import_referenced_ids: which of these rows does any row anywhere name.
 -- ---------------------------------------------------------------------------
 --
 -- The rollback deletes a record the import created only when nothing references it (games lesson 103: a rollback
@@ -388,16 +388,19 @@ COMMENT ON FUNCTION public.ensure_practice_slot(uuid, uuid, uuid, public.day_of_
 -- it: a team's calendar token (a trigger makes one for every team) and a practice row of the TIME TBD list (rebuilt by
 -- the refresh the rollback runs). A table added later is covered without an edit here.
 
-CREATE FUNCTION public.practice_import_referenced(p_table regclass, p_id uuid)
-RETURNS boolean
+CREATE FUNCTION public.practice_import_referenced_ids(p_table regclass, p_ids uuid[])
+RETURNS SETOF uuid
 LANGUAGE plpgsql
 STABLE
 SET search_path = public
 AS $function$
 DECLARE
     v_fk record;
-    v_hit boolean;
 BEGIN
+    IF p_ids IS NULL OR cardinality(p_ids) = 0 THEN
+        RETURN;
+    END IF;
+    -- One query per foreign key, over the whole set (a rollback of 705 slots asks each key once, not 705 times).
     FOR v_fk IN
         SELECT c.conrelid::regclass AS child, a.attname AS col
           FROM pg_constraint c
@@ -408,20 +411,16 @@ BEGIN
            AND NOT (c.conrelid = 'public.team_calendar_tokens'::regclass)
          ORDER BY 1, 2
     LOOP
-        EXECUTE format('SELECT EXISTS (SELECT 1 FROM %s x WHERE x.%I = $1%s)', v_fk.child, v_fk.col,
-                       CASE WHEN v_fk.child = 'public.schedule_tbd'::regclass THEN ' AND x.kind <> ''practice''' ELSE '' END)
-           INTO v_hit USING p_id;
-        IF v_hit THEN
-            RETURN true;
-        END IF;
+        RETURN QUERY EXECUTE format('SELECT DISTINCT x.%I FROM %s x WHERE x.%I = ANY ($1)%s', v_fk.col, v_fk.child, v_fk.col,
+                                    CASE WHEN v_fk.child = 'public.schedule_tbd'::regclass THEN ' AND x.kind <> ''practice''' ELSE '' END)
+            USING p_ids;
     END LOOP;
-    RETURN false;
 END;
 $function$;
 
-REVOKE ALL ON FUNCTION public.practice_import_referenced(regclass, uuid) FROM PUBLIC, anon, authenticated;
-COMMENT ON FUNCTION public.practice_import_referenced(regclass, uuid) IS
-    'Internal (the practice import''s rollback): true when a row of any table names this row through a foreign key onto its id, read from the catalogue; a team''s calendar token and a practice row of the TIME TBD list are derived and not counted. 20261123010000.';
+REVOKE ALL ON FUNCTION public.practice_import_referenced_ids(regclass, uuid[]) FROM PUBLIC, anon, authenticated;
+COMMENT ON FUNCTION public.practice_import_referenced_ids(regclass, uuid[]) IS
+    'Internal (the practice import''s rollback): of the given ids of a table, those a row of any table names through a foreign key onto its id, read from the catalogue, one query per key; a team''s calendar token and a practice row of the TIME TBD list are derived and not counted. 20261123010000.';
 
 -- ---------------------------------------------------------------------------
 -- 5. map_practice_import_job: store what the admin decided for each label, and which moved rows to add.
@@ -669,6 +668,14 @@ BEGIN
     IF v_job.job_type <> 'practice_schedule' THEN
         RAISE EXCEPTION 'Import job % is %, not practice_schedule', p_import_job_id, v_job.job_type USING ERRCODE = '22023';
     END IF;
+    -- The season writers' lock (completion and rollover take it), then the practice writer's own season lock (the save and
+    -- the TIME TBD refresh take it), so an import and a save cannot interleave; THEN the job is read again, held, and
+    -- judged as it stands (apply_game_import_job's order): a second caller that waited on the locks finds the first one's
+    -- completed job and replays it, never applies it twice. A dry run takes them too: it writes.
+    PERFORM pg_advisory_xact_lock(hashtextextended('season:' || v_org::text, 0));
+    PERFORM pg_advisory_xact_lock(hashtextextended('persist_practice_schedule:' || v_org::text || ':' || v_job.season_settings_id::text, 0));
+    SELECT * INTO v_job FROM public.import_jobs WHERE id = p_import_job_id FOR UPDATE;
+
     -- A finished job answers with the result it stored (a retry after a lost response writes nothing).
     IF v_job.status IN ('completed', 'completed_with_warnings') THEN
         IF v_job.warning_summary ? 'practice_import' THEN
@@ -678,7 +685,12 @@ BEGIN
     END IF;
     IF v_job.status IN ('failed', 'needs_fix') THEN
         RAISE EXCEPTION '% import job % cannot be applied: a new file is a new job', initcap(v_job.status), p_import_job_id
-            USING ERRCODE = '22023';
+            USING ERRCODE = '22023', DETAIL = 'import_not_ready_to_apply';
+    END IF;
+    -- Only a job whose staging finished (mark_import_job_ready_to_apply) is applied: one still importing may be missing rows.
+    IF v_job.status <> 'ready_to_apply' THEN
+        RAISE EXCEPTION 'Import job % is %, not ready_to_apply: stage the whole file first', p_import_job_id, v_job.status
+            USING ERRCODE = '22023', DETAIL = 'import_not_ready_to_apply';
     END IF;
     v_season := v_job.season_settings_id;
     SELECT s.status, s.season_start, s.season_end INTO v_season_status, v_season_start, v_season_end
@@ -699,14 +711,6 @@ BEGIN
             USING ERRCODE = '22023', DETAIL = 'mapping_required';
     END IF;
     v_add := ARRAY(SELECT jsonb_array_elements_text(COALESCE(v_map -> 'options' -> 'add_moved_rows', '[]'::jsonb)));
-
-    -- The season writers' lock (completion and rollover take it), then the practice writer's own season lock (the save and
-    -- the TIME TBD refresh take it), so an import and a save cannot interleave. A dry run takes them too: it writes.
-    PERFORM pg_advisory_xact_lock(hashtextextended('season:' || v_org::text, 0));
-    PERFORM pg_advisory_xact_lock(hashtextextended('persist_practice_schedule:' || v_org::text || ':' || v_season::text, 0));
-    IF NOT v_dry THEN
-        SELECT * INTO v_job FROM public.import_jobs WHERE id = p_import_job_id FOR UPDATE;
-    END IF;
 
     -- Everything below is ONE code path for the preview and the apply. A dry run ends in a sentinel exception after the
     -- result is in v_result, so every write rolls back with the sub-block (plan 4.11.4).
@@ -849,8 +853,7 @@ BEGIN
         )
         SELECT k2.lkey, k2.action, k2.cname, k2.can_create,
                (k2.can_create AND row_number() OVER w = 1) AS creator,
-               CASE WHEN k2.action = 'map' THEN k2.existing_id WHEN k2.can_create THEN first_value(k2.own_id) OVER w END AS ref,
-               (k2.action = 'create') AS is_new
+               CASE WHEN k2.action = 'map' THEN k2.existing_id WHEN k2.can_create THEN first_value(k2.own_id) OVER w END AS ref
           FROM k2
         WINDOW w AS (PARTITION BY k2.can_create, public.normalise_external_label(k2.cname) ORDER BY k2.lkey);
 
@@ -861,7 +864,7 @@ BEGIN
                    (array_agg(r.field_label ORDER BY r.rowno))[1] AS label
               FROM _pi_rows r WHERE r.outcome = 'ok' GROUP BY r.field_key
         ), j AS (
-            SELECT k.fkey, l.ref AS loc_ref, COALESCE(l.is_new, false) AS loc_new, d.action,
+            SELECT k.fkey, l.ref AS loc_ref, d.action,
                    CASE WHEN d.action = 'map' AND l.ref IS NOT NULL
                         THEN (SELECT f.id FROM public.fields f WHERE f.id = d.ref_id AND f.organization_id = v_org AND f.location_id = l.ref) END AS existing_id,
                    CASE WHEN d.action = 'create' AND l.ref IS NOT NULL THEN COALESCE(d.dname, k.label) END AS cname
@@ -877,8 +880,7 @@ BEGIN
         )
         SELECT k2.fkey, k2.loc_ref, k2.action, k2.cname, k2.can_create,
                (k2.can_create AND row_number() OVER w = 1) AS creator,
-               CASE WHEN k2.action = 'map' THEN k2.existing_id WHEN k2.can_create THEN first_value(k2.own_id) OVER w END AS ref,
-               (k2.action = 'create') AS is_new
+               CASE WHEN k2.action = 'map' THEN k2.existing_id WHEN k2.can_create THEN first_value(k2.own_id) OVER w END AS ref
           FROM k2
         WINDOW w AS (PARTITION BY k2.can_create, k2.loc_ref, public.normalise_external_label(k2.cname) ORDER BY k2.fkey);
 
@@ -1025,7 +1027,8 @@ BEGIN
         CREATE TEMP TABLE _pi_grp ON COMMIT DROP AS
         SELECT DISTINCT ON (r.fld_ref, r.sub_ref, r.dow, r.start_time, r.valid_from)
                r.fld_ref, r.sub_ref, r.dow, r.start_time, r.valid_from, r.end_time, r.valid_until, r.capacity, r.rowno AS first_row,
-               NULL::boolean AS holds_team, NULL::uuid AS slot_id, NULL::boolean AS created, NULL::uuid AS clash_id
+               NULL::boolean AS holds_team, NULL::uuid AS slot_id, NULL::boolean AS created, NULL::uuid AS clash_id,
+               NULL::uuid AS differs_id, NULL::text AS differs
           FROM _pi_rows r WHERE r.outcome = 'ok' AND r.status IN ('placement', 'open')
          ORDER BY r.fld_ref, r.sub_ref, r.dow, r.start_time, r.valid_from, r.rowno;
         -- A slot is one End, Valid Until and Capacity: a later row that says otherwise is refused.
@@ -1046,6 +1049,26 @@ BEGIN
             UPDATE _pi_grp SET slot_id = v_slot.slot_id, created = v_slot.created, clash_id = v_slot.conflict_slot_id
              WHERE first_row = v_grp.first_row;
         END LOOP;
+        -- A slot that is FOUND is never changed (plan 4.11.3), so a row that describes it otherwise (another End, Capacity or
+        -- Valid Until) is refused, naming what differs: written against it, a practice could outlive its slot, or sit in a
+        -- slot of another length or size than the file says.
+        UPDATE _pi_grp g
+           SET differs_id = g.slot_id, slot_id = NULL,
+               differs = concat_ws('; ',
+                   CASE WHEN ps.end_time <> g.end_time THEN format('its end is %s, the row''s %s', left(ps.end_time::text, 5), left(g.end_time::text, 5)) END,
+                   CASE WHEN COALESCE(ps.capacity, 1) <> g.capacity THEN format('its capacity is %s, the row''s %s', COALESCE(ps.capacity, 1), g.capacity) END,
+                   CASE WHEN ps.valid_until IS DISTINCT FROM g.valid_until
+                        THEN format('its last date is %s, the row''s %s', COALESCE(ps.valid_until::text, 'open'), g.valid_until) END)
+          FROM public.practice_slots ps
+         WHERE ps.id = g.slot_id AND NOT g.created
+           AND (ps.end_time <> g.end_time OR COALESCE(ps.capacity, 1) <> g.capacity OR ps.valid_until IS DISTINCT FROM g.valid_until);
+        UPDATE _pi_rows r SET outcome = 'refused', reason = 'slot-differs',
+               message = format('The slot this row names is saved already (%s) and differs: %s. An import never changes a saved slot: change the slot on Field Management, or make the row match it.',
+                                g.differs_id, g.differs)
+          FROM _pi_grp g
+         WHERE g.differs_id IS NOT NULL AND r.outcome = 'ok' AND r.status IN ('placement', 'open')
+           AND r.fld_ref = g.fld_ref AND r.sub_ref IS NOT DISTINCT FROM g.sub_ref AND r.dow = g.dow AND r.start_time = g.start_time
+           AND r.valid_from = g.valid_from;
         UPDATE _pi_rows r SET outcome = 'refused', reason = 'slot-overlaps-another',
                message = CASE WHEN o.first_row IS NOT NULL
                               THEN format('This slot overlaps the slot of row %s on the same ground at the same time. Two slots cannot claim one ground: the one a team is placed in is imported, else the earlier row.', o.first_row)
@@ -1079,21 +1102,37 @@ BEGIN
                         AND g.start_time = r.start_time AND g.valid_from = r.valid_from
          WHERE r.outcome = 'ok' AND r.status = 'placement' AND g.slot_id IS NOT NULL;
 
-        -- In the schedule, not in this file: every saved practice of the season's own teams the file does not hold (an
-        -- import never deletes; the admin removes one on the Practices page with the unlock prompt, as today).
+        -- In the schedule, not in this file: a saved practice of a team the file places, the file does not hold, and live on
+        -- a date of the file's span for that team (its range cut to its slot's validity, as the gate reads one, against the
+        -- first to the last date of the team's rows). A fall practice is not "leaving" a spring file. An import never deletes;
+        -- the admin removes one on the Practices page with the unlock prompt, as today.
         CREATE TEMP TABLE _pi_leave ON COMMIT DROP AS
-        SELECT pa.id, pa.team_id, t.name AS team, ps.day_of_week::text AS day, ps.start_time, ps.end_time, ps.field_id,
-               ps.field_subunit_id, pa.effective_date_range AS rng
-          FROM public.practice_assignments pa
-          JOIN public.teams t ON t.id = pa.team_id AND NOT t.is_external
-          JOIN public.divisions d ON d.id = t.division_id AND d.season_settings_id = v_season
-          JOIN public.practice_slots ps ON ps.id = pa.practice_slot_id
-         WHERE pa.organization_id = v_org
-           AND pa.id NOT IN (SELECT a.existing_id FROM _pi_asg a WHERE a.existing_id IS NOT NULL);
-        -- New in this file, for a team that also has a row leaving: a probable move (team level, as core's
-        -- pairProbableMoves), not added unless the admin ticked it.
+        WITH span AS (
+            SELECT a.team_ref, daterange(min(lower(a.rng)), max(upper(a.rng)), '[)') AS rng FROM _pi_asg a GROUP BY a.team_ref
+        ), saved AS (
+            SELECT pa.id, pa.team_id, t.name AS team, ps.day_of_week::text AS day, ps.start_time, ps.end_time, ps.field_id,
+                   ps.field_subunit_id, pa.effective_date_range AS rng,
+                   GREATEST(lower(pa.effective_date_range), ps.valid_from) AS lo,
+                   LEAST(upper(pa.effective_date_range) - 1, ps.valid_until) AS hi
+              FROM public.practice_assignments pa
+              JOIN public.teams t ON t.id = pa.team_id AND NOT t.is_external
+              JOIN public.divisions d ON d.id = t.division_id AND d.season_settings_id = v_season
+              JOIN public.practice_slots ps ON ps.id = pa.practice_slot_id
+             WHERE pa.organization_id = v_org
+               AND (pa.effective_date_range IS NULL OR NOT isempty(pa.effective_date_range))
+               AND pa.id NOT IN (SELECT a.existing_id FROM _pi_asg a WHERE a.existing_id IS NOT NULL)
+        )
+        SELECT sv.id, sv.team_id, sv.team, sv.day, sv.start_time, sv.end_time, sv.field_id, sv.field_subunit_id, sv.rng,
+               daterange(sv.lo, sv.hi, '[]') AS live
+          FROM saved sv
+          JOIN span sp ON sp.team_ref = sv.team_id
+         WHERE (sv.lo IS NULL OR sv.hi IS NULL OR sv.lo <= sv.hi)
+           AND daterange(sv.lo, sv.hi, '[]') && sp.rng;
+        -- New in this file, for a team with a row leaving on a date this row is live too: a probable move (the pair is the
+        -- team, as core's pairProbableMoves pairs it, narrowed to rows whose dates meet), not added unless the admin ticked it.
         UPDATE _pi_asg a SET probable_move = true, held_back = NOT (a.row_key = ANY (v_add))
-         WHERE a.existing_id IS NULL AND a.team_ref IN (SELECT l.team_id FROM _pi_leave l);
+         WHERE a.existing_id IS NULL
+           AND EXISTS (SELECT 1 FROM _pi_leave l WHERE l.team_id = a.team_ref AND l.live && a.rng);
 
         -- ------------------------------------------------------------ 6. Team shells, in ONE team run (as the games import's).
         DELETE FROM public.divisions dv USING _pi_div x
@@ -1227,11 +1266,14 @@ BEGIN
           JOIN public.teams ot ON ot.id = cb.team_id AND NOT ot.is_external
           JOIN public.practice_assignments pb ON pb.team_id = cb.team_id AND pb.organization_id = v_org
           JOIN public.practice_slots pbs ON pbs.id = pb.practice_slot_id
+          -- The shared dates: each practice's range cut to its OWN slot's validity (a NULL range, or a bound it lacks, is
+          -- the slot's: practice_new_auto_row_refusals' rule and core's assignmentLiveSpan), and both coach assignments in
+          -- force. GREATEST and LEAST skip a NULL, so an open bound is open.
           CROSS JOIN LATERAL (
-              SELECT GREATEST(lower(pa.effective_date_range), COALESCE(lower(pb.effective_date_range), pbs.valid_from, '-infinity'::date),
-                              ca.effective_from, cb.effective_from) AS lo,
-                     LEAST(upper(pa.effective_date_range) - 1, COALESCE(upper(pb.effective_date_range) - 1, pbs.valid_until, 'infinity'::date),
-                           COALESCE(ca.effective_to, 'infinity'::date), COALESCE(cb.effective_to, 'infinity'::date)) AS hi) w
+              SELECT COALESCE(GREATEST(lower(pa.effective_date_range), ps.valid_from, lower(pb.effective_date_range), pbs.valid_from,
+                                       ca.effective_from, cb.effective_from), '-infinity'::date) AS lo,
+                     COALESCE(LEAST(upper(pa.effective_date_range) - 1, ps.valid_until, upper(pb.effective_date_range) - 1, pbs.valid_until,
+                                    ca.effective_to, cb.effective_to), 'infinity'::date) AS hi) w
          WHERE pbs.day_of_week = ps.day_of_week AND pbs.start_time < ps.end_time AND ps.start_time < pbs.end_time
            AND (pb.effective_date_range IS NULL OR NOT isempty(pb.effective_date_range))
            AND isfinite(w.lo) AND w.lo <= w.hi
@@ -1262,7 +1304,10 @@ BEGIN
               SELECT count(*) AS n, bool_or(EXISTS (SELECT 1 FROM public.practice_assignments pa WHERE pa.practice_slot_id = x.slot_id)) AS used
                 FROM public.practice_slot_conflicts(v_org, r.fld_ref, r.sub_ref, r.dow, r.start_time, r.end_time, r.valid_from, r.valid_until, NULL, 0) x) c
          WHERE r.outcome = 'ok' AND r.status = 'hold' AND r.fld_ref IS NOT NULL
-           AND EXISTS (SELECT 1 FROM public.fields f WHERE f.id = r.fld_ref) AND c.n > 0;
+           -- The ground must stand after the plan: a field or half a decision would create but no written row made, or one
+           -- made and taken out again, is no ground.
+           AND EXISTS (SELECT 1 FROM public.fields f WHERE f.id = r.fld_ref)
+           AND (r.sub_ref IS NULL OR EXISTS (SELECT 1 FROM public.field_subunits su WHERE su.id = r.sub_ref)) AND c.n > 0;
         -- division-not-reserved: the parse's own flag (a Division on a row with no team reserves nothing here).
         INSERT INTO _pi_flag
         SELECT r.rowno, r.row_key, NULL, 'division-not-reserved',
@@ -1313,8 +1358,11 @@ BEGIN
                                                                    'field_id', field_id, 'field_subunit_id', field_subunit_id, 'range', rng::text)
                                                 ORDER BY team, day, start_time, id), '[]'::jsonb)
                           FROM _pi_leave),
-            'holds', (SELECT COALESCE(jsonb_agg(jsonb_build_object('row', rowno, 'row_key', row_key, 'ground_known', fld_ref IS NOT NULL) ORDER BY rowno), '[]'::jsonb)
-                        FROM _pi_rows WHERE outcome = 'ok' AND status = 'hold'),
+            'holds', (SELECT COALESCE(jsonb_agg(jsonb_build_object('row', h.rowno, 'row_key', h.row_key,
+                                  'ground_known', EXISTS (SELECT 1 FROM public.fields f WHERE f.id = h.fld_ref)
+                                                  AND (h.sub_ref IS NULL OR EXISTS (SELECT 1 FROM public.field_subunits su WHERE su.id = h.sub_ref)))
+                                  ORDER BY h.rowno), '[]'::jsonb)
+                        FROM _pi_rows h WHERE h.outcome = 'ok' AND h.status = 'hold'),
             'time_tbd', jsonb_build_object(
                 'practice_rows', v_tbd -> 'practice_rows',
                 'missing_practices', v_tbd -> 'missing_practices',
@@ -1375,7 +1423,7 @@ COMMENT ON FUNCTION public.apply_practice_import_job(uuid, boolean) IS
 --     (22023 practice_import_changed), the one necessary blocker (deleting it would destroy a later writer's work);
 --   * an assignment a later writer removed: gone already, counted (`assignments_already_gone`);
 --   * anything else created, changed since (any column the apply stored, game_import_row_unchanged) or referenced by any
---     row of any table (practice_import_referenced, from the catalogue; plus players.team_id and a later team run naming
+--     row of any table (practice_import_referenced_ids, from the catalogue, one query per key; plus players.team_id and a later team run naming
 --     a shell, which have no key): KEPT and reported, never deleted.
 
 CREATE FUNCTION public.rollback_practice_import_job(p_import_job_id uuid)
@@ -1403,6 +1451,7 @@ DECLARE
     v_kept jsonb;
     v_tbd jsonb;
     v_result jsonb;
+    v_refd uuid[];
 BEGIN
     IF v_uid IS NULL THEN
         RAISE EXCEPTION 'rollback_practice_import_job needs a signed-in caller to audit the rollback' USING ERRCODE = '42501';
@@ -1480,6 +1529,12 @@ BEGIN
         SELECT t.tbl, t.ord FROM (VALUES ('practice_slots', 1), ('field_subunits', 2), ('fields', 3), ('locations', 4),
                                          ('teams', 5), ('divisions', 6)) AS t(tbl, ord) ORDER BY t.ord
     LOOP
+        -- The rows of this table something names, asked of the catalogue's keys ONCE per table, after the tables before it
+        -- in this order have lost what the rollback deleted from them (a slot the import made no longer names its field).
+        v_refd := ARRAY(SELECT public.practice_import_referenced_ids(('public.' || v_rec.tbl)::regclass, ARRAY(
+                      SELECT r.target_id FROM public.import_application_records r
+                       WHERE r.import_job_id = p_import_job_id AND r.import_type = 'practice_schedule'
+                         AND r.target_table = v_rec.tbl AND r.operation = 'inserted' AND r.rolled_back_at IS NULL)));
         -- A field is deleted in its own statement, after the shared producer of bookings says it holds none (every function
         -- that deletes a field consults it: docs/sql/20260909000000_smoke.sql), as well as the catalogue's references.
         IF v_rec.tbl = 'fields' THEN
@@ -1488,7 +1543,7 @@ BEGIN
                  WHERE r.target_id = x.id AND r.import_job_id = p_import_job_id AND r.import_type = 'practice_schedule'
                    AND r.target_table = 'fields' AND r.operation = 'inserted' AND r.rolled_back_at IS NULL
                    AND public.game_import_row_unchanged(to_jsonb(x), r.applied_payload)
-                   AND NOT public.practice_import_referenced('public.fields'::regclass, x.id)
+                   AND NOT (x.id = ANY (v_refd))
                    AND NOT EXISTS (SELECT 1 FROM public.field_bookings(v_org, x.id, NULL) b)
                 RETURNING 1)
             SELECT count(*) INTO n FROM gone;
@@ -1501,12 +1556,12 @@ BEGIN
                  WHERE r.target_id = x.id AND r.import_job_id = $1 AND r.import_type = 'practice_schedule'
                    AND r.target_table = %2$L AND r.operation = 'inserted' AND r.rolled_back_at IS NULL
                    AND public.game_import_row_unchanged(to_jsonb(x), r.applied_payload)
-                   AND NOT public.practice_import_referenced(%3$L::regclass, x.id)
+                   AND NOT (x.id = ANY ($2))
                    AND (%2$L <> 'teams' OR (NOT EXISTS (SELECT 1 FROM public.players p WHERE p.team_id = x.id)
                                             AND NOT EXISTS (SELECT 1 FROM pg_temp._pr_named nm WHERE nm.id = x.id::text)))
                 RETURNING 1)
-            SELECT count(*) FROM gone$q$, v_rec.tbl, v_rec.tbl, 'public.' || v_rec.tbl)
-          INTO n USING p_import_job_id;
+            SELECT count(*) FROM gone$q$, v_rec.tbl, v_rec.tbl)
+          INTO n USING p_import_job_id, v_refd;
         v_deleted := v_deleted || jsonb_build_object(v_rec.tbl, n);
     END LOOP;
 
@@ -1517,7 +1572,9 @@ BEGIN
      WHERE sr.organization_id = v_org AND sr.run_type = 'team' AND sr.parameters ->> 'import_job_id' = p_import_job_id::text
        AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(sr.parameters -> 'shell_ids', '[]'::jsonb)) sid
                         WHERE EXISTS (SELECT 1 FROM public.teams t WHERE t.id::text = sid))
-       AND NOT public.practice_import_referenced('public.scheduler_runs'::regclass, sr.id);
+       AND NOT (sr.id = ANY (ARRAY(SELECT public.practice_import_referenced_ids('public.scheduler_runs'::regclass, ARRAY(
+                SELECT x.id FROM public.scheduler_runs x WHERE x.organization_id = v_org AND x.run_type = 'team'
+                   AND x.parameters ->> 'import_job_id' = p_import_job_id::text)))));
     GET DIAGNOSTICS n_team_runs = ROW_COUNT;
     UPDATE public.scheduler_runs sr
        SET status = 'failed', parameters = sr.parameters || jsonb_build_object('rolled_back', true)
@@ -1607,7 +1664,7 @@ BEGIN
     SELECT string_agg(f.sig, ', ') INTO v_bad
       FROM (VALUES ('apply_practice_import_job(uuid,boolean)'), ('rollback_practice_import_job(uuid)'), ('map_practice_import_job(uuid,jsonb)'),
                    ('ensure_practice_slot(uuid,uuid,uuid,day_of_week,time without time zone,time without time zone,date,date,smallint)'),
-                   ('practice_import_referenced(regclass,uuid)')) AS f(sig)
+                   ('practice_import_referenced_ids(regclass,uuid[])')) AS f(sig)
      WHERE to_regprocedure('public.' || f.sig) IS NULL;
     IF v_bad IS NOT NULL THEN
         RAISE EXCEPTION 'function(s) missing: %', v_bad;
@@ -1626,7 +1683,7 @@ BEGIN
     SELECT string_agg(p.proname, ', ') INTO v_bad
       FROM pg_proc p
      WHERE p.pronamespace = 'public'::regnamespace
-       AND p.proname IN ('ensure_practice_slot', 'practice_import_referenced')
+       AND p.proname IN ('ensure_practice_slot', 'practice_import_referenced_ids')
        AND (p.prosecdef OR has_function_privilege('authenticated', p.oid, 'EXECUTE') OR has_function_privilege('anon', p.oid, 'EXECUTE')
             OR EXISTS (SELECT 1 FROM aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a WHERE a.grantee = 0));
     IF v_bad IS NOT NULL THEN

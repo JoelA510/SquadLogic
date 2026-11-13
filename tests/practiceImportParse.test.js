@@ -36,6 +36,7 @@ import * as practiceImport from '../packages/core/src/practiceImport/index.js';
 import {
   PRACTICE_IMPORT_ALIAS_REFUSALS,
   PRACTICE_IMPORT_DATABASE_FLAGS,
+  PRACTICE_IMPORT_DATABASE_ROW_REFUSALS,
   PRACTICE_IMPORT_FILE_FLAGS,
   PRACTICE_IMPORT_FILE_REFUSALS,
   PRACTICE_IMPORT_FLAGS,
@@ -165,6 +166,8 @@ describe('practice import: the reason codes', () => {
       'reservation',
       'weekday',
     ]);
+    // Declared, not enforced here: the database judges a slot saved with other values (PR 10).
+    expect([...PRACTICE_IMPORT_DATABASE_ROW_REFUSALS]).toEqual(['slot-differs']);
     expect([...PRACTICE_IMPORT_FLAGS].sort()).toEqual(
       [...PRACTICE_IMPORT_FILE_FLAGS, ...PRACTICE_IMPORT_DATABASE_FLAGS].sort()
     );
@@ -172,6 +175,7 @@ describe('practice import: the reason codes', () => {
     const listed = new Set([
       ...PRACTICE_IMPORT_FILE_REFUSALS,
       ...PRACTICE_IMPORT_ROW_REFUSALS,
+      ...PRACTICE_IMPORT_DATABASE_ROW_REFUSALS,
       ...PRACTICE_IMPORT_ALIAS_REFUSALS,
       ...PRACTICE_IMPORT_FLAGS,
     ]);

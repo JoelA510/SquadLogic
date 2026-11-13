@@ -80,7 +80,8 @@ and must match the week and times the page worked out. A team already playing, o
 in another slot is a **double booking, flagged and not blocked** (owner, 2026-11-09: warnings, not blockers), as is a
 slot reserved for another division. These are shown in the dialog and the banner, each clash once, and recorded in the
 saved run's warnings. An outside club is never double-booked. The game **starts not Published** (the save never writes
-the flag). Generating waits while an added game is staged.
+the flag). Generating waits while an added game is staged. In Manual Override a pending new time is drawn in the grid (shown,
+not offered as a target), and every flag is judged from the game's current slot, so a move carries it.
 Tests: `tests/gameAddByHand.test.jsx`; E2E: four
 scenarios in `tests/e2e/features/published_games.feature`.
 

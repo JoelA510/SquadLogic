@@ -1736,13 +1736,22 @@ answers; none adds scope):
   made are read into the grid before the save, and the effect that copies the saved rows into the list does nothing
   while those rows are known to be stale (`savedIsStale`), so a slot read landing late cannot put the list back to the
   schedule before the save.
+- **A new time is on the grid before Apply** (Codex re-review of #731, C4). In Manual Override, the review's pending
+  new times are drawn as slots in the preview grid, under their own field and labelled "(new time, made on Apply)", so
+  the added game has a card that can be seen and moved. They are shown, never offered: "Move to" and a drop still take
+  only the season's real slots, and a pending time the game has left is no longer drawn.
+- **Every flag of an added game is judged where the game is now** (C5): its slot's reserved division, its field and
+  its times are read when the warnings are, never kept from when it was added, so a move into a reserved slot raises the
+  flag, a move out clears it, and Apply records what holds at Apply. A drop that would put two games in one slot is
+  refused for an added game, either way round (the move handler's existing rule).
 - **Divisions offered** are those that play games; their teams are the run's teams and the season's outside clubs.
 - **A failed save after a slot was made** keeps the slot and names it in the error. When the outcome is unknown (a
   timeout, an unreadable answer) the error says instead that whether the game was saved into it is being checked. The
   review then names the database's slot, so a second Apply does not ask again.
-- **Plant evidence** (executed, 2026-11-13, re-run in full after the review round): sixteen plants, each turning its
-  cases red against the 31 cases of `tests/gameAddByHand.test.jsx`, the restored code green. The plan's three: a
-  Published slot addable (4 red), a double booking blocked (5 red), a new game arriving Published (2 red). The E2E
+- **Plant evidence** (executed, 2026-11-13, re-run in full after the review round): nineteen plants after the Codex
+  re-review, each turning its cases red against the 35 cases of `tests/gameAddByHand.test.jsx`, the restored code green.
+  The plan's three: a Published slot addable (4 red), a double booking blocked (6 red), a new game arriving Published
+  (6 red). The E2E
   refusal scenario fails under the first. "Arriving Published" is caught on the staged game; once saved, the database
   cannot be told to publish it through this save, so the post-Apply assertions hold under that plant too (said, not
   hidden).

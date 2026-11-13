@@ -254,7 +254,15 @@ export default function PracticeImportSteps(props) {
   // Every change of the choices drops a `map:<id>` its label's scope no longer holds (a team of the division its
   // division label was mapped to before): it would be sent and refused, or hidden behind a select that shows "not
   // decided".
-  const settle = (next) => withoutOutOfScopeChoices(next, proposal, league);
+  const proposeFor = (/** @type {Record<string, Record<string, string>>} */ next) =>
+    proposePracticeMapping({
+      rows,
+      league,
+      decisions: decisionsFromChoices(next, bare),
+      aliases,
+      previous,
+    });
+  const settle = (next) => withoutOutOfScopeChoices(next, proposeFor, league);
   const setChoice = (group, key, value) =>
     props.setChoices((prev) =>
       settle({ ...prev, [group]: { ...(prev[group] ?? {}), [key]: value } })

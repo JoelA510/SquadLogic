@@ -51,6 +51,8 @@ export const COACH = '0b000000-0000-4000-8000-000000000050';
 export const VENUE_C = '0b000000-0000-4000-8000-000000000025';
 export const FIELD_C1 = '0b000000-0000-4000-8000-000000000026';
 export const SAVED_SLOT_C = '0b000000-0000-4000-8000-000000000032';
+/** Venue C's Field 1 has a half "A" too, as Venue A's has (Codex's C4 repro on #732). */
+export const HALF_CA = '0b000000-0000-4000-8000-000000000027';
 export const RUN = '0b000000-0000-4000-8000-000000000060';
 
 const team = (n) => `0b000000-0000-4000-8000-0000000001${String(n).padStart(2, '0')}`;
@@ -166,6 +168,7 @@ export function seedPracticeImportWorld({ savedRange = FALL_RANGE } = {}) {
     field_subunits: [
       { id: HALF_A, organization_id: ORG, field_id: FIELD_1, label: 'A', effective_to: null },
       { id: HALF_B, organization_id: ORG, field_id: FIELD_1, label: 'B', effective_to: null },
+      { id: HALF_CA, organization_id: ORG, field_id: FIELD_C1, label: 'A', effective_to: null },
     ],
     practice_slots: [
       slot(SAVED_SLOT_MON, 'mon', '16:00', '17:00'),

@@ -1885,7 +1885,9 @@ requirements of the PR 10 review and by this PR:
    281.08 KB gz against 281.09 on the base, and the Games tab's own chunks grow by about 2 KB gz (the kind's words).
 10. **Review round (#732: three Codex findings and one review).** A repeated column in the alias file refuses it; a
     ground only a hold names is stored as its exact existing ground (a hold creates nothing), so the database knows it
-    and flags a hold over a slot; a `map` that leaves its label's scope goes back to undecided in the choices; the stage
+    and flags a hold over a slot; a `map` that leaves its label's scope goes back to undecided in the choices, the scope judged with the proposal
+    made again under the updated choices at each level (Codex's C4: a location remapped to another with a field of the
+    same name moves that field, and a half chosen under it goes); the stage
     answers `bad-date` only for `PracticeImportDateError` and audits and rethrows anything else; the words helper catches
     nothing; the header-to-column map is made once per file in core and the mirror; the clients share
     `utils/importClientCommon.js`; the panel's kind checks are `KINDS` fields (`Steps`, `takesDates`,

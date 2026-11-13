@@ -158,24 +158,37 @@ export function practiceMappingForJob(proposal, choices, addMovedRows, resolvedR
  * The choices with every `map:<id>` that is no longer among its label's records in scope taken out (the label goes back
  * to what is proposed in its new scope, often nothing: undecided). A team mapped in one division whose division label is
  * then mapped to another division names a team of the first: kept, it would be sent and refused, or hidden behind a
- * select that shows "not decided". Fields go before halves, so a half under a field that moved goes too.
+ * select that shows "not decided".
+ *
+ * **The scope is judged under the choices as they now stand.** A parent's effective record (an exact match in its new
+ * scope, which nobody chose) comes from a proposal made with the updated choices, never the one on screen: a location
+ * remapped to another with a field of the same name moves that field's exact match, and a half chosen under the old
+ * field must go (Codex on #732). So the proposal is made again before each level (fields, then halves, then teams), and
+ * the levels are run until nothing more is taken out.
  *
  * @param {Record<string, Record<string, string>>} choices
- * @param {Record<string, any[]>} proposal
+ * @param {(choices: Record<string, Record<string, string>>) => Record<string, any[]>} propose  the mapping step's
+ *   proposal for a set of choices
  * @param {any} league
  * @returns {Record<string, Record<string, string>>} the same object when nothing was out of scope
  */
-export function withoutOutOfScopeChoices(choices, proposal, league) {
+export function withoutOutOfScopeChoices(choices, propose, league) {
   let next = choices;
-  for (const group of ['fields', 'subunits', 'teams']) {
-    for (const entry of proposal[group] ?? []) {
-      const choice = next?.[group]?.[entry.key];
-      if (typeof choice !== 'string' || !choice.startsWith('map:')) continue;
-      const id = choice.slice(4);
-      if (recordsInScope(entry, league, proposal, next).some((r) => r.id === id)) continue;
-      const { [entry.key]: _gone, ...rest } = next[group];
-      next = { ...next, [group]: rest };
+  for (let pass = 0; pass < 8; pass += 1) {
+    let changed = false;
+    for (const group of ['fields', 'subunits', 'teams']) {
+      const proposal = propose(next);
+      for (const entry of proposal[group] ?? []) {
+        const choice = next?.[group]?.[entry.key];
+        if (typeof choice !== 'string' || !choice.startsWith('map:')) continue;
+        const id = choice.slice(4);
+        if (recordsInScope(entry, league, proposal, next).some((r) => r.id === id)) continue;
+        const { [entry.key]: _gone, ...rest } = next[group];
+        next = { ...next, [group]: rest };
+        changed = true;
+      }
     }
+    if (!changed) return next;
   }
   return next;
 }

@@ -22,6 +22,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ALIAS_CSV,
   DIVISIONS,
+  HALF_A,
+  HALF_CA,
+  VENUE_C,
   ORG,
   SPRING_ROWS,
   TEAMS,
@@ -512,5 +515,21 @@ describe('the review round of #732', () => {
     expect(short).not.toMatch(/U12G-02/);
     expect(short).not.toMatch(/U12G-03/);
     expect(short).toMatch(/Counted again after the division settings were saved\./);
+  });
+
+  it('C4: a half chosen under a field whose location is remapped is judged in the new scope, and its old id is not sent', async () => {
+    render(<ScheduleImportPanel kind="practices" />);
+    await toMapping();
+    decideEverything();
+    // Venue A and Venue C each have a "Field 1" with a half "A"
+    choose('A (Venue A, Field 1)', `map:${HALF_A}`);
+    expect(select('A (Venue A, Field 1)').value).toBe(`map:${HALF_A}`);
+    choose('Venue A', `map:${VENUE_C}`);
+    // the field's exact match is now Venue C's Field 1, so the half goes back to what is proposed there: its half A
+    expect(select('Field 1 (Venue A)').value).toBe('map:0b000000-0000-4000-8000-000000000026');
+    expect(select('A (Venue A, Field 1)').value).toBe(`map:${HALF_CA}`);
+    await toPreview();
+    const mapping = await storedMapping();
+    expect(JSON.stringify(mapping.subunits)).not.toContain(HALF_A);
   });
 });

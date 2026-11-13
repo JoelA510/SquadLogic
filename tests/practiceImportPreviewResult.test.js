@@ -377,6 +377,8 @@ describe('division settings: the roster rules are sent back only when unchanged 
     expect(applied.settings.saved).toEqual([{ name: 'U12 Girls' }]);
     // lowered from two to one: the deficit is gone from the list read back
     const ids = applied.settings.tbd.map((t) => t.team_id);
+    // CONTROL: the list read back is the season's real list, not an empty one (U10B-05 is skipped, so still short)
+    expect(ids).toContain(TEAMS['U10B-05']);
     expect(ids).not.toContain(TEAMS['U12G-02']);
     expect(ids).not.toContain(TEAMS['U12G-03']);
     vi.restoreAllMocks();

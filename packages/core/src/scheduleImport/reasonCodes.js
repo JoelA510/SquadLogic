@@ -10,7 +10,7 @@
  * ## What the plan lists, and what this build added
  *
  * Plan 4.4 names thirteen row reasons and two file reasons; 4.8 names `missing-week`. Building the
- * parse needed four more, each for an input the plan's lists have no word for. They are here, so
+ * parse needed five more, each for an input the plan's lists have no word for. They are here, so
  * they are reviewed, rather than reported as a reason that does not exist:
  *
  * - `bad-week`: a `Week` cell that is not a whole number from 1 to 255. It was a refusal until the
@@ -19,6 +19,9 @@
  * - `bad-game-id`: a `Game ID` longer than the 40 characters 4.3 allows. Cutting it would change
  *   the key a later import matches on.
  * - `duplicate-column`: two columns of one name. Reading either would be a guess.
+ * - `too-many-columns`: more than 200 headers SENT (the practice import's reason, PR 11). The browser sends only the
+ *   columns the import reads, so a wide file reaches none of the guards; the header row was once cut to 200 by
+ *   position, which dropped a column the import reads past the cap while its values stayed in the rows.
  * - `no-season-clock`: the file cannot be placed on a clock (4.8: "with none, the import refuses with
  *   the Games page's existing 'no clock' explanation"). It is a file reason because it applies to
  *   every row.
@@ -34,6 +37,7 @@ export const SCHEDULE_IMPORT_REASON = Object.freeze({
   MISSING_COLUMN: 'missing-column',
   DUPLICATE_COLUMN: 'duplicate-column',
   TOO_MANY_ROWS: 'too-many-rows',
+  TOO_MANY_COLUMNS: 'too-many-columns',
   NO_SEASON_CLOCK: 'no-season-clock',
   MISSING_WEEK: 'missing-week',
 
@@ -84,6 +88,7 @@ export const SCHEDULE_IMPORT_FILE_REFUSALS = Object.freeze([
   R.MISSING_COLUMN,
   R.DUPLICATE_COLUMN,
   R.TOO_MANY_ROWS,
+  R.TOO_MANY_COLUMNS,
   R.NO_SEASON_CLOCK,
   R.MISSING_WEEK,
 ]);
@@ -172,12 +177,31 @@ export const SCHEDULE_IMPORT_LIMITS = Object.freeze({
   MAX_ROWS: 2400,
   /** `game_assignments.external_ref`. */
   MAX_GAME_ID_LENGTH: 40,
+  /**
+   * The headers one request may SEND (the Edge request shape refuses more with a 400; the stage and the parse refuse
+   * more with `too-many-columns`). The browser sends only the columns the import reads, found by name
+   * (`splitScheduleImportHeaders`), so a wide file is never cut by position and never refused for its width.
+   */
+  MAX_COLUMNS: 200,
 });
+
+/**
+ * The words of `too-many-columns`, written once: the games and the practice import's parse and client say it with this
+ * (the Edge mirrors hold a copy each, held to it by their vector tables).
+ *
+ * @param {number} count  the columns the refused header row has
+ * @param {number} max  the cap it is over
+ * @returns {string}
+ */
+export function describeTooManyColumns(count, max) {
+  return `The file has ${count} columns; one import reads at most ${max}. Remove the columns it does not need and choose it again.`;
+}
 
 const DESCRIPTIONS = Object.freeze({
   [R.MISSING_COLUMN]: 'The file is missing a column the import needs.',
   [R.DUPLICATE_COLUMN]: 'The file has the same column twice, so neither can be trusted.',
   [R.TOO_MANY_ROWS]: 'The file has more rows than one import takes.',
+  [R.TOO_MANY_COLUMNS]: 'The file has more columns than one import reads.',
   [R.NO_SEASON_CLOCK]:
     'The season has no usable time zone, so the times in the file cannot be placed on a clock.',
   [R.MISSING_WEEK]: 'There is no Week to use and no season start date to work one out from.',

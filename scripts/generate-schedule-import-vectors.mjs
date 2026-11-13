@@ -67,6 +67,15 @@ const withLength = (over) => {
   delete r['End Time'];
   return r;
 };
+/**
+ * A header row of `at` SENT headers, the Game ID last, after filler columns the import does not read. The browser sends
+ * only the columns the import reads, so these reach the stage only from a caller that sends more: the backstop.
+ */
+const gameIdAt = (at) => [
+  ...HEADERS.filter((h) => h !== 'Game ID'),
+  ...Array.from({ length: at - HEADERS.length }, (_, i) => `Extra ${i}`),
+  'Game ID',
+];
 
 /** The inputs: a name, a season, a header row, rows, and how many rows came before. */
 export const SCHEDULE_IMPORT_VECTOR_INPUTS = [
@@ -234,6 +243,24 @@ export const SCHEDULE_IMPORT_VECTOR_INPUTS = [
     headers: HEADERS,
     rowOffset: 2399,
     rows: [row({ 'Game ID': 'V-2400' }), row({ 'Game ID': 'V-2401', 'Home Team': 'U05B Team 03' })],
+  },
+  {
+    name: '200 headers sent, a recognised column (the Game ID) the 200th: every header sent is read',
+    season: season(LA),
+    headers: gameIdAt(200),
+    rows: [row()],
+  },
+  {
+    name: 'file refused: 201 headers sent, a recognised column (the Game ID) the 201st; never cut',
+    season: season(LA),
+    headers: gameIdAt(201),
+    rows: [row()],
+  },
+  {
+    name: 'file refused: 201 headers sent, two of them blank; counted as sent, as the request shape counts them',
+    season: season(LA),
+    headers: [...gameIdAt(199), '', '   '],
+    rows: [row()],
   },
   {
     name: 'file refused: a missing column',

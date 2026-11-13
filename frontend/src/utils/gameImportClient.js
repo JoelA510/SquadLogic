@@ -19,16 +19,20 @@
 
 import {
   SCHEDULE_IMPORT_CHUNK_LIMITS,
+  splitScheduleImportHeaders,
   stagedRowToParsed,
 } from '@squadlogic/core/scheduleImport/staging.js';
-import { scheduleLabelKey } from '@squadlogic/core/scheduleImport/mapping.js';
-import { SCHEDULE_IMPORT_COLUMNS } from '@squadlogic/core/scheduleImport/parseRows.js';
+import {
+  SCHEDULE_IMPORT_LIMITS,
+  describeTooManyColumns,
+} from '@squadlogic/core/scheduleImport/reasonCodes.js';
 import { buildScheduleCsv } from '@squadlogic/core/scheduleImport/scheduleCsv.js';
 import { fetchAllPages } from '../lib/pagedFetch.js';
 import { readCurrentSavedGameIds } from './gamePublishedClient.js';
 import { readSeasonTeamDirectory } from './scheduleReportsRead.js';
 import { readScheduleTbd } from './scheduleTbdClient.js';
 import { functionErrorBody, refusal, requireClient, rpcRefusal } from './importClientCommon.js';
+import { sanitizeImportText } from './importRows.js';
 
 /** Words for a refusal whose database message is not written for a person. */
 const RPC_REFUSAL_WORDS = {
@@ -101,6 +105,18 @@ export async function startGameImport(
   { organizationId, seasonSettingsId, fileName, headers, rows, onProgress }
 ) {
   requireClient(client);
+  // Only the columns the import reads leave the browser, found by NAME as the stage finds them (a note, a coach or an
+  // email in the file has no reason to travel). Nothing is cut by position, so a column the import reads is read
+  // wherever it stands, and a wide file is never refused for its width. The dropped columns are named from here.
+  const { read, dropped } = splitScheduleImportHeaders(headers, sanitizeImportText);
+  // More columns to send than one request takes cannot happen today (the import reads eleven names; only a column
+  // given many times over could): refused here, in words, before a job is made, never cut.
+  if (read.length > SCHEDULE_IMPORT_LIMITS.MAX_COLUMNS) {
+    throw refusal(
+      describeTooManyColumns(read.length, SCHEDULE_IMPORT_LIMITS.MAX_COLUMNS),
+      'too-many-columns'
+    );
+  }
   const created = await client.rpc('create_import_job', {
     p_organization_id: organizationId,
     p_import_type: 'games',
@@ -122,21 +138,14 @@ export async function startGameImport(
     /** @type {Record<string, number>} */
     by_reason: {},
     /** @type {string[]} */
-    dropped_columns: [],
+    dropped_columns: [...dropped],
     /** @type {Array<{ row: number, code: string, message: string }>} */
     warnings: [],
     /** @type {Array<{ row: number, code: string, message: string }>} */
     refused_rows: [],
   };
   const size = SCHEDULE_IMPORT_CHUNK_LIMITS.MAX_CHUNK_ROWS;
-  // Only the columns the import reads leave the browser (the function drops the rest too, but a note, a coach or an
-  // email in the file has no reason to travel). The header row goes whole, as names, so the dropped columns are named.
-  const read = new Set(
-    Object.values(SCHEDULE_IMPORT_COLUMNS).map((name) => scheduleLabelKey(name))
-  );
-  const kept = headers.filter((header) => read.has(scheduleLabelKey(header)));
-  const sentHeaders = headers.slice(0, SCHEDULE_IMPORT_CHUNK_LIMITS.MAX_HEADERS);
-  const sentRows = rows.map((row) => Object.fromEntries(kept.map((h) => [h, row?.[h] ?? ''])));
+  const sentRows = rows.map((row) => Object.fromEntries(read.map((h) => [h, row?.[h] ?? ''])));
   // A file with a header and no rows still goes to the function once, so the refusal or the empty answer is its own.
   for (let offset = 0; offset === 0 || offset < rows.length; offset += size) {
     const { data, error } = await client.functions.invoke('import-validation', {
@@ -145,7 +154,7 @@ export async function startGameImport(
         action: 'stage',
         organization_id: organizationId,
         import_job_id: jobId,
-        headers: sentHeaders,
+        headers: read,
         rows: sentRows.slice(offset, offset + size),
         row_offset: offset,
       },
@@ -171,7 +180,10 @@ export async function startGameImport(
     for (const [reason, n] of Object.entries(s.by_reason ?? {})) {
       summary.by_reason[reason] = (summary.by_reason[reason] ?? 0) + Number(n);
     }
-    summary.dropped_columns = s.dropped_columns ?? summary.dropped_columns;
+    // The function names none today (it is sent only what the import reads); a name it does give is kept as well.
+    for (const name of s.dropped_columns ?? []) {
+      if (!summary.dropped_columns.includes(name)) summary.dropped_columns.push(name);
+    }
     summary.warnings.push(...(s.warnings ?? []));
     summary.refused_rows.push(...(s.refused_rows ?? []));
     onProgress?.(Math.min(offset + size, rows.length), rows.length);

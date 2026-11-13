@@ -325,3 +325,34 @@ describe('ScoresPage: one save of a game at a time, and only scores are sent (F1
     expect(await scores()).toEqual([]);
   });
 });
+
+describe('ScoresPage: the count of earlier results is a side read (F11-3 review R3)', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('when it fails the games still show, and the note says the count could not be read', async () => {
+    await save([assignment('comets', 'rockets', 'slot-1')]);
+    const supabase = await client();
+    const realFrom = supabase.from.bind(supabase);
+    vi.spyOn(supabase, 'from').mockImplementation((table) => {
+      const builder = realFrom(table);
+      if (table !== 'game_assignments') return builder;
+      const realSelect = builder.select.bind(builder);
+      builder.select = (columns, options) => {
+        if (!options?.head) return realSelect(columns, options);
+        const refused = {
+          eq: () => refused,
+          neq: () => refused,
+          then: (resolve) => resolve({ data: null, count: null, error: { message: 'boom' } }),
+        };
+        return refused;
+      };
+      return builder;
+    });
+    renderPage();
+    expect(await screen.findByText(TEAM_NAMES.rockets)).toBeInTheDocument();
+    expect(screen.queryByTestId('scores-load-failed')).toBeNull();
+    expect(screen.getByTestId('scores-outside-schedule')).toHaveTextContent(
+      'Earlier results that are no longer in the saved schedule could not be counted, so some may not be listed here.'
+    );
+  });
+});

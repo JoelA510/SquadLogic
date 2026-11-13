@@ -22,6 +22,10 @@ How to read the settings audit trail and spot configuration anomalies.
   searches the metadata and actor.
 - A flag change (`update_org_feature_flags`) records `metadata = { field: 'feature_flags',
   old: <flags before>, new: <flags after> }`.
+- A scoped setting change (`admin_set_scoped_setting`, 20261124010000) is a `settings.updated` row
+  with `resource_type = 'scoped_setting'` and `metadata = { setting: 'scoped_setting', field: <key>,
+  scope, scope_id, scope_name, season_settings_id, old, new }`; a null `old` or `new` means
+  "inherited" (no value at that level).
 
 ## Inspecting
 

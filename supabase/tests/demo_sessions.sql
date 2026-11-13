@@ -642,7 +642,10 @@ SELECT is(
         'standings_counts_outside',
         -- 20261123010000: the practice import (map, preview and apply, roll back): admin RPCs gated by is_org_admin, so
         -- allowed; ensure_practice_slot is internal (no client role may execute it) and is not on this list.
-        'apply_practice_import_job', 'map_practice_import_job', 'rollback_practice_import_job'
+        'apply_practice_import_job', 'map_practice_import_job', 'rollback_practice_import_job',
+        -- 20261124010000: the settings cascade's two setters, admin RPCs gated by is_org_admin, so allowed; the resolver
+        -- (scoped_setting_value) is internal (no client role may execute it) and is not on this list.
+        'admin_set_division_practice_settings', 'admin_set_scoped_setting'
       ])),
     NULL,
     'every function a signed-in caller may execute is on the anonymous list: refused, required, or allowed'
@@ -695,7 +698,10 @@ SELECT is(
         'standings_counts_outside',
         -- 20261123010000: the practice import (map, preview and apply, roll back): admin RPCs gated by is_org_admin, so
         -- allowed; ensure_practice_slot is internal (no client role may execute it) and is not on this list.
-        'apply_practice_import_job', 'map_practice_import_job', 'rollback_practice_import_job'
+        'apply_practice_import_job', 'map_practice_import_job', 'rollback_practice_import_job',
+        -- 20261124010000: the settings cascade's two setters, admin RPCs gated by is_org_admin, so allowed; the resolver
+        -- (scoped_setting_value) is internal (no client role may execute it) and is not on this list.
+        'admin_set_division_practice_settings', 'admin_set_scoped_setting'
       ]) n WHERE n NOT IN (SELECT name FROM t_client_fns)),
     NULL,
     'control: every name on the list is still a function a signed-in caller may execute'

@@ -73,6 +73,36 @@ export default function ScoresPage() {
     [completedSeasonIds]
   );
 
+  // What is typed and not saved yet, one game at a time (hooks/useScoreDrafts.js, shared with the Standings page).
+  const {
+    type: typeScoreBox,
+    stateOf,
+    reset: resetDrafts,
+    isSaving,
+  } = useScoreDrafts({
+    save: async (game, entry) => {
+      const { error } = await supabase.rpc('update_game_score', {
+        p_organization_id: orgId,
+        p_game_id: game.id,
+        p_score_home: entry.score_home,
+        p_score_away: entry.score_away,
+      });
+      if (error) throw error;
+    },
+    onSaved: (game, entry) => {
+      setGames((current) =>
+        current.map((row) => (row.id === game.id ? { ...row, ...entry } : row))
+      );
+      setNotSaved(null);
+      toast(entry.score_home === null ? 'Score cleared' : 'Score saved', 'success');
+    },
+    onRefused: (err) => {
+      logger.error('[ScoresPage] score update failed:', err);
+      // The row goes back to the saved score, and why is said in words that stay on the page.
+      setNotSaved(scoreRefusalText(err));
+    },
+  });
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -108,37 +138,7 @@ export default function ScoresPage() {
     return () => {
       cancelled = true;
     };
-  }, [orgId, seasonId]);
-
-  // What is typed and not saved yet, one game at a time (hooks/useScoreDrafts.js, shared with the Standings page).
-  const {
-    type: typeScoreBox,
-    stateOf,
-    reset: resetDrafts,
-    isSaving,
-  } = useScoreDrafts({
-    save: async (game, entry) => {
-      const { error } = await supabase.rpc('update_game_score', {
-        p_organization_id: orgId,
-        p_game_id: game.id,
-        p_score_home: entry.score_home,
-        p_score_away: entry.score_away,
-      });
-      if (error) throw error;
-    },
-    onSaved: (game, entry) => {
-      setGames((current) =>
-        current.map((row) => (row.id === game.id ? { ...row, ...entry } : row))
-      );
-      setNotSaved(null);
-      toast(entry.score_home === null ? 'Score cleared' : 'Score saved', 'success');
-    },
-    onRefused: (err) => {
-      logger.error('[ScoresPage] score update failed:', err);
-      // The row goes back to the saved score, and why is said in words that stay on the page.
-      setNotSaved(scoreRefusalText(err));
-    },
-  });
+  }, [orgId, seasonId, resetDrafts]);
 
   const enterScore = useCallback(
     (gameId, side, value) => {

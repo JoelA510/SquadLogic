@@ -726,3 +726,45 @@ describe('more than 1,000 divisions in a season (Codex C6 on #737)', () => {
     expect(appliesNow('Division: U8')).toBe('Not counted, by default');
   }, 30000);
 });
+
+describe('a save that finishes after an organization switch (Codex C7 on #737)', () => {
+  it('does not hold up the new organization: its read still lands and renders', async () => {
+    const view = render(<ScopedSettingsSection />);
+    await table();
+    await waitFor(() => expect(screen.queryByText('Loading settings…')).not.toBeInTheDocument());
+    // the save is sent and its answer is slow
+    /** @type {() => void} */
+    let answer = () => {};
+    const slow = new Promise((resolve) => {
+      answer = () => resolve(undefined);
+    });
+    const realRpc = mockSupabase.rpc.bind(mockSupabase);
+    vi.spyOn(mockSupabase, 'rpc').mockImplementation(async (name, params) => {
+      if (name === 'admin_set_scoped_setting') await slow;
+      return realRpc(name, params);
+    });
+    fireEvent.change(select('Division: U8'), { target: { value: 'true' } });
+    // the admin switches organization; the new organization's first read is held until the save has finished
+    const held = holdNextRead('programs');
+    ctx.org.currentOrganization = { id: OTHER, name: 'Other United' };
+    ctx.org.currentSeasonSetting = {
+      id: OTHER_SEASON,
+      organization_id: OTHER,
+      status: 'active',
+    };
+    view.rerender(<ScopedSettingsSection />);
+    await waitFor(() => expect(held.started()).toBe(true));
+    // the save's answer arrives (its read-back is of the organization left behind)
+    answer();
+    await settle();
+    // then the new organization's read lands, and is shown
+    held.release();
+    await screen.findByRole('rowheader', { name: 'Organization: Other United' });
+    await waitFor(() => expect(screen.queryByText('Loading settings…')).not.toBeInTheDocument());
+    expect(screen.getAllByRole('combobox')).toHaveLength(2);
+    // the save itself went through, for the organization it was made in
+    expect(storedRows().find((r) => r.division_id === 'd-u8')?.value).toBe(true);
+    // and nothing of the save is said under the new organization
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+});

@@ -176,6 +176,9 @@ export function useScopedSettings(organizationId, seasonId) {
   // One generation counter for every read (the first read, a save's read-back, the Programs signal): each read takes
   // the next number when it starts, and only the latest one's answer is applied. A read that started earlier and
   // lands later (a refresh begun before a save, landing after the save's read-back) is dropped, never shown over it.
+  // **The rule: check the pair first, then bump.** Only a read for the pair shown now takes a number; a read for a pair
+  // left behind (a save that finishes after an organization switch) returns without touching the counter, so it can
+  // never supersede the new pair's read.
   const generation = useRef(0);
 
   /**
@@ -184,6 +187,9 @@ export function useScopedSettings(organizationId, seasonId) {
    */
   const load = useCallback(async () => {
     if (!organizationId) return false;
+    const pair = `${organizationId}|${seasonId ?? null}`;
+    // the pair first: a stale load (its closure is of the pair left behind) touches neither the counter nor the state
+    if (latest.current !== pair) return false;
     const mine = ++generation.current;
     const next = await readScopedSettings(organizationId, seasonId ?? null);
     if (latest.current !== next.readFor) return false;
@@ -194,15 +200,14 @@ export function useScopedSettings(organizationId, seasonId) {
 
   useEffect(() => {
     if (!organizationId) return undefined;
+    // This effect runs for the pair just set in `latest` (the effect above runs first), so it is the current pair's
+    // read and takes a number. No cleanup bump: a read of a pair left behind is dropped by the pair check when it lands.
     const mine = ++generation.current;
     (async () => {
       const next = await readScopedSettings(organizationId, seasonId ?? null);
       if (mine === generation.current && latest.current === next.readFor) setState(next);
     })();
-    return () => {
-      // a read begun for this pair is superseded once the pair changes or the panel goes
-      if (generation.current === mine) generation.current += 1;
-    };
+    return undefined;
   }, [organizationId, seasonId]);
 
   // A change to the season's programs (the Programs section's writes) reads again.

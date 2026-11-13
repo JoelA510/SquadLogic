@@ -571,6 +571,9 @@ text above, each a decision of the build:
     save's read-back is dropped.
   - **C6:** the season's programs and divisions are each paged to completion (`fetchAllPages`, by `id`) and then put in
     name order. `usePrograms` still reads both unpaged (a follow-up; the panel does not depend on it).
+  - **C7 (third round):** the pair is checked first and the counter bumped after: a load whose pair was left behind (a
+    save that finishes after an organization switch) returns without touching the counter or the state, so the new
+    pair's first read is never superseded. The first-read effect no longer bumps on cleanup.
 - **Not done here (S8):** the program delete and merge dialogs do not yet say that a program's values go with it; neither
   task list names it, and the stop condition forbids markup changes outside the panel. A follow-up.
 

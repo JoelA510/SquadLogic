@@ -21,6 +21,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ALIAS_CSV,
+  FILE_ROWS,
   FILE_HEADERS,
   DIVISIONS,
   HALF_A,
@@ -30,6 +31,7 @@ import {
   SPRING_ROWS,
   TEAMS,
   fileCsv,
+  pinWorldClock,
   seedPracticeImportWorld,
 } from './helpers/practiceImportWorld.js';
 
@@ -108,9 +110,12 @@ const storedMapping = async () =>
     ?.practice_mapping;
 
 beforeEach(() => {
+  // the TIME TBD rebuild reads the date: pinned, so the answer does not change as the real date passes
+  pinWorldClock(vi);
   seedPracticeImportWorld();
 });
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -568,5 +573,31 @@ describe('Codex C5 and C6 on #732', () => {
     expect(step()).toMatch(/1 of 4/);
     expect(rpc.mock.calls.filter(([name]) => name === 'create_import_job')).toEqual([]);
     expect(await table('staging_import_rows')).toEqual([]);
+  });
+});
+
+describe('Codex C8 on #732', () => {
+  it('two teams the import creates, each short of its count, are named in the preview and the result', async () => {
+    const extra = [
+      { ...FILE_ROWS[10], Team: 'U12G-08', Subunit: '', Start: '13:00', End: '14:00' },
+      { ...FILE_ROWS[10], Team: 'U12G-09', Subunit: '', Start: '14:00', End: '15:00' },
+    ];
+    render(<ScheduleImportPanel kind="practices" />);
+    await toMapping(fileCsv([...FILE_ROWS, ...extra]));
+    decideEverything();
+    choose('U12G-08 (U12 Girls)', 'create');
+    choose('U12G-09 (U12 Girls)', 'create');
+    await toPreview();
+    const before = screen.getByTestId('practice-import-short').textContent;
+    expect(before).toMatch(/U12G-08: 1 practice short/);
+    expect(before).toMatch(/U12G-09: 1 practice short/);
+    expect(before).not.toMatch(/A team this import creates/);
+    fireEvent.click(checkbox(/Create the \d+ records listed above/));
+    fireEvent.click(button('Confirm and import'));
+    await waitFor(() => expect(step()).toMatch(/4 of 4/), { timeout: 5000 });
+    const after = screen.getByTestId('practice-import-result-short').textContent;
+    expect(after).toMatch(/U12G-08: 1 practice short/);
+    expect(after).toMatch(/U12G-09: 1 practice short/);
+    expect(after).not.toMatch(/A team this import creates/);
   });
 });

@@ -77,6 +77,18 @@ export const SEASON_ROW = Object.freeze({
   timezone: 'America/Los_Angeles',
 });
 
+/**
+ * The day the world is looked at. The TIME TBD rebuild counts only practices that end after today, so a test of this
+ * world that reads the date would change its answer as the real date passes the fall range (2026-12-21) or the season's
+ * end (2027-03-31). Every test of it pins the clock here (`pinWorldClock`), Date only, so timers stay real.
+ */
+export const WORLD_TODAY = '2026-11-13T12:00:00.000Z';
+
+/** @param {{ useFakeTimers: (options: any) => unknown }} vi */
+export function pinWorldClock(vi) {
+  vi.useFakeTimers({ toFake: ['Date'], now: new Date(WORLD_TODAY) });
+}
+
 /** The saved practice of U10B-03 (a solver run's, in the fall) that row 7 would move. */
 export const FALL_RANGE = '[2026-09-07,2026-12-21)';
 

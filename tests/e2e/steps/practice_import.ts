@@ -20,6 +20,12 @@ import { readPracticeAliases } from '../../../packages/core/src/practiceImport/i
 const { Given, When, Then } = createBdd();
 
 const FIXTURE_DIR = path.resolve(process.cwd(), 'fixtures/practice-schedule-2026');
+/**
+ * The day the browser is pinned to: inside the fixture's season (2026-09-07 to 2026-11-20), the day PR 10's
+ * tests/mockPracticeImport.test.js gives the mock. The TIME TBD rebuild counts only practices that end after today, so on
+ * the real date after the season's end every team would read short by all its practices (Codex on #732).
+ */
+const FIXTURE_TODAY = new Date('2026-11-13T12:00:00Z');
 const W = practicePgtapWorld();
 const FX = W.fixture;
 const PLANTS = countPlants({
@@ -146,6 +152,8 @@ Given(
       },
       { orgId: MOCK_ORG_ID, seasonId: MOCK_SEASON_ID, league: W.league, season: W.season }
     );
+    // pinned before the page loads again, so every date the page and its mock read is this one
+    await page.clock.setFixedTime(FIXTURE_TODAY);
     await page.reload();
     await waitForMockClient(page);
   }

@@ -706,9 +706,15 @@ export default function PracticeImportSteps(props) {
   }
 
   // ------------------------------------------------------------------------------------------------ shared lists
-  /** The name of a team the database names by id: the league's, else one this import creates. */
-  const teamName = (id) =>
-    league.teams.find((t) => String(t.id) === String(id))?.name ?? 'A team this import creates';
+  /**
+   * The name of a team the database names by id: the league's, else the name the dry run or the apply gives it in its
+   * `arriving` rows (a team this import creates is not in the league read before it; Codex on #732), else a sentence.
+   * @param {string} id @param {any} [r] the result the id comes from
+   */
+  const teamName = (id, r = preview) =>
+    league.teams.find((t) => String(t.id) === String(id))?.name ??
+    (r?.arriving ?? []).find((a) => String(a.team_id) === String(id) && a.team)?.team ??
+    'A team this import creates';
   /** @param {any} r */
   const flagLines = (r) =>
     (r?.flagged ?? []).map(
@@ -796,7 +802,7 @@ export default function PracticeImportSteps(props) {
             <ul className="text-sm text-text-secondary space-y-1 list-disc pl-5">
               {short.slice(0, NAMED).map((t) => (
                 <li key={t.team_id}>
-                  {`${teamName(t.team_id)}: ${plural(Number(t.missing_count), 'practice', 'practices')} short`}
+                  {`${teamName(t.team_id, r)}: ${plural(Number(t.missing_count), 'practice', 'practices')} short`}
                 </li>
               ))}
             </ul>

@@ -1891,7 +1891,10 @@ requirements of the PR 10 review and by this PR:
     (`too-many-columns`, by the parse in core and the mirror, and by the client before a job is made), never cut, so a
     Team past the cap cannot turn a placement into an open slot (C5; the games import cuts its header row at 200 the
     same way, a follow-up); every probable-move team has its own tick, the first 25 listed and "Show all N teams" for
-    the rest (C6); the stage
+    the rest (C6); a team the import creates is named on the TIME TBD list by the dry run's or the apply's own
+    `arriving` rows (C8); every test of PR 11 that reads the date pins it (the world's `pinWorldClock`, the E2E's
+    `page.clock.setFixedTime`; the TIME TBD rebuild counts only practices that end after today, so the E2E broke after
+    the fixture's 2026-11-20 end, C7); the stage
     answers `bad-date` only for `PracticeImportDateError` and audits and rethrows anything else; the words helper catches
     nothing; the header-to-column map is made once per file in core and the mirror; the clients share
     `utils/importClientCommon.js`; the panel's kind checks are `KINDS` fields (`Steps`, `takesDates`,

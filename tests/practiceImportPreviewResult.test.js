@@ -7,7 +7,7 @@
 //
 // Each count is required non-zero first: a count that is zero in both would compare nothing.
 import Papa from 'papaparse';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ALIAS_CSV,
   DIVISIONS,
@@ -19,6 +19,7 @@ import {
   TEAMS,
   VENUE_A,
   fileCsv,
+  pinWorldClock,
   seedPracticeImportWorld,
 } from './helpers/practiceImportWorld.js';
 
@@ -87,7 +88,12 @@ async function staged(rows) {
   return { jobId: started.jobId, proposal, choices, resolvedRows: resolved.rows, league };
 }
 
+afterEach(() => {
+  vi.useRealTimers();
+});
 beforeEach(() => {
+  // the TIME TBD rebuild reads the date: pinned, so the answer does not change as the real date passes
+  pinWorldClock(vi);
   seedPracticeImportWorld();
 });
 

@@ -65,6 +65,10 @@ export const PRACTICE_IMPORT_REASON = Object.freeze({
   SLOT_OVERLAPS_ANOTHER: 'slot-overlaps-another',
   DUPLICATE_ROW: 'duplicate-row',
 
+  // A row is listed and not written, judged by the database (PR 10): the slot the row names is saved already with
+  // another End, Capacity or Valid Until, and a saved slot is never changed by an import.
+  SLOT_DIFFERS: 'slot-differs',
+
   // A row of the alias file is listed and not read.
   BLANK_ALIAS: 'blank-alias',
   ALIAS_CONFLICT: 'alias-conflict',
@@ -118,6 +122,13 @@ export const PRACTICE_IMPORT_ROW_REFUSALS = Object.freeze([
   R.SLOT_OVERLAPS_ANOTHER,
   R.DUPLICATE_ROW,
 ]);
+
+/**
+ * Reasons a row is listed and not written that only the database can judge (PR 10): declared here so the screen has
+ * words for them; nothing in core produces them.
+ * @type {readonly string[]}
+ */
+export const PRACTICE_IMPORT_DATABASE_ROW_REFUSALS = Object.freeze([R.SLOT_DIFFERS]);
 
 /** Reasons a row of the alias file is listed and not read (the mapping's own reasons are shared).
  * @type {readonly string[]}
@@ -207,6 +218,8 @@ const DESCRIPTIONS = Object.freeze({
   [R.SLOT_OVERLAPS_ANOTHER]:
     'Two slots claim the same ground at overlapping times, or one slot is described two ways.',
   [R.DUPLICATE_ROW]: 'The same practice is already earlier in the file.',
+  [R.SLOT_DIFFERS]:
+    'The slot is saved already with another end, capacity or last date; an import never changes a saved slot.',
   [R.BLANK_ALIAS]: 'The alias row has no alias.',
   [R.ALIAS_CONFLICT]: 'The same alias names two different grounds, so neither is kept.',
   [R.TEAM_ON_BOTH_HALVES]: 'A team is on both halves of one field at the same time.',

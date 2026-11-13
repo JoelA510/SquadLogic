@@ -476,7 +476,12 @@ BEGIN
   -- names, asked of this same producer (`field_bookings`) in the DELETE itself. It has no `p_confirm` parameter, so it
   -- never deletes over a refusal and needs no prune; the loop below holds both facts (the producer's name in its
   -- definition, and exactly one deleter with a confirmation override).
-  IF v_deleters <> ARRAY['admin_delete_field','rollback_field_import_job','rollback_game_import_job'] THEN
+  --
+  -- **20261123010000 ARGUES the fourth and fifth.** `apply_practice_import_job` deletes, in the same transaction, a field it
+  -- has just created that no row of its file kept (and asks the producer first); `rollback_practice_import_job` deletes a
+  -- field the practice import created, and only that, when it is as the import left it, nothing references it in the
+  -- catalogue's foreign keys and the producer (`field_bookings`) returns nothing. Neither has a `p_confirm` parameter.
+  IF v_deleters <> ARRAY['admin_delete_field','apply_practice_import_job','rollback_field_import_job','rollback_game_import_job','rollback_practice_import_job'] THEN
     RAISE EXCEPTION
       'the set of functions deleting public.fields is now %. Every one of them must enumerate through public.field_bookings before it deletes.',
       v_deleters;

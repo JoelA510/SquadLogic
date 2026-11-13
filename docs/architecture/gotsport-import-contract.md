@@ -385,6 +385,32 @@ last wrote the row), `schedule_tbd.external_ref` and `schedule_tbd.game_date` (a
 nothing else: no players, no coach, no practice, in no team run). No birthdate, name of a person or contact is in the file's
 allowlist, and none is stored.
 
+## Practice schedule import — kept fields (`20261123010000`)
+
+A club that already has a practice schedule can bring it in as one flat CSV, one row per timed cell (plan
+`docs/changes/2026-11-03-schedule-expansion.md` 4.11; PR 9 is the parse, PR 10 the database, PR 11 the Edge validation and
+the Import panel's Practices tab). The `practice_schedule` type keeps **19 snake_case keys** per staged row and nothing else
+(`PRACTICE_SCHEDULE_IMPORT_KEYS` in `frontend/src/utils/importAllowlist.js`, its Edge twin, and
+`import_allowed_keys('practice_schedule')`; `tests/importAllowlistParity.test.js` holds the three equal to the keys the apply
+reads). Core's `toStagedPracticeRow` (`packages/core/src/practiceImport/staging.js`) is where a parsed row becomes them. A
+coach, an email, a phone or a note in the file is never read, so it is never staged.
+
+| Staged key(s)                                                        | Becomes                                   | Rule                                                                                            |
+| -------------------------------------------------------------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `row_key`                                                            | the row's name in the result's lists      | Made by the parse (`row-<n>`); never stored                                                     |
+| `status`                                                             | a practice, an open slot, or nothing      | `placement`, `open` (a slot and no practice) or `hold` (no slot; listed)                        |
+| `day`, `start_time`, `end_time`                                      | the slot's weekday and wall times         | `mon` to `sun`, `HH:mm`; no instant, no clock                                                   |
+| `valid_from`, `valid_until`                                          | the slot's dates and the practice's range | The row's, else the confirm step's, else the season's (the parse settles them); `[from, until]` |
+| `capacity`                                                           | the capacity of a slot the import makes   | 1 to 32767; a slot that exists keeps its own                                                    |
+| `flags`                                                              | a flag of the result                      | Only `division-not-reserved` (the parse's); the database judges the rest                        |
+| `division`, `location`, `field`, `subunit`, `team` and their `*_key` | the admin's decisions, by key             | A label as typed, and beside it the decision key core computes; the SQL matches by equality     |
+
+What is stored: `practice_assignments` rows (`source = 'manual'`, `assigned_via = 'manual'`, no run), `practice_slots`, and,
+only where the admin chose to create them, `divisions` (no age band), `locations` and `fields` (no coordinates, unknown
+lighting), `field_subunits` and team shells (a name and a division, no players, no coach). `Division` here names a team's
+division and **reserves nothing** (in the fields CSV it does). No name of a person or contact is in the file's allowlist,
+and none is stored.
+
 ## Dropped on import (never stored)
 
 Everything not listed above, including: guardian and parent names, emails,

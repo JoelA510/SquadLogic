@@ -10,7 +10,8 @@
  * lists equal to what the latest SQL finalizers read. Change both copies, and
  * the SQL, or none. Why an allowlist, and what each list holds: the Edge copy's
  * header, and docs/architecture/gotsport-import-contract.md. The practice preference (Phase D C1)
- *, evaluations (E3c) and games (PR 5) imports have short lists of their own and no declared fields.
+ *, evaluations (E3c), games (PR 5) and practice schedule (PR 10) imports have short lists of their own and no
+ * declared fields.
  */
 import { HEADER_ALIASES } from './telemetryUtils.js';
 
@@ -181,6 +182,37 @@ export const GAME_IMPORT_KEYS = Object.freeze([
   'away_key',
 ]);
 
+/**
+ * Keys `apply_practice_import_job` reads (PR 10 of the schedule expansion, plan 4.11.2 and 4.11.4): the STAGED payload
+ * of a practice schedule import, which `import-validation` (PR 11) builds with core's `toStagedPracticeRow` after the
+ * practice parser (`packages/core/src/practiceImport/parseRows.js`) has kept only the columns of plan 4.11.2: the
+ * status (a team's placement, an open slot or a hold), the weekday, the wall times, the two dates, the capacity, the
+ * division, location, field, subunit and team labels (each with the decision key the mapping step uses), and the
+ * parse's one staged flag. Payload keys, not file headers: nothing else of the file (a coach, an email, a phone, a
+ * note) is ever read or staged. A practice file declares no fields of the organization's.
+ */
+export const PRACTICE_SCHEDULE_IMPORT_KEYS = Object.freeze([
+  'row_key',
+  'status',
+  'day',
+  'start_time',
+  'end_time',
+  'valid_from',
+  'valid_until',
+  'capacity',
+  'flags',
+  'division',
+  'division_key',
+  'location',
+  'location_key',
+  'field',
+  'field_key',
+  'subunit',
+  'subunit_key',
+  'team',
+  'team_key',
+]);
+
 /** The import types the allowlist applies to, and the schema entity each declares fields for. */
 export const ALLOWLIST_ENTITY_TYPES = Object.freeze({
   players: 'player',
@@ -193,6 +225,7 @@ const KEYS_BY_TYPE = Object.freeze({
   coaches: COACH_IMPORT_KEYS,
   evaluations: EVALUATION_IMPORT_KEYS,
   games: GAME_IMPORT_KEYS,
+  practice_schedule: PRACTICE_SCHEDULE_IMPORT_KEYS,
   // No declared fields: a preference file has no entity in Settings, so only these keys are kept.
   practice_preferences: PRACTICE_PREFERENCE_IMPORT_KEYS,
 });

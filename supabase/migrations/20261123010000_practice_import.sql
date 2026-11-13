@@ -536,8 +536,10 @@ BEGIN
                 IF v_action IS NULL OR v_action NOT IN ('map', 'create', 'skip') THEN
                     RAISE EXCEPTION 'a decision of % is not one of its actions (map, create, skip)', v_group USING ERRCODE = '22023';
                 END IF;
-                v_source := COALESCE(v_decision ->> 'source', 'admin');
-                IF jsonb_typeof(COALESCE(v_decision -> 'source', '"admin"'::jsonb)) <> 'string' OR NOT (v_source = ANY (c_sources)) THEN
+                -- No source is the admin's own word (c_sources[4]; written by index so this body names no role list:
+                -- supabase/tests/staff_is_admin.sql reads every parenthesised list that names that word as a role list).
+                v_source := COALESCE(v_decision ->> 'source', c_sources[4]);
+                IF (v_decision ? 'source' AND jsonb_typeof(v_decision -> 'source') <> 'string') OR NOT (v_source = ANY (c_sources)) THEN
                     RAISE EXCEPTION 'a decision''s source is one of exact, alias, previous, admin' USING ERRCODE = '22023';
                 END IF;
                 v_name := NULLIF(btrim(v_decision ->> 'name', E' \t\r\n'), '');
@@ -1098,7 +1100,7 @@ BEGIN
         IF cardinality(v_shell_arr) > 0 THEN
             -- The pages read the LATEST team run (`mapSchedulerRunToSummary` reads `results.teamsByDivision`), so the run is
             -- the latest completed run's results carried forward whole, with each division's shells added to it (lesson 104;
-            -- copied from apply_game_import_job, 20261122010000).
+            -- copied from apply_game_import_job's latest body).
             SELECT sr.results INTO v_base
               FROM public.scheduler_runs sr
              WHERE sr.organization_id = v_org AND sr.run_type = 'team' AND sr.status = 'completed'
@@ -1492,7 +1494,7 @@ BEGIN
 
     -- The import's team run: deleted when every shell it carries is gone and nothing names it; a run that stays is retired
     -- (status failed, rolled_back) only when it carries no kept shell, and trimmed of the shells that are gone (the games
-    -- import's rule, 20261122010000: a reader of a kept run is never shown a team that no longer exists).
+    -- import's rule in rollback_game_import_job: a reader of a kept run is never shown a team that no longer exists).
     DELETE FROM public.scheduler_runs sr
      WHERE sr.organization_id = v_org AND sr.run_type = 'team' AND sr.parameters ->> 'import_job_id' = p_import_job_id::text
        AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(sr.parameters -> 'shell_ids', '[]'::jsonb)) sid

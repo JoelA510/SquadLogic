@@ -45,25 +45,23 @@ function losAngelesInstant(date: string, hour: number): string {
 /**
  * Two played games of the saved schedule (F11-3: Scores and Standings list the season's saved games, not the legacy
  * `games` table): Team A at home to Team B yesterday, scored 2 to 1, and again an hour ago, not scored yet. They are
- * rows of `game_assignments` in the seed's completed game run, and the score is a row of `game_scores`.
+ * rows of `game_assignments` in the mock seed's completed game run (`run-game-1`), and the score is a row of
+ * `game_scores`.
+ *
+ * Written by an init script, on every page load, after any the feature registered before it: a feature's Background
+ * can rewrite the stored database on each load (reporting.feature's "there is an active season" does), and a row put
+ * there once by `page.evaluate` would be gone at the next navigation. A row already there is left as it is, so a
+ * score entered on the page survives the next load.
  */
 async function seedPlayedGames(page: Page) {
-  await openMock(page);
-  await page.evaluate((mockOrgId) => {
-    const db = JSON.parse(
-      sessionStorage.getItem('__MOCK_DB__') || JSON.stringify(window.__MOCK_DB__ || {})
-    );
+  await page.addInitScript((mockOrgId) => {
+    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
-    const run = (db.scheduler_runs || []).find(
-      (r: MockRow) =>
-        r.organization_id === orgId && r.run_type === 'game' && r.status === 'completed'
-    );
-    if (!run) throw new Error('seed: the mock db has no completed game run');
     const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
     const game = (id: string, startedAgo: number) => ({
       id,
       organization_id: orgId,
-      run_id: run.id,
+      run_id: 'run-game-1',
       home_team_id: 't1',
       away_team_id: 't2',
       week_index: 1,
@@ -72,26 +70,29 @@ async function seedPlayedGames(page: Page) {
       assignment_source: 'auto',
       published: false,
     });
-    const ids = ['ga-e2e-played-1', 'ga-e2e-played-2'];
-    db.game_assignments = (db.game_assignments || []).filter(
-      (g: MockRow) => !ids.includes(String(g.id))
-    );
-    db.game_assignments.push(game(ids[0], 86_400_000), game(ids[1], 3_600_000));
-    db.game_scores = (db.game_scores || []).filter(
-      (s: MockRow) => !ids.includes(String(s.game_id))
-    );
-    db.game_scores.push({
-      game_id: ids[0],
-      organization_id: orgId,
-      home_team_id: 't1',
-      away_team_id: 't2',
-      score_home: 2,
-      score_away: 1,
-      created_at: ago(80_000_000),
-      updated_at: ago(80_000_000),
-      updated_by: null,
-    });
-    window.__saveMockDB__(db);
+    db.game_assignments = db.game_assignments || [];
+    for (const [id, startedAgo] of [
+      ['ga-e2e-played-1', 86_400_000],
+      ['ga-e2e-played-2', 3_600_000],
+    ] as const) {
+      if (!db.game_assignments.some((g: MockRow) => g.id === id))
+        db.game_assignments.push(game(id, startedAgo));
+    }
+    db.game_scores = db.game_scores || [];
+    if (!db.game_scores.some((s: MockRow) => s.game_id === 'ga-e2e-played-1')) {
+      db.game_scores.push({
+        game_id: 'ga-e2e-played-1',
+        organization_id: orgId,
+        home_team_id: 't1',
+        away_team_id: 't2',
+        score_home: 2,
+        score_away: 1,
+        created_at: ago(80_000_000),
+        updated_at: ago(80_000_000),
+        updated_by: null,
+      });
+    }
+    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
   }, MOCK_ORG_ID);
 }
 

@@ -342,9 +342,12 @@ export async function generateMasterExport(
   // The practice rows the files hold, as the caller handed them over, filtered exactly as `buildExportPayload`
   // filters them (never a row it dropped): what the page counts a practice's unshown changes over.
   const exportTeamIds = new Set(payload.teams.map((team) => String(team.id)));
-  const exportedPractices = (practiceAssignments ?? []).filter((assignment) => {
-    const exported = normalizePracticeForExport(assignment);
-    return exported && exportTeamIds.has(String(exported.teamId));
-  });
+  // Called as the panel called it: a caller that hands over no practice array fails here, as it always did.
+  const exportedPractices = /** @type {Array<Object>} */ (practiceAssignments).filter(
+    (assignment) => {
+      const exported = normalizePracticeForExport(assignment);
+      return exported && exportTeamIds.has(String(exported.teamId));
+    }
+  );
   return { status: 'generated', payload, exports, tbd, exportedPractices };
 }

@@ -259,9 +259,9 @@ export function ImportProvider({ children }) {
   const hydrateReadyImportJob = useCallback(
     /**
      * @param {any} job
-     * @param {<T>(pending: Promise<T>) => Promise<T>} [live] - the caller's guard: throws once the load is stale
+     * @param {<T>(pending: PromiseLike<T>) => Promise<T>} [live] - the caller's guard: throws once the load is stale
      */
-    async (job, live = (pending) => pending) => {
+    async (job, live = async (pending) => pending) => {
       const { buildDeferredImportDataFromJob } = await live(
         import('../utils/importDeferredActions.js')
       );
@@ -394,7 +394,7 @@ export function ImportProvider({ children }) {
     // A load still answering for an organization that is no longer the current one writes nothing (review R5): every
     // await of the load goes through `live`, which throws STALE_LOAD once another organization is current.
     const loadingFor = currentOrganization?.id ?? null;
-    /** @type {<T>(pending: Promise<T>) => Promise<T>} */
+    /** @type {<T>(pending: PromiseLike<T>) => Promise<T>} */
     const live = async (pending) => {
       const value = await pending;
       if (currentOrgRef.current !== loadingFor) throw STALE_LOAD;

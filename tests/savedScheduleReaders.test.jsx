@@ -302,7 +302,9 @@ describe('the team page and the feed show the same games (F11-3 review R6, R8)',
     expect(readFailures).toEqual([]);
     return events
       .filter((event) => event.title?.startsWith('Game'))
-      .map((event) => [event.uid, event.dtstart ?? null, event.dtend ?? null])
+      .map((event) =>
+        event.kind === 'timed' ? [event.uid, event.dtstart, event.dtend] : [event.uid, null, null]
+      )
       .sort();
   }
   /** The team page's games of a team, as instants in the feed's spelling. */

@@ -133,6 +133,7 @@ describe('R5: a load for the old organization writes nothing, wherever it was wa
   it('a switch while a ready job is being hydrated leaves nothing of the old organization', async () => {
     seed({ status: 'ready_to_apply', job_type: 'evaluations' });
     const realRpc = mockSupabase.rpc.bind(mockSupabase);
+    /** @type {(value?: unknown) => void} */
     let release = () => {};
     const held = new Promise((resolve) => (release = resolve));
     let reached = false;

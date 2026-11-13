@@ -15,9 +15,9 @@ describe.each(GAME_END_CASES)('$name', ({ game, feedStart, feedEnd, pageEnd }) =
     const [event] = buildFeedEvents({
       teamName: 'Tigers',
       timezone: GAME_END_TIMEZONE,
-      games: [game],
+      games: [/** @type {any} */ (game)],
     });
-    expect(event.kind).toBe('timed');
+    if (event.kind !== 'timed') throw new Error(`not placed: ${JSON.stringify(event)}`);
     expect([event.dtstart, event.dtend]).toEqual([feedStart, feedEnd]);
     expect(event.dtend >= event.dtstart).toBe(true);
   });

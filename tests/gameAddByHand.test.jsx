@@ -1245,6 +1245,91 @@ describe('review of #731, round 2: the added game on the grid, judged where it i
   });
 });
 
+describe('Codex re-review of #731, round 3', () => {
+  it('a date earlier in the season start’s own week is before the season starts (C6); the start date itself is week 1', () => {
+    const choice = (date) => ({
+      division: 'U10',
+      homeTeamId: 'team-1',
+      awayTeamId: 'team-3',
+      where: 'new',
+      fieldId: 'f-south',
+      date,
+      startTime: '11:00',
+      endTime: '12:00',
+    });
+    // The season starts on a Wednesday; the Monday of that week rounds to week 1 but is before the season.
+    const ctx = { ...context({ review: [] }), seasonStart: '2026-09-30' };
+    expect(planAddedGame(choice('2026-09-28'), ctx)).toEqual({
+      refusal: '2026-09-28 is before the season starts (2026-09-30), so it has no week.',
+    });
+    // Control: the start date itself is the season's first day, week 1.
+    const onStart = planAddedGame(choice('2026-09-30'), ctx);
+    if (!('game' in onStart)) throw new Error(`the start date was refused: ${onStart.refusal}`);
+    expect(onStart.game.weekIndex).toBe(1);
+  });
+
+  it('after Auto-Generate, a game added by hand is counted in the saved summary (C7)', async () => {
+    await mount();
+    const generate = await screen.findByRole('button', {
+      name: 'Auto-Generate: run auto-scheduler optimization',
+    });
+    await waitFor(() => expect(generate).toBeEnabled());
+    fireEvent.click(generate);
+    const staged = await screen.findByText(/(\d+) game assignments? staged for review/);
+    const generated = Number(/(\d+) game assignment/.exec(staged.textContent ?? '')?.[1]);
+    expect(generated).toBeGreaterThan(0);
+    await stage({
+      home: 'team-2',
+      away: 'team-4',
+      where: { field: 'f-north', date: '2026-10-24', start: '09:00', end: '10:00' },
+    });
+    await apply();
+    await screen.findByText(/Game schedule applied through the persistence workflow\./);
+    const { assignments, runMetadata } = SAVE.calls[0];
+    const summary = runMetadata.results.summary;
+    expect(assignments).toHaveLength(generated + 1);
+    expect(summary.totalGames).toBe(generated + 1);
+    expect(summary.scheduledRate).toBeCloseTo(
+      summary.totalGames / (summary.totalGames + summary.unscheduledMatchups)
+    );
+  });
+
+  it('a slot another admin made after the page loaded: the saved game still has its card in Manual Override (C8)', async () => {
+    const real = mockSupabase.rpc.bind(mockSupabase);
+    // The database finds the slot (another admin made it a moment ago): created false, and the page never read it.
+    vi.spyOn(mockSupabase, 'rpc').mockImplementation(async (name, params) => {
+      const result = await real(name, params);
+      return name === 'ensure_game_slot' && result.data
+        ? { ...result, data: { ...result.data, created: false } }
+        : result;
+    });
+    await mount();
+    await stage({
+      home: 'team-2',
+      away: 'team-4',
+      where: { field: 'f-south', date: '2026-10-31', start: '13:00', end: '14:00' },
+    });
+    await apply();
+    await screen.findByText(/Game schedule applied through the persistence workflow\./);
+    await waitFor(() => expect(orgGames()).toHaveLength(3));
+    const made = orgSlots().find((slot) => slot.slot_date === '2026-10-31');
+    const saved = orgGames().find((g) => g.home_team_id === 'team-2');
+    expect(saved.game_slot_id).toBe(made.id);
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Manual Override' }));
+    await screen.findByTestId('game-schedule-grid');
+    // Every saved game has its card, the new one in its slot's cell.
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId(`drop-zone-f-south:${made.id}`)).getByTestId(
+          `game-card-${saved.id}`
+        )
+      ).toBeInTheDocument()
+    );
+    expect(screen.getByTestId(`game-card-${G1}`)).toBeInTheDocument();
+    expect(screen.getByTestId(`game-card-${G2}`)).toBeInTheDocument();
+  });
+});
+
 /** The page's context for the pure rule, over the league above. */
 function context({ review }) {
   const names = new Map([

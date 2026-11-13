@@ -1754,17 +1754,20 @@ export default function GameSchedulingPage() {
     // A game added by hand at a new time needs its slot first: found or made by the database, which also says
     // whether that slot holds a game (refused here, before anything is saved).
     //
-    // The slots this Apply makes, by id, read into the grid's slots before the save. The list is not put back to the
-    // schedule before the save by that read: it keeps the applied review while the saved rows are stale (the effect
-    // guarded by `savedIsStale`; review of #731).
+    // The slots of this Apply the grid does not hold, by id, read into the grid's slots before the save: the ones it
+    // makes, and one the database already had that this page has not read (another admin made it after the page loaded;
+    // Codex re-review of #731, C8), or the saved game's card would have no row until a reload. The list is not put back
+    // to the schedule before the save by that read: it keeps the applied review while the saved rows are stale (the
+    // effect guarded by `savedIsStale`; review of #731).
+    const knownSlotRowIds = new Set(gameSlotRows.map((row) => String(row.id)));
     /** @type {string[]} */
-    const madeIds = [];
-    const readMadeSlots = async () => {
-      if (madeIds.length === 0) return;
+    const slotIdsToRead = [];
+    const readResolvedSlots = async () => {
+      if (slotIdsToRead.length === 0) return;
       const { data, error } = await supabase
         .from('game_slots')
         .select('*, divisions(id, name)')
-        .in('id', madeIds);
+        .in('id', slotIdsToRead);
       if (error) throw error;
       const fresh = new Set((data ?? []).map((row) => String(row.id)));
       setGameSlotRows((rows) => [
@@ -1794,10 +1797,8 @@ export default function GameSchedulingPage() {
             );
           }
           ensuredSlotIdsRef.current.add(String(data.id));
-          if (data.created) {
-            madeIds.push(String(data.id));
-            return data;
-          }
+          if (!knownSlotRowIds.has(String(data.id))) slotIdsToRead.push(String(data.id));
+          if (data.created) return data;
           // A slot it already had: its result is the id alone, so the slot is read back to be compared.
           const { data: row, error: readError } = await supabase
             .from('game_slots')
@@ -1818,12 +1819,14 @@ export default function GameSchedulingPage() {
       setApplyStatus('error');
       setApplyError(withLeftSlots(err instanceof Error ? err.message : String(err), made));
       // Best effort: the grid learns of the slots made; the error above already names them.
-      await readMadeSlots().catch((readErr) => logger.warn('Made slots not read back', readErr));
+      await readResolvedSlots().catch((readErr) =>
+        logger.warn('Made slots not read back', readErr)
+      );
       return;
     }
     const review = resolved.review;
     try {
-      await readMadeSlots();
+      await readResolvedSlots();
     } catch (err) {
       setApplyStatus('error');
       setApplyError(
@@ -1836,11 +1839,22 @@ export default function GameSchedulingPage() {
       return;
     }
 
+    // The summary of the games actually saved (Codex re-review of #731, C7): a generated review's own summary does not
+    // count a game added by hand. The generator's byes and unscheduled games stay; with no generation the save makes it
+    // from the games itself, as it always did.
+    const finalSummary = schedulerResult
+      ? summarizeGameResult({
+          assignments: review,
+          byes: schedulerResult.byes ?? [],
+          unscheduled: schedulerResult.unscheduled ?? [],
+        })
+      : undefined;
+
     try {
       const { result } = await persistReviewedAssignments({
         assignments: review,
         generationMode: 'round-robin',
-        resultSummary: schedulerResult?.summary,
+        resultSummary: finalSummary,
         resultDetails: schedulerResult,
         knownSlotIds: ensuredSlotIdsRef.current,
         extraWarnings: addedGameWarnings,
@@ -1856,21 +1870,24 @@ export default function GameSchedulingPage() {
         }))
       );
       setReviewAssignments(null);
-      // The saved run now records the added games' flags with the generator's (C3, review of #731): a generated review's
-      // snapshot is what the banner reads after Apply, so it carries them too.
-      if (addedGameWarnings.length > 0) {
-        setSchedulerResult((current) =>
-          current?.evaluation
-            ? {
-                ...current,
-                evaluation: {
-                  ...current.evaluation,
-                  warnings: [...(current.evaluation.warnings ?? []), ...addedGameWarnings],
-                },
-              }
-            : current
-        );
-      }
+      // A generated review's result is what the banner and the readiness panel read after Apply, so it is brought to
+      // what the run saved: the summary of the final games (C7) and the added games' flags with the generator's (C3).
+      setSchedulerResult((current) =>
+        current
+          ? {
+              ...current,
+              summary: finalSummary ?? current.summary,
+              ...(current.evaluation && addedGameWarnings.length > 0
+                ? {
+                    evaluation: {
+                      ...current.evaluation,
+                      warnings: [...(current.evaluation.warnings ?? []), ...addedGameWarnings],
+                    },
+                  }
+                : {}),
+            }
+          : current
+      );
       setApplyStatus('applied');
       // A game moved, flipped or regenerated keeps its id, its Published state and its history (the save updates it
       // in place). A game that had a Published history and that the new schedule no longer holds stays in the old run
@@ -1903,6 +1920,7 @@ export default function GameSchedulingPage() {
     currentOrganization?.id,
     fieldNameOf,
     game?.runId,
+    gameSlotRows,
     localAssignments,
     markSavedStale,
     persistReviewedAssignments,

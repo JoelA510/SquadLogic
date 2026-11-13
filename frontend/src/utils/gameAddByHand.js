@@ -251,6 +251,13 @@ export function planAddedGame(choice, ctx) {
             'The season has no start date, so the week of a new time cannot be worked out. Choose an open slot, or set the season’s start date first.',
         };
       }
+      // The date itself against the season's start, first: the week rounds back to the Monday, so a date earlier in the
+      // start's own week would otherwise be given week 1 (Codex re-review of #731, C6; the import compares the same way).
+      if (choice.date < ctx.seasonStart) {
+        return {
+          refusal: `${choice.date} is before the season starts (${ctx.seasonStart}), so it has no week.`,
+        };
+      }
       const weekIndex = scheduleWeekOf(choice.date, ctx.seasonStart);
       if (weekIndex < 1) {
         return {

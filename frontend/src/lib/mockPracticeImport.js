@@ -124,6 +124,22 @@ export const PRACTICE_IMPORT_REFERENCES = Object.freeze({
   ],
 });
 
+/** Every table the plan writes (and so copies for a dry run); `tests/mockPracticeImport.test.js` holds it to the writes. */
+export const PRACTICE_IMPORT_WRITTEN_TABLES = Object.freeze([
+  'import_jobs',
+  'divisions',
+  'locations',
+  'fields',
+  'field_subunits',
+  'teams',
+  'practice_slots',
+  'practice_assignments',
+  'scheduler_runs',
+  'import_application_records',
+  'schedule_tbd',
+  'audit_log',
+]);
+
 const same = (a, b) =>
   a != null && b != null && String(a).toLowerCase() === String(b).toLowerCase();
 const fail = (code, message, details) => ({
@@ -368,7 +384,7 @@ export function mockSyncScheduleTbdPractices(db, org, season, today, newId, stam
   };
 }
 
-/** The SQL's `practice_import_referenced(table, id)`, over the list of keys above. */
+/** The SQL's `practice_import_referenced_ids(table, ids)` for one id, over the list of keys above. */
 export function mockPracticeImportReferenced(db, table, id) {
   return (PRACTICE_IMPORT_REFERENCES[table] ?? []).some(([child, column]) =>
     (db[child] || []).some(
@@ -582,7 +598,19 @@ function applyJob(db, job, dry, ctx, env) {
     return fail('22023', `Import job ${job.id} is already ${job.status}`);
   }
   if (['failed', 'needs_fix'].includes(job.status)) {
-    return fail('22023', `Import job ${job.id} cannot be applied: a new file is a new job`);
+    return fail(
+      '22023',
+      `Import job ${job.id} cannot be applied: a new file is a new job`,
+      'import_not_ready_to_apply'
+    );
+  }
+  // Only a job whose staging finished is applied (the SQL judges this after its locks; the mock has none).
+  if (job.status !== 'ready_to_apply') {
+    return fail(
+      '22023',
+      `Import job ${job.id} is ${job.status}, not ready_to_apply: stage the whole file first`,
+      'import_not_ready_to_apply'
+    );
   }
   const season = jobSeason(db, job);
   if (!season)
@@ -608,11 +636,14 @@ function applyJob(db, job, dry, ctx, env) {
       'mapping_required'
     );
 
-  // The one code path: on a copy. A dry run drops it (the SQL's sentinel); an apply puts it in place.
-  const work = structuredClone(db);
+  // The one code path: on a copy of the tables the plan writes (the others are read as they are). A dry run drops the copy
+  // (the SQL's sentinel); an apply puts it in place.
+  const work = { ...db };
+  for (const table of PRACTICE_IMPORT_WRITTEN_TABLES)
+    work[table] = structuredClone(db[table] ?? []);
   const done = planAndWrite(work, job.id, season, map, ctx, env);
   if (done.error) return done;
-  if (!dry) for (const k of Object.keys(work)) db[k] = work[k];
+  if (!dry) for (const table of PRACTICE_IMPORT_WRITTEN_TABLES) db[table] = work[table];
   return {
     data: { ...done.result, dry_run: dry, ids: { team_run_id: dry ? null : done.teamRunId } },
     error: null,
@@ -1098,6 +1129,23 @@ function planAndWrite(db, jobId, season, map, ctx, env) {
           cmp(String(a.id), String(b.id))
       )[0];
     if (found) {
+      // A slot that is found is never changed: a row that describes it otherwise is refused, naming what differs.
+      const differs = [
+        clock(found.end_time) !== f.end
+          ? `its end is ${clock(found.end_time)}, the row's ${f.end}`
+          : null,
+        (found.capacity ?? 1) !== f.capacity
+          ? `its capacity is ${found.capacity ?? 1}, the row's ${f.capacity}`
+          : null,
+        (found.valid_until ?? null) !== f.until
+          ? `its last date is ${found.valid_until ?? 'open'}, the row's ${f.until}`
+          : null,
+      ].filter(Boolean);
+      if (differs.length > 0) {
+        g.differs_id = found.id;
+        g.differs = differs.join('; ');
+        continue;
+      }
       g.slot_id = found.id;
       continue;
     }
@@ -1135,6 +1183,18 @@ function planAndWrite(db, jobId, season, map, ctx, env) {
     (db.practice_slots = db.practice_slots || []).push(row);
     g.slot_id = row.id;
     g.created = true;
+  }
+  for (const g of groups.values()) {
+    if (!g.differs_id) continue;
+    for (const r of okRows().filter(
+      (x) => (x.status === 'placement' || x.status === 'open') && gkey(x) === g.key
+    )) {
+      Object.assign(r, {
+        outcome: 'refused',
+        reason: 'slot-differs',
+        message: `The slot this row names is saved already (${g.differs_id}) and differs: ${g.differs}. An import never changes a saved slot: change the slot on Field Management, or make the row match it.`,
+      });
+    }
   }
   for (const g of groups.values()) {
     if (!g.clash_id) continue;
@@ -1208,14 +1268,45 @@ function planAndWrite(db, jobId, season, map, ctx, env) {
   );
   const matched = new Set(asg.filter((a) => a.existing_id).map((a) => String(a.existing_id)));
   const slotById = new Map((db.practice_slots || []).map((s) => [String(s.id), s]));
+  // The file's span for each team it places: its first to its last date (inclusive day numbers).
+  const span = new Map();
+  for (const a of asg) {
+    const r = rangeOf(a.rng);
+    const k = String(a.team_ref).toLowerCase();
+    const was = span.get(k);
+    span.set(
+      k,
+      was
+        ? { lo: Math.min(was.lo, r.lo), hi: Math.max(was.hi, r.hi - 1) }
+        : { lo: r.lo, hi: r.hi - 1 }
+    );
+  }
+  /** A saved practice's live days: its range cut to its slot's validity (an open bound is open). */
+  const liveOf = (pa, ps) => {
+    const r = rangeOf(pa.effective_date_range);
+    const lows = [r?.lo ?? null, ps.valid_from ? toDay(ps.valid_from) : null].filter(
+      (v) => v !== null
+    );
+    const highs = [
+      r && r.hi !== null ? r.hi - 1 : null,
+      ps.valid_until ? toDay(ps.valid_until) : null,
+    ].filter((v) => v !== null);
+    return {
+      lo: lows.length ? Math.max(...lows) : -Infinity,
+      hi: highs.length ? Math.min(...highs) : Infinity,
+    };
+  };
+  const meets = (x, y) => x.lo <= y.hi && y.lo <= x.hi;
   const leave = (db.practice_assignments || [])
-    .filter(
-      (pa) =>
-        same(pa.organization_id, org) &&
-        seasonTeams.has(String(pa.team_id).toLowerCase()) &&
-        slotById.has(String(pa.practice_slot_id)) &&
-        !matched.has(String(pa.id))
-    )
+    .filter((pa) => {
+      if (!same(pa.organization_id, org) || !seasonTeams.has(String(pa.team_id).toLowerCase()))
+        return false;
+      if (!slotById.has(String(pa.practice_slot_id)) || matched.has(String(pa.id))) return false;
+      if (isEmptyRange(rangeOf(pa.effective_date_range))) return false;
+      const live = liveOf(pa, slotById.get(String(pa.practice_slot_id)));
+      const sp = span.get(String(pa.team_id).toLowerCase());
+      return live.lo <= live.hi && sp !== undefined && meets(live, sp);
+    })
     .map((pa) => {
       const ps = slotById.get(String(pa.practice_slot_id));
       return {
@@ -1228,11 +1319,17 @@ function planAndWrite(db, jobId, season, map, ctx, env) {
         field_id: ps.field_id,
         field_subunit_id: ps.field_subunit_id ?? null,
         rng: pa.effective_date_range ?? null,
+        live: liveOf(pa, slotById.get(String(pa.practice_slot_id))),
       };
     });
-  const leavingTeams = new Set(leave.map((l) => String(l.team_id).toLowerCase()));
+  // A probable move: a new row of a team with a row leaving on a date the new row is live too.
   for (const a of asg) {
-    if (a.existing_id === null && leavingTeams.has(String(a.team_ref).toLowerCase())) {
+    const r = rangeOf(a.rng);
+    const mine = { lo: r.lo, hi: r.hi - 1 };
+    if (
+      a.existing_id === null &&
+      leave.some((l) => same(l.team_id, a.team_ref) && meets(l.live, mine))
+    ) {
       a.probable_move = true;
       a.held_back = !add.has(a.row_key);
     }
@@ -1423,14 +1520,19 @@ function planAndWrite(db, jobId, season, map, ctx, env) {
           const rb = rangeOf(pb.effective_date_range);
           if (isEmptyRange(rb)) continue;
           const lo = Math.max(
+            // each practice's range cut to its OWN slot's validity (the gate's rule), and both coach assignments
             ra.lo,
-            rb?.lo ?? (pbs.valid_from ? toDay(pbs.valid_from) : -Infinity),
+            ps.valid_from ? toDay(ps.valid_from) : -Infinity,
+            rb?.lo ?? -Infinity,
+            pbs.valid_from ? toDay(pbs.valid_from) : -Infinity,
             toDay(ca.effective_from),
             toDay(cb.effective_from)
           );
           const hi = Math.min(
             ra.hi - 1,
-            rb && rb.hi !== null ? rb.hi - 1 : pbs.valid_until ? toDay(pbs.valid_until) : Infinity,
+            ps.valid_until ? toDay(ps.valid_until) : Infinity,
+            rb && rb.hi !== null ? rb.hi - 1 : Infinity,
+            pbs.valid_until ? toDay(pbs.valid_until) : Infinity,
             ca.effective_to ? toDay(ca.effective_to) : Infinity,
             cb.effective_to ? toDay(cb.effective_to) : Infinity
           );
@@ -1487,7 +1589,11 @@ function planAndWrite(db, jobId, season, map, ctx, env) {
     }
   }
   for (const r of okRows().filter(
-    (x) => x.status === 'hold' && x.fld_ref && db.fields.some((f) => same(f.id, x.fld_ref))
+    (x) =>
+      x.status === 'hold' &&
+      x.fld_ref &&
+      db.fields.some((f) => same(f.id, x.fld_ref)) &&
+      (!x.sub_ref || db.field_subunits.some((su) => same(su.id, x.sub_ref)))
   )) {
     const over = mockPracticeSlotConflicts(
       db,
@@ -1633,7 +1739,15 @@ function planAndWrite(db, jobId, season, map, ctx, env) {
       })),
     holds: okRows()
       .filter((r) => r.status === 'hold')
-      .map((r) => ({ row: r.rowno, row_key: r.row_key, ground_known: Boolean(r.fld_ref) })),
+      .map((r) => ({
+        row: r.rowno,
+        row_key: r.row_key,
+        // The ground must stand after the plan (a field or half never made, or taken out again, is none).
+        ground_known:
+          Boolean(r.fld_ref) &&
+          db.fields.some((x) => same(x.id, r.fld_ref)) &&
+          (!r.sub_ref || db.field_subunits.some((x) => same(x.id, r.sub_ref))),
+      })),
     time_tbd: {
       practice_rows: tbd.practice_rows,
       missing_practices: tbd.missing_practices,

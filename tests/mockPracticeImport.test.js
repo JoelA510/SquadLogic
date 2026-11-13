@@ -23,6 +23,7 @@ import { describe, expect, it } from 'vitest';
 import {
   handlePracticeImportRpc,
   mockPracticeImportReferenced,
+  PRACTICE_IMPORT_WRITTEN_TABLES,
   PRACTICE_IMPORT_REFERENCES,
 } from '../frontend/src/lib/mockPracticeImport.js';
 import { pairProbableMoves } from '../packages/core/src/practiceImport/index.js';
@@ -462,6 +463,342 @@ describe('a probable move is held back until it is ticked, and pairs as core pai
       1,
       true,
     ]);
+  });
+});
+
+describe('the review round, through the mock and held to the pgTAP file (section 7b and the job status)', () => {
+  const U = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  const SEASON_DATES = { season_start: '2026-09-07', season_end: '2026-11-20' };
+  const key = (s) => s.trim().toLowerCase();
+  const k2 = (a, b) => JSON.stringify([key(a), key(b)]);
+  const k3 = (a, b, c) => JSON.stringify([key(a), key(b), key(c)]);
+  /** The pgTAP file's J7 world: three coached teams, two moved teams, and the H ground. */
+  function world() {
+    const slot = (id, field, day, start, end, from, until) => ({
+      id,
+      organization_id: ORG,
+      field_id: field,
+      field_subunit_id: null,
+      day_of_week: day,
+      start_time: `${start}:00`,
+      end_time: `${end}:00`,
+      capacity: 1,
+      valid_from: from,
+      valid_until: until,
+      created_at: '2026-01-01T00:00:00Z',
+    });
+    const pa = (id, team, slotId, rng) => ({
+      id,
+      organization_id: ORG,
+      team_id: team,
+      practice_slot_id: slotId,
+      slot_id: slotId,
+      effective_date_range: rng,
+      source: 'manual',
+      assigned_via: 'manual',
+      run_id: null,
+    });
+    const db = {
+      season_settings: [{ id: SEASON, organization_id: ORG, status: 'active', ...SEASON_DATES }],
+      divisions: [
+        {
+          id: U(920),
+          organization_id: ORG,
+          season_settings_id: SEASON,
+          name: 'C Div',
+          practices_per_week: 1,
+        },
+      ],
+      teams: ['CX', 'CY', 'CZ', 'FT', 'MT'].map((name, i) => ({
+        id: U(921 + i),
+        organization_id: ORG,
+        division_id: U(920),
+        name,
+        is_external: false,
+      })),
+      team_coach_assignments: [921, 922, 923].map((t) => ({
+        id: `k${t}`,
+        team_id: U(t),
+        coach_id: U(926),
+        effective_from: '2026-09-07',
+        effective_to: null,
+      })),
+      locations: [{ id: U(910), organization_id: ORG, name: 'Before Park' }],
+      fields: [
+        { id: U(911), organization_id: ORG, location_id: U(910), name: 'Before Field' },
+        { id: U(913), organization_id: ORG, location_id: U(910), name: 'Coach Field' },
+      ],
+      field_subunits: [],
+      practice_slots: [
+        slot(U(930), U(911), 'tue', '07:00', '08:00', '2026-10-01', '2026-11-20'),
+        slot(U(931), U(913), 'tue', '07:30', '08:30', '2026-09-07', '2026-09-20'),
+        slot(U(932), U(913), 'wed', '07:00', '08:00', '2026-09-07', '2026-11-20'),
+        slot(U(933), U(913), 'thu', '07:00', '08:00', '2026-09-07', '2026-11-20'),
+      ],
+      practice_assignments: [
+        pa(U(940), U(922), U(930), '[2026-09-07,2026-11-21)'),
+        pa(U(941), U(923), U(931), '[2026-09-07,2026-11-21)'),
+        pa(U(942), U(924), U(932), '[2026-09-07,2026-10-01)'),
+        pa(U(943), U(925), U(933), '[2026-09-07,2026-11-21)'),
+      ],
+      import_jobs: [
+        {
+          id: 'job-7',
+          organization_id: ORG,
+          job_type: 'practice_schedule',
+          status: 'importing',
+          season_settings_id: SEASON,
+          warning_summary: {},
+        },
+      ],
+      staging_import_rows: [],
+      audit_log: [],
+    };
+    const stage = (n, status, team, day, start, end, loc, field, sub, from, until, cap = 1) =>
+      db.staging_import_rows.push({
+        id: `s${n}`,
+        organization_id: ORG,
+        import_job_id: 'job-7',
+        import_type: 'practice_schedule',
+        source_row_number: n,
+        validation_errors: [],
+        normalized_payload: {
+          row_key: `row-${n}`,
+          status,
+          day,
+          start_time: start,
+          end_time: end,
+          valid_from: from,
+          valid_until: until,
+          capacity: cap,
+          flags: [],
+          division: team ? 'C Div' : '',
+          division_key: team ? key('C Div') : '',
+          location: loc,
+          location_key: key(loc),
+          field,
+          field_key: k2(loc, field),
+          subunit: sub ?? '',
+          subunit_key: sub ? k3(loc, field, sub) : '',
+          team: team ?? '',
+          team_key: team ? k2('C Div', team) : '',
+        },
+      });
+    stage(
+      1,
+      'placement',
+      'CX',
+      'tue',
+      '07:00',
+      '08:00',
+      'Before Park',
+      'Before Field',
+      null,
+      '2026-09-07',
+      '2026-09-30'
+    );
+    stage(
+      2,
+      'placement',
+      'FT',
+      'fri',
+      '07:00',
+      '08:00',
+      'Before Park',
+      'Coach Field',
+      null,
+      '2026-10-01',
+      '2026-11-20'
+    );
+    stage(
+      3,
+      'placement',
+      'MT',
+      'sat',
+      '07:00',
+      '08:00',
+      'Before Park',
+      'Coach Field',
+      null,
+      '2026-10-01',
+      '2026-11-20'
+    );
+    stage(
+      4,
+      'open',
+      null,
+      'tue',
+      '17:00',
+      '18:00',
+      'H Park',
+      'H Field',
+      null,
+      '2026-09-07',
+      '2026-11-20'
+    );
+    stage(
+      5,
+      'open',
+      null,
+      'tue',
+      '17:00',
+      '18:00',
+      'H Park',
+      'H Field',
+      'C',
+      '2026-09-07',
+      '2026-11-20'
+    );
+    stage(
+      6,
+      'hold',
+      null,
+      'tue',
+      '17:00',
+      '18:00',
+      'H Park',
+      'H Field',
+      'C',
+      '2026-09-07',
+      '2026-11-20'
+    );
+    stage(
+      7,
+      'hold',
+      null,
+      'tue',
+      '17:00',
+      '18:00',
+      'H Park',
+      'Ghost Field',
+      null,
+      '2026-09-07',
+      '2026-11-20'
+    );
+    stage(
+      8,
+      'hold',
+      null,
+      'tue',
+      '17:00',
+      '18:00',
+      'H Park',
+      'H Field',
+      null,
+      '2026-09-07',
+      '2026-11-20'
+    );
+    // a row naming the saved Wednesday slot by its key with another end and capacity (W's row 6 in the pgTAP file)
+    stage(
+      9,
+      'open',
+      null,
+      'wed',
+      '07:00',
+      '08:30',
+      'Before Park',
+      'Coach Field',
+      null,
+      '2026-09-07',
+      '2026-11-20',
+      2
+    );
+    const mapping = {
+      divisions: { [key('C Div')]: { action: 'map', id: U(920) } },
+      locations: {
+        [key('Before Park')]: { action: 'map', id: U(910) },
+        [key('H Park')]: { action: 'create' },
+      },
+      fields: {
+        [k2('Before Park', 'Before Field')]: { action: 'map', id: U(911) },
+        [k2('Before Park', 'Coach Field')]: { action: 'map', id: U(913) },
+        [k2('H Park', 'H Field')]: { action: 'create' },
+        [k2('H Park', 'Ghost Field')]: { action: 'create' },
+      },
+      subunits: { [k3('H Park', 'H Field', 'C')]: { action: 'create' } },
+      teams: Object.fromEntries(
+        ['CX', 'FT', 'MT'].map((t, i) => [
+          k2('C Div', t),
+          { action: 'map', id: U([921, 924, 925][i]) },
+        ])
+      ),
+    };
+    return { db, mapping };
+  }
+
+  it('a job still importing takes its mapping and refuses the apply; a ready one applies; one cancelled underneath refuses', () => {
+    const { db, mapping } = world();
+    expect(
+      rpc(db, 'map_practice_import_job', { p_import_job_id: 'job-7', p_mapping: mapping }).error
+    ).toBeNull();
+    expect(
+      rpc(db, 'apply_practice_import_job', { p_import_job_id: 'job-7', p_dry_run: true }).error
+        .details
+    ).toBe('import_not_ready_to_apply');
+    expect(
+      pgtapAsserts(
+        'and refuses the apply until it is ready_to_apply (a preview too)',
+        '22023:import_not_ready_to_apply'
+      )
+    ).toBe(true);
+    db.import_jobs[0].status = 'ready_to_apply';
+    expect(
+      rpc(db, 'apply_practice_import_job', { p_import_job_id: 'job-7', p_dry_run: true }).error
+    ).toBeNull();
+    db.import_jobs[0].status = 'failed';
+    expect(
+      rpc(db, 'apply_practice_import_job', { p_import_job_id: 'job-7', p_dry_run: false }).error
+        .details
+    ).toBe('import_not_ready_to_apply');
+  });
+
+  it("section 7b: the coach overlap, leaving and moves by dates, and a hold's ground, as the pgTAP file asserts them", () => {
+    const { db, mapping } = world();
+    db.import_jobs[0].status = 'ready_to_apply';
+    rpc(db, 'map_practice_import_job', { p_import_job_id: 'job-7', p_mapping: mapping });
+    const r = rpc(db, 'apply_practice_import_job', {
+      p_import_job_id: 'job-7',
+      p_dry_run: true,
+    }).data;
+    const coach = r.flagged
+      .filter((f) => f.code === 'coach-conflict')
+      .map((f) => `${f.row}:${/CZ/.test(f.detail)}${/CY/.test(f.detail)}`)
+      .join(',');
+    expect(pgtapAsserts('C2: the coach overlap reads each slot', coach)).toBe(true);
+    expect(coach).toBe('1:truefalse');
+    const leaving = `${r.counts.leaving} ${r.leaving[0]?.team} ${r.counts.held_back} ${r.counts.inserted} ${r.counts.probable_move_teams}`;
+    expect(pgtapAsserts('item 7: FT', leaving)).toBe(true);
+    const arriving = r.arriving.map((a) => `${a.row}:${a.probable_move}/${a.added}`).join(',');
+    expect(pgtapAsserts('the arriving rows say so', arriving)).toBe(true);
+    const refused = r.refused.find((x) => x.reason === 'slot-overlaps-another');
+    const holds = `${r.holds.map((h) => `${h.row}:${h.ground_known}`).join(',')} ${r.flags['hold-over-open-slot']?.rows} ${refused.row}${refused.reason}`;
+    expect(pgtapAsserts('item 6: a hold on a half', holds)).toBe(true);
+    // slot-differs: the same words as the SQL's, naming the saved slot and both values
+    expect(r.refused.find((x) => x.row === 9)).toMatchObject({
+      reason: 'slot-differs',
+      message: `The slot this row names is saved already (${U(932)}) and differs: its end is 08:00, the row's 08:30; its capacity is 1, the row's 2. An import never changes a saved slot: change the slot on Field Management, or make the row match it.`,
+    });
+    expect(db.practice_slots.find((s) => s.id === U(932))).toMatchObject({
+      end_time: '08:00:00',
+      capacity: 1,
+    });
+  });
+
+  it('a dry run copies only the tables the plan writes, leaves them as they were, and the list holds every table an apply writes', () => {
+    const { db, mapping } = world();
+    db.import_jobs[0].status = 'ready_to_apply';
+    rpc(db, 'map_practice_import_job', { p_import_job_id: 'job-7', p_mapping: mapping });
+    const before = structuredClone(db);
+    const untouched = db.team_coach_assignments;
+    rpc(db, 'apply_practice_import_job', { p_import_job_id: 'job-7', p_dry_run: true });
+    expect(db).toEqual(before);
+    expect(db.team_coach_assignments).toBe(untouched);
+    rpc(db, 'apply_practice_import_job', { p_import_job_id: 'job-7', p_dry_run: false });
+    const changed = Object.keys(db).filter(
+      (t) => JSON.stringify(db[t]) !== JSON.stringify(before[t])
+    );
+    expect(changed.length).toBeGreaterThan(5);
+    expect(changed.filter((t) => !PRACTICE_IMPORT_WRITTEN_TABLES.includes(t))).toEqual([]);
   });
 });
 

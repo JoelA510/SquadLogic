@@ -709,8 +709,12 @@ BEGIN
     -- Everything below is ONE code path for the preview and the apply. A dry run ends in a sentinel exception after the
     -- result is in v_result, so every write rolls back with the sub-block (plan 4.11.4).
     BEGIN
-        DROP TABLE IF EXISTS pg_temp._pi_rows, pg_temp._pi_dec, pg_temp._pi_div, pg_temp._pi_loc, pg_temp._pi_fld,
-            pg_temp._pi_sub, pg_temp._pi_team, pg_temp._pi_grp, pg_temp._pi_asg, pg_temp._pi_leave, pg_temp._pi_flag;
+        -- A second apply in one transaction finds the first one's tables (they drop at commit); asked first, so a call
+        -- prints no notice.
+        IF to_regclass('pg_temp._pi_rows') IS NOT NULL THEN
+            DROP TABLE IF EXISTS pg_temp._pi_rows, pg_temp._pi_dec, pg_temp._pi_div, pg_temp._pi_loc, pg_temp._pi_fld,
+                pg_temp._pi_sub, pg_temp._pi_team, pg_temp._pi_grp, pg_temp._pi_asg, pg_temp._pi_leave, pg_temp._pi_flag;
+        END IF;
 
         -- ------------------------------------------------------------ 1. The staged rows, read once.
         CREATE TEMP TABLE _pi_rows ON COMMIT DROP AS
@@ -1165,7 +1169,9 @@ BEGIN
             SELECT v_org, NULL, a.team_ref, a.slot_id, a.slot_id, ps.day_of_week::text, ps.start_time::text, ps.end_time::text,
                    ps.field_id, a.rng, 'manual'::public.source_enum, 'manual'
               FROM _pi_asg a JOIN public.practice_slots ps ON ps.id = a.slot_id
-             WHERE a.existing_id IS NULL AND NOT a.held_back
+             -- Every row of the file goes to the insert, the ones already saved too: the unique key (team, slot, range)
+             -- turns a saved one into nothing (a re-import inserts nothing), and the count below holds the planned new ones.
+             WHERE NOT a.held_back
              ORDER BY a.rowno
             ON CONFLICT (team_id, practice_slot_id, effective_date_range)
                 WHERE practice_slot_id IS NOT NULL AND effective_date_range IS NOT NULL
@@ -1453,7 +1459,9 @@ BEGIN
     GET DIAGNOSTICS n_asg = ROW_COUNT;
 
     -- The ids every OTHER team run of the organization names, read once (a shell a later run lists is kept).
-    DROP TABLE IF EXISTS pg_temp._pr_named;
+    IF to_regclass('pg_temp._pr_named') IS NOT NULL THEN
+        DROP TABLE pg_temp._pr_named;
+    END IF;
     CREATE TEMP TABLE _pr_named ON COMMIT DROP AS
     SELECT DISTINCT lower(m[1]) AS id
       FROM public.scheduler_runs sr,

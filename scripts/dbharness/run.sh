@@ -1357,7 +1357,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000 20261105010000 20261106010000 20261108010000 20261108020000 20261110010000 20261111010000 20261112010000 20261113010000 20261114010000 20261115010000 20261116010000 20261117010000 20261118010000 20261119010000 20261120010000 20261121010000 20261122010000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000 20261105010000 20261106010000 20261108010000 20261108020000 20261110010000 20261111010000 20261112010000 20261113010000 20261114010000 20261115010000 20261116010000 20261117010000 20261118010000 20261119010000 20261120010000 20261121010000 20261122010000 20261123010000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2684,6 +2684,59 @@ NEEDLES
     fi
     if ! psql_cmd "DELETE FROM public.game_scores WHERE game_id = '1f000000-0000-4000-8000-0000000000c1';" >$SCRATCH/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the planted score could not be removed before the second revert run"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+  fi
+
+  # **20261123010000's revert refuses while a practice schedule import is applied, and keeps every practice when it is
+  # not.** An applied import is planted (a job, a staged row, a practice it wrote and the application record of it, not
+  # rolled back), and the revert is run onto it FIRST: it must refuse in its own words, naming the count, and change
+  # nothing. The record is then marked rolled back (the practice is left standing, as one a rollback kept would be) and
+  # the revert runs again, as every other revert in this set does, below. Every name is synthetic.
+  if [ "$id" = "20261123010000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
+                ('2a000000-0000-4000-8000-00000000000a','Practice Import Revert Org','practice-import-revert');
+              INSERT INTO public.season_settings (id, organization_id, name) VALUES
+                ('2a000000-0000-4000-8000-0000000000a1','2a000000-0000-4000-8000-00000000000a','Practice Import Revert Season');
+              INSERT INTO public.divisions (id, organization_id, season_settings_id, name) VALUES
+                ('2a000000-0000-4000-8000-0000000000a2','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000a1','Practice Revert Division');
+              INSERT INTO public.teams (id, organization_id, division_id, name) VALUES
+                ('2a000000-0000-4000-8000-0000000000b1','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000a2','Practice Revert One');
+              INSERT INTO public.locations (id, organization_id, name) VALUES
+                ('2a000000-0000-4000-8000-0000000000e1','2a000000-0000-4000-8000-00000000000a','Practice Revert Park');
+              INSERT INTO public.fields (id, organization_id, location_id, name) VALUES
+                ('2a000000-0000-4000-8000-0000000000e2','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000e1','Practice Revert Field');
+              INSERT INTO public.practice_slots (id, organization_id, field_id, day_of_week, start_time, end_time, capacity) VALUES
+                ('2a000000-0000-4000-8000-0000000000e3','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000e2','mon','17:00','18:00',1);
+              INSERT INTO public.practice_assignments (id, organization_id, team_id, slot_id, practice_slot_id, effective_date_range, source, assigned_via) VALUES
+                ('2a000000-0000-4000-8000-0000000000c1','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000b1','2a000000-0000-4000-8000-0000000000e3','2a000000-0000-4000-8000-0000000000e3','[2026-09-07,2026-11-21)','manual','manual');
+              INSERT INTO public.import_jobs (id, organization_id, job_type, storage_path, status, season_settings_id) VALUES
+                ('2a000000-0000-4000-8000-0000000000d1','2a000000-0000-4000-8000-00000000000a','practice_schedule','imports/x/revert.csv','completed','2a000000-0000-4000-8000-0000000000a1');
+              INSERT INTO public.staging_import_rows (organization_id, import_job_id, import_type, source_row_number, raw_payload, normalized_payload, validation_errors) VALUES
+                ('2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000d1','practice_schedule',1,'{}'::jsonb,NULL,'[]'::jsonb);
+              INSERT INTO public.import_application_records (organization_id, import_job_id, import_type, target_table, target_id, operation, previous_payload, applied_payload) VALUES
+                ('2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000d1','practice_schedule','practice_assignments','2a000000-0000-4000-8000-0000000000c1','inserted',NULL,'{}'::jsonb);" \
+         >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the applied practice import the revert check requires was never inserted"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+    if psql_file "$REPO/docs/sql/${id}_revert.sql" >$SCRATCH/harness_rev_refused 2>&1; then
+      echo "FAIL revert ${id}: planted an applied practice import (1 record not rolled back) and the revert ran onto it"
+      STATUS=1
+    elif ! grep -qF 'a practice schedule import is still applied: 1 record(s) not rolled back.' $SCRATCH/harness_rev_refused; then
+      echo "FAIL revert ${id}: refused an applied practice import, but not in the words that name the 1 record"
+      dump 10 $SCRATCH/harness_rev_refused; STATUS=1
+    elif [ "$(psql_cmd "SELECT (SELECT count(*) FROM public.import_jobs WHERE id = '2a000000-0000-4000-8000-0000000000d1') || ':' ||
+                      (SELECT count(*) FROM public.practice_assignments WHERE id = '2a000000-0000-4000-8000-0000000000c1') || ':' ||
+                      (to_regprocedure('public.apply_practice_import_job(uuid, boolean)') IS NOT NULL);" 2>/dev/null)" != "1:1:true" ]; then
+      echo "FAIL revert ${id}: the refused revert changed the database (the job, the practice or a function is not as it was)"
+      STATUS=1
+    else
+      echo "  revert ${id}: refused an applied practice import in its words (1 record not rolled back) and changed nothing"
+    fi
+    if ! psql_cmd "UPDATE public.import_application_records SET rolled_back_at = now() WHERE import_job_id = '2a000000-0000-4000-8000-0000000000d1';" \
+         >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the import's record could not be marked rolled back before the second revert run"
       dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
@@ -4145,6 +4198,30 @@ PROBE
       else
         echo "FAIL revert ${id}: the revert did not leave the planted games and the 20261119010000 bodies as they were"
         dump 10 $SCRATCH/harness_idrevert; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261123010000" ]; then
+      # What the revert must leave: the practice (a rollback kept it, or an earlier writer made it: it is an ordinary row
+      # now), the job, its staged row and its record gone, no function of the migration, and practice_schedule out of the
+      # lists. The revert checks the md5 of the four restored bodies itself.
+      if ! grep -qF 'this revert deletes 1 practice schedule import job(s), 1 staged row(s) and 1 rolled-back record(s)' $SCRATCH/harness_rev; then
+        echo "FAIL revert ${id}: planted 1 job, 1 staged row and 1 record, and the revert did not say so"
+        STATUS=1
+      fi
+      if psql_cmd "SELECT 'PIREVERT-VERDICT:' || CASE
+               WHEN (SELECT count(*) FROM public.practice_assignments WHERE id = '2a000000-0000-4000-8000-0000000000c1') <> 1 THEN 'practice-lost'
+               WHEN (SELECT count(*) FROM public.import_jobs WHERE id = '2a000000-0000-4000-8000-0000000000d1') <> 0 THEN 'job-left'
+               WHEN (SELECT count(*) FROM public.import_application_records WHERE import_job_id = '2a000000-0000-4000-8000-0000000000d1') <> 0 THEN 'records-left'
+               WHEN to_regprocedure('public.apply_practice_import_job(uuid, boolean)') IS NOT NULL OR to_regprocedure('public.rollback_practice_import_job(uuid)') IS NOT NULL
+                    OR to_regprocedure('public.map_practice_import_job(uuid, jsonb)') IS NOT NULL OR to_regprocedure('public.practice_import_referenced(regclass, uuid)') IS NOT NULL THEN 'function-left'
+               WHEN (SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'import_jobs_job_type_check') ~ 'practice_schedule' THEN 'list-left'
+               WHEN cardinality(public.import_allowed_keys('practice_schedule')) <> 0 THEN 'allowlist-left'
+               ELSE 'restored' END;" \
+         >$SCRATCH/harness_pirevert 2>&1 && grep -q 'PIREVERT-VERDICT:restored' $SCRATCH/harness_pirevert; then
+        echo "  revert ${id}: the revert keeps the practice, deletes the job, its staged row and its record, leaves no function of the migration and takes practice_schedule out of the lists"
+      else
+        echo "FAIL revert ${id}: the revert did not leave the practice and the pre-migration lists as they were"
+        dump 10 $SCRATCH/harness_pirevert; STATUS=1
       fi
     fi
     if [ "$id" = "20261122010000" ]; then

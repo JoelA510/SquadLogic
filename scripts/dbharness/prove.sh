@@ -280,6 +280,11 @@ R70="$REPO/docs/sql/20261121010000_revert.sql"
 # (supabase/tests/game_scores.sql) is CI's.
 M71="$REPO/supabase/migrations/20261122010000_game_scores.sql"
 R71="$REPO/docs/sql/20261122010000_revert.sql"
+# 20261123010000: the practice schedule import (PR 10). It replaces create_import_job, mark_import_job_ready_to_apply,
+# cancel_ready_import_job and import_allowed_keys whole (the one change of knowing practice_schedule), so every plant that
+# aimed at one of those bodies in $M70 or $M71 is re-aimed here (lesson 70). Its smoke holds the plants of its own,
+# below; the pgTAP file (supabase/tests/practice_import_apply_rollback.sql) is CI's.
+M80="$REPO/supabase/migrations/20261123010000_practice_import.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -5778,6 +5783,50 @@ plant "R71 the revert does not refuse while a score is recorded" "$R71" \
   "    IF v_scores > 0 THEN" \
   "    IF false THEN" \
   "revert 20261122010000"
+
+# 20261123010000: the practice schedule import. The plan's three plants (PR 10) and three of this file's own:
+#   - the dry run's sentinel is removed, so a preview writes (and completes the job);
+#   - ON CONFLICT ... DO NOTHING is removed, so a re-import meets the unique key and fails;
+#   - the flag step hands the gate only the file's auto rows, so the manual rows go unflagged;
+#   - the rollback no longer refuses after a practice it wrote has changed;
+#   - an arriving row of a probable move is added without its tick;
+#   - the rollback reads no reference, so a field an admin gave a blackout since is deleted with the blackout.
+plant "M80 the dry run's sentinel is removed (a preview writes)" "$M80" \
+  "        IF v_dry THEN
+            RAISE EXCEPTION 'practice import dry run: every write is undone' USING ERRCODE = 'SLD01';
+        END IF;" \
+  "        IF false THEN
+            RAISE EXCEPTION 'practice import dry run: every write is undone' USING ERRCODE = 'SLD01';
+        END IF;" \
+  "smoke 20261123010000"
+
+plant "M80 ON CONFLICT DO NOTHING is removed (a re-import fails)" "$M80" \
+  "            ON CONFLICT (team_id, practice_slot_id, effective_date_range)
+                WHERE practice_slot_id IS NOT NULL AND effective_date_range IS NOT NULL
+            DO NOTHING
+            RETURNING id, team_id, practice_slot_id, effective_date_range" \
+  "            RETURNING id, team_id, practice_slot_id, effective_date_range" \
+  "smoke 20261123010000"
+
+plant "M80 the flag step hands the gate auto rows only" "$M80" \
+  "          FROM _pi_asg a WHERE COALESCE(a.existing_id, a.new_id) IS NOT NULL;" \
+  "          FROM _pi_asg a JOIN public.practice_assignments pz ON pz.id = COALESCE(a.existing_id, a.new_id) WHERE pz.source = 'auto';" \
+  "smoke 20261123010000"
+
+plant "M80 the rollback no longer refuses after a change" "$M80" \
+  "    IF cardinality(v_changed) > 0 THEN" \
+  "    IF false THEN" \
+  "smoke 20261123010000"
+
+plant "M80 a probable move is added without its tick" "$M80" \
+  "SET probable_move = true, held_back = NOT (a.row_key = ANY (v_add))" \
+  "SET probable_move = true, held_back = false" \
+  "smoke 20261123010000"
+
+plant "M80 the rollback reads no reference" "$M80" \
+  "                   AND NOT public.practice_import_referenced(%3\$L::regclass, x.id)" \
+  "                   AND true" \
+  "smoke 20261123010000"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye

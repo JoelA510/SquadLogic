@@ -126,7 +126,7 @@ function seed() {
   sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify({ user: { id: ADMIN } }));
 }
 
-const table = () => screen.findByRole('table', { name: CAPTION });
+const table = (timeout = 1000) => screen.findByRole('table', { name: CAPTION }, { timeout });
 /** The select of a row, by its accessible name (the row's header, then the caption). */
 const select = (rowName) =>
   /** @type {HTMLSelectElement} */ (
@@ -150,10 +150,12 @@ function mutateDb(change) {
   /** @type {any} */ (window).__saveMockDB__(db);
 }
 
-async function ready() {
+async function ready(timeout = 1000) {
   render(<ScopedSettingsSection />);
-  await table();
-  await waitFor(() => expect(screen.queryByText('Loading settings…')).not.toBeInTheDocument());
+  await table(timeout);
+  await waitFor(() => expect(screen.queryByText('Loading settings…')).not.toBeInTheDocument(), {
+    timeout,
+  });
 }
 
 beforeEach(() => {
@@ -714,7 +716,9 @@ describe('more than 1,000 divisions in a season (Codex C6 on #737)', () => {
     });
     // the last by id, the one a single 1,000-row answer leaves out first
     await preset('division', 'd-many-1000', true);
-    await ready();
+    // 1,004 rows over paged reads take longer than the default 1 s wait on CI's runner (it failed
+    // there at 1 s while passing locally), so this case waits up to 20 s.
+    await ready(20000);
     const divisionHeaders = screen
       .getAllByRole('rowheader')
       .filter((h) => h.textContent.startsWith('Division: '));

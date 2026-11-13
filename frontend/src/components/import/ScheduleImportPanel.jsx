@@ -1,4 +1,13 @@
-import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import Papa from 'papaparse';
 import { AlertCircle, CheckCircle, Info } from 'lucide-react';
 import {
@@ -43,6 +52,15 @@ import {
   recordsInScope,
   shownChoice,
 } from '../../utils/gameImportMapping.js';
+
+// G5: recording an import as the publication baseline reads the whole saved schedule and makes the master export, so
+// it is its own chunk, loaded only when an import records or is rolled back.
+const ImportBaselineRecorder = lazy(() =>
+  import('./ImportBaseline.jsx').then((m) => ({ default: m.ImportBaselineRecorder }))
+);
+const ImportBaselineLookup = lazy(() =>
+  import('./ImportBaseline.jsx').then((m) => ({ default: m.ImportBaselineLookup }))
+);
 
 /**
  * The schedule import: upload, mapping, preview, confirm, result, roll back (plan
@@ -235,6 +253,7 @@ function ScheduleImportWorkflow({
   const fileInputId = useId();
   const publishedId = useId();
   const createAckId = useId();
+  const recordBaselineId = useId();
   const stepHeadingRef = useRef(/** @type {HTMLHeadingElement | null} */ (null));
 
   const [step, setStep] = useState(
@@ -268,6 +287,19 @@ function ScheduleImportWorkflow({
   // What a roll back undid, and of WHICH job: the result screen of another import is not that import's.
   const [rolledBack, setRolledBack] = useState(
     /** @type {{ jobId: string, undone: any } | null} */ (null)
+  );
+  // G5: record the schedule the import leaves as the publication baseline. Its default is the STORED mapping's
+  // "Games arrive Published", set again each time a mapping is stored; the admin can change it.
+  const [recordBaseline, setRecordBaseline] = useState(false);
+  // What became of that recording, and for WHICH job (the next import's result is its own).
+  const [baseline, setBaseline] = useState(
+    /** @type {{ jobId: string, status: 'recording' | 'recorded' | 'failed', message?: string } | null} */ (
+      null
+    )
+  );
+  // After a roll back: the baseline its import recorded, if any, which still describes the imported schedule.
+  const [rolledBaseline, setRolledBaseline] = useState(
+    /** @type {{ jobId: string, found: any } | null} */ (null)
   );
   const [lastImport, setLastImport] = useState(/** @type {any} */ (null));
   const [unfinished, setUnfinished] = useState(
@@ -362,6 +394,9 @@ function ScheduleImportWorkflow({
     setUnknown(false);
     setResult(null);
     setRolledBack(null);
+    setRecordBaseline(false);
+    setBaseline(null);
+    setRolledBaseline(null);
   }, []);
 
   // False once this workflow is gone (the scope changed, or the page closed): a step that was waiting does not go on
@@ -513,6 +548,8 @@ function ScheduleImportWorkflow({
     if (!alive.current) return;
     // From here the job holds THIS mapping. A preview of the one before it is no longer the import's.
     setSent({ published: published === true, creations });
+    // The baseline's default follows the mapping now stored: ticked when its games arrive Published (decision 15).
+    setRecordBaseline(published === true);
     setPreview(null);
     try {
       const made = await K.preview(client, jobId);
@@ -531,6 +568,26 @@ function ScheduleImportWorkflow({
   const createdTotal = counts
     ? CREATED_ROWS.reduce((n, [key]) => n + Number(counts[key] ?? 0), 0)
     : 0;
+
+  // An import that is applied: its result screen, and (G5) its baseline when the admin asked for one. The recording
+  // reads the schedule after the apply; the import is never undone for a recording that fails.
+  const showApplied = (applied) => {
+    setResult(applied);
+    setBusy(null);
+    setStep('result');
+    refreshLast();
+    if (recordBaseline && jobId && baseline?.jobId !== jobId) {
+      setBaseline({ jobId, status: 'recording' });
+      setBusy('Recording the publication baseline');
+    }
+  };
+  const onBaselineDone = useCallback((outcome) => {
+    setBaseline((prev) => (prev ? { ...prev, ...outcome } : prev));
+    setBusy(null);
+  }, []);
+  const onBaselineFound = useCallback((found) => {
+    setRolledBaseline((prev) => (prev ? { ...prev, found } : prev));
+  }, []);
 
   // What became of a confirm, read from the job itself. The apply's answer can be lost after the database committed
   // it (a dropped connection, a gateway timeout), so a failed confirm says nothing about the schedule: the job does.
@@ -554,10 +611,7 @@ function ScheduleImportWorkflow({
       // It was applied: the same screen as if the answer had arrived, with its roll back.
       if (cause) logger.warn('The import was applied and its answer was lost:', cause);
       setError(null);
-      setResult(state.result);
-      setBusy(null);
-      setStep('result');
-      refreshLast();
+      showApplied(state.result);
       return;
     }
     if (state.status === DISCARDABLE_STATUS) {
@@ -597,10 +651,7 @@ function ScheduleImportWorkflow({
         setBusy(null);
         return;
       }
-      setResult(outcome.result);
-      setBusy(null);
-      setStep('result');
-      refreshLast();
+      showApplied(outcome.result);
     } catch (err) {
       // No answer, or a refusal: either way the job says what happened, and it is read before anything else.
       await settleConfirm(err);
@@ -619,6 +670,8 @@ function ScheduleImportWorkflow({
     try {
       const undone = await K.rollback(client, { jobId: id, organizationId, seasonSettingsId });
       setRolledBack({ jobId: id, undone });
+      // The baseline the import recorded (if it did) is never changed or removed: it is found and said, below.
+      setRolledBaseline({ jobId: id, found: null });
       setBusy(null);
       refreshLast();
     } catch (err) {
@@ -743,6 +796,32 @@ function ScheduleImportWorkflow({
     }
     return `Nothing will be written: ${parts.join(', ')}; every other game of the file is already as the file has it. Go back to the names to decide the ones that are not imported, or allow changes to a Published game first.`;
   })();
+
+  // After a roll back, the baseline its import recorded, said: it still describes the games the roll back removed.
+  const found = rolledBaseline?.found ?? null;
+  const rolledBaselineNote = rolledBaseline && (
+    <>
+      {found === null && (
+        <Suspense fallback={null}>
+          <ImportBaselineLookup
+            key={rolledBaseline.jobId}
+            jobId={rolledBaseline.jobId}
+            onResult={onBaselineFound}
+          />
+        </Suspense>
+      )}
+      {found?.status === 'found' && (
+        <Notice tone="warning" testId="schedule-import-baseline-rolled-back">
+          {`Published baseline v${found.version}, recorded from this import, still describes the imported schedule: a baseline is never changed or removed. Compared with it, "Changes since publication" lists what this roll back removed or put back; choose another baseline there to compare with the schedule as it is now.`}
+        </Notice>
+      )}
+      {found?.status === 'unchecked' && (
+        <Notice tone="warning" testId="schedule-import-baseline-rolled-back">
+          {`Whether a publication baseline was recorded from this import could not be checked (${found.message}). If one was, it still describes the imported schedule, not the schedule as it is now.`}
+        </Notice>
+      )}
+    </>
+  );
 
   const stepTitle = {
     upload: `1 of 4: choose the file`,
@@ -923,6 +1002,7 @@ function ScheduleImportWorkflow({
                   undone?.games?.restored ?? 0
                 )} put back as they were.`}
               </Notice>
+              <div className="mt-2">{rolledBaselineNote}</div>
             </div>
           )}
         </div>
@@ -1230,6 +1310,27 @@ function ScheduleImportWorkflow({
                 </span>
               </span>
             </label>
+            <label
+              htmlFor={recordBaselineId}
+              className="flex items-start gap-2 text-sm text-text-primary"
+            >
+              <input
+                id={recordBaselineId}
+                type="checkbox"
+                className="mt-1"
+                checked={recordBaseline}
+                disabled={busy !== null}
+                onChange={(event) => setRecordBaseline(event.target.checked)}
+              />
+              <span>
+                Record this schedule as the baseline for Changes since publication
+                <span className="block text-xs text-text-muted">
+                  Once the import is applied, the schedule as it then stands is recorded as the
+                  Exports page records the files it uploads, so the Changes since publication report
+                  shows what changes from here. Ticked when the games arrive Published.
+                </span>
+              </span>
+            </label>
             {createdTotal > 0 && (
               <label
                 htmlFor={createAckId}
@@ -1296,6 +1397,30 @@ function ScheduleImportWorkflow({
               }`}
             </Notice>
           )}
+          {rolledBackHere && <div className="mt-2">{rolledBaselineNote}</div>}
+          {baseline?.jobId === jobId && baseline.status === 'recording' && (
+            <Suspense fallback={null}>
+              <ImportBaselineRecorder
+                key={baseline.jobId}
+                jobId={baseline.jobId}
+                fileName={fileName}
+                client={client}
+                onDone={onBaselineDone}
+              />
+            </Suspense>
+          )}
+          {!rolledBackHere &&
+            baseline?.jobId === jobId &&
+            (baseline.status === 'recorded' || baseline.status === 'failed') && (
+              <div className="mt-2">
+                <Notice
+                  tone={baseline.status === 'recorded' ? 'success' : 'error'}
+                  testId="schedule-import-baseline"
+                >
+                  {baseline.message}
+                </Notice>
+              </div>
+            )}
           <dl
             data-testid="schedule-import-result-counts"
             className="mt-3 rounded-lg border border-border-subtle divide-y divide-border-subtle max-w-xl"

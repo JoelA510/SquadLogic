@@ -4,6 +4,7 @@ import Page from '../components/chrome/Page.jsx';
 import PageHeader from '../components/chrome/PageHeader.jsx';
 import OutputGenerationPanel from '../components/OutputGenerationPanel.jsx';
 import { useDashboardData } from '../hooks/useDashboardData.js';
+import { masterExportInputs } from '../utils/masterExport.js';
 import DataErrorBanner from '../components/ui/DataErrorBanner.jsx';
 import { supabase } from '../lib/supabaseClient.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
@@ -62,10 +63,8 @@ export default function ExportsPage() {
           </p>
         )}
         <OutputGenerationPanel
-          teams={team?.teams || []}
-          teamSummary={team?.summary || null}
-          practiceAssignments={practice?.scheduleAssignments || []}
-          gameAssignments={game?.assignments || []}
+          // The same mapping the import's baseline uses (`masterExportInputs`), so both make the same rows.
+          {...masterExportInputs({ team, practice, game })}
           supabaseClient={supabase}
           sourceErrors={errors}
           sourceLoading={loading}

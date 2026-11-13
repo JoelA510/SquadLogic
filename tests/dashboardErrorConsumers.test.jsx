@@ -312,7 +312,9 @@ describe('every page consuming useDashboardData reports a failed load', () => {
     // Meta-assertion on the meta-assertion: a broken scan that matched
     // nothing would otherwise make the comparison below trivially true.
     expect(consumers.length).toBeGreaterThan(0);
-    expect(consumers).toEqual([...PAGES.map((p) => p.name), 'useSetupProgress'].sort());
+    expect(consumers).toEqual(
+      [...PAGES.map((p) => p.name), 'useSetupProgress', 'ImportBaseline'].sort()
+    );
   });
 
   it('the enumeration can fail -- a consumer missing from the list is caught', () => {
@@ -320,7 +322,9 @@ describe('every page consuming useDashboardData reports a failed load', () => {
     // page from the expected list and the same comparison must reject it;
     // otherwise `toEqual` is passing on something other than the set.
     const consumers = consumersOfHook();
-    const short = [...PAGES.map((p) => p.name), 'useSetupProgress'].sort().slice(1);
+    const short = [...PAGES.map((p) => p.name), 'useSetupProgress', 'ImportBaseline']
+      .sort()
+      .slice(1);
 
     expect(consumers).not.toEqual(short);
     expect(consumers.length).toBe(short.length + 1);
@@ -407,6 +411,36 @@ describe('every page consuming useDashboardData reports a failed load', () => {
     expect(withoutComments(`const u = 'https://x/y';\n${call}`).includes('useDashboardData(')).toBe(
       true
     );
+  });
+});
+
+describe('the import’s baseline recorder (G5, ImportBaseline.jsx) says a failed load and records nothing over it', () => {
+  // It draws nothing of its own: it tells the import panel what came of the recording, and the panel says it. So the
+  // claim here is the sentence it hands over, not a banner.
+  const recordWith = async (error) => {
+    const { waitFor } = await import('@testing-library/react');
+    const { ImportBaselineRecorder } =
+      await import('../frontend/src/components/import/ImportBaseline.jsx');
+    dash.value = dashboardData(error);
+    const onDone = vi.fn();
+    render(<ImportBaselineRecorder jobId="job-1" client={null} onDone={onDone} />);
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+    return onDone.mock.calls[0][0];
+  };
+
+  it('a read that failed: no baseline, and the failed read named', async () => {
+    const outcome = await recordWith(MESSAGE);
+    expect(outcome.status).toBe('failed');
+    expect(outcome.message).toMatch(
+      `the saved schedule could not be read: teams (${MESSAGE}), so rows made now could leave games out`
+    );
+  });
+
+  it('negative twin: with every read sound, it does not say one failed', async () => {
+    // (nothing is scheduled in this fixture, so nothing is recorded either: said as that)
+    const outcome = await recordWith(null);
+    expect(outcome.message).not.toMatch(/could not be read/);
+    expect(outcome.message).toMatch(/holds nothing the master export can write/);
   });
 });
 

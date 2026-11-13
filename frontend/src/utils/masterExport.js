@@ -236,6 +236,22 @@ export function buildExportPayload({
 }
 
 /**
+ * The schedule inputs of the master export, from what `useDashboardData()` returns: the one mapping the Exports page
+ * and the import panel's baseline (G5) both use, so the two hand `generateMasterExport` the same teams, practices and
+ * games and their rows cannot differ by an input.
+ *
+ * @param {{ team?: any, practice?: any, game?: any }} dashboard - `useDashboardData()`'s `team`, `practice`, `game`
+ */
+export function masterExportInputs({ team, practice, game }) {
+  return {
+    teams: team?.teams || [],
+    teamSummary: team?.summary || null,
+    practiceAssignments: practice?.scheduleAssignments || [],
+    gameAssignments: game?.assignments || [],
+  };
+}
+
+/**
  * What one generation of the master export came to. The panel turns each into its sentence.
  *
  * @typedef {{ rows: Array<Record<string, any>>, items: Array<import('@squadlogic/core/scheduleTbd.js').ScheduleTbdItem> }} TbdList

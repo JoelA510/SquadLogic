@@ -451,6 +451,9 @@ describe('the result, the rollback, and the import that can still be rolled back
     fireEvent.click(screen.getByLabelText('Create the 5 records listed above'));
     fireEvent.click(screen.getByRole('button', { name: 'Confirm and import' }));
     await waitFor(() => expect(step()).toMatch(/4 of 4/));
+    // The games arrive Published, so the publication baseline is recorded by default (G5); the result's buttons wait
+    // for it (tests/gameImportBaseline.test.jsx).
+    await waitFor(() => expect(screen.queryByTestId('schedule-import-busy')).toBeNull());
   };
 
   it('rolls the import back from the result screen: the schedule is as it was', async () => {
@@ -1000,7 +1003,8 @@ describe('G1: a confirm whose answer is lost is resolved from the stored job, an
     fireEvent.click(screen.getByRole('button', { name: 'Confirm and import' }));
     await waitFor(() => expect(step()).toMatch(/4 of 4/));
     expect(screen.getByTestId('schedule-import-applied').textContent).toMatch(/Imported:/);
-    expect(button('Roll back this import')).toBeEnabled();
+    // enabled once the baseline the import records by default (G5) is recorded
+    await waitFor(() => expect(button('Roll back this import')).toBeEnabled());
     view.unmount();
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(cancels(rpc)).toEqual([]);
@@ -1059,7 +1063,8 @@ describe('G1: a confirm whose answer is lost is resolved from the stored job, an
     broken.on = false;
     fireEvent.click(button('Check again'));
     await waitFor(() => expect(step()).toMatch(/4 of 4/));
-    expect(button('Roll back this import')).toBeEnabled();
+    // enabled once the baseline the import records by default (G5) is recorded
+    await waitFor(() => expect(button('Roll back this import')).toBeEnabled());
     view.unmount();
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(cancels(rpc)).toEqual([]);

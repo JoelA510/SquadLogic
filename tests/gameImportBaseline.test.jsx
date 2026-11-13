@@ -25,8 +25,6 @@ import {
   seedGameImportWorld,
 } from './helpers/gameImportWorld.js';
 
-const REC = vi.hoisted(() => ({ uploads: /** @type {string[]} */ ([]) }));
-
 vi.mock('../frontend/src/lib/supabaseClient.js', async () => {
   const { mockSupabase } = await import('../frontend/src/lib/mockSupabaseClient.js');
   return { supabase: mockSupabase, supabaseReady: Promise.resolve() };
@@ -54,14 +52,6 @@ vi.mock('../frontend/src/utils/scheduleDownloads.js', async (original) => ({
 vi.mock('../frontend/src/lib/logger.js', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), log: vi.fn() },
 }));
-// The mock has no storage bucket: the Exports page's upload is recorded, and everything after it (the baseline) is real.
-vi.mock('../packages/core/src/storageSupabase.js', async (importOriginal) => ({
-  .../** @type {object} */ (await importOriginal()),
-  uploadScheduleExport: vi.fn(async ({ path }) => {
-    REC.uploads.push(path);
-    return { path };
-  }),
-}));
 
 const { default: ScheduleImportPanel } =
   await import('../frontend/src/components/import/ScheduleImportPanel.jsx');
@@ -71,7 +61,7 @@ const { mockSupabase } = await import('../frontend/src/lib/mockSupabaseClient.js
 // Each case drives a whole import, and two the Exports page after it.
 vi.setConfig({ testTimeout: 30000 });
 
-const RECORD = 'Record this schedule as the baseline for Changes since publication';
+const RECORD = /^Record this schedule as the baseline for Changes since publication/;
 
 /** A table of the mock, this league's rows, read through the client as the app reads it. */
 async function table(name) {
@@ -174,7 +164,6 @@ function renderExports() {
 }
 
 beforeEach(async () => {
-  REC.uploads = [];
   await seedWorld();
 });
 afterEach(() => {
@@ -196,7 +185,8 @@ describe('(1) the baseline recorded at import is the Exports page’s baseline f
 
     renderExports();
     const generate = await screen.findByRole('button', { name: 'Generate CSVs' });
-    await waitFor(() => expect(generate).toBeEnabled());
+    // `aria-disabled` while a read the files need is in flight (the button stays focusable)
+    await waitFor(() => expect(generate).not.toHaveAttribute('aria-disabled'), { timeout: 5000 });
     fireEvent.click(generate);
     const status = await screen.findByTestId('output-generation-status');
     await waitFor(() => expect(status).toHaveTextContent('CSVs generated successfully.'));
@@ -208,7 +198,7 @@ describe('(1) the baseline recorded at import is the Exports page’s baseline f
     const fromExports = (await table('publication_baselines')).find(
       (b) => b.baseline_version === 2
     );
-    expect(REC.uploads.length).toBeGreaterThan(0);
+    expect(status).toHaveTextContent(/^Uploaded \d+ files/);
     // Row for row, and the digest of the rows with them.
     expect(atImport.export_rows).toEqual(fromExports.export_rows);
     expect(atImport.export_columns).toEqual(fromExports.export_columns);
@@ -386,7 +376,11 @@ describe('(6) "Changes since publication", read after the import, over the basel
     const page = renderExports();
     const reports = await screen.findByTestId('schedule-reports', {}, { timeout: 5000 });
     fireEvent.click(
-      await within(reports).findByRole('tab', { name: 'Changes since publication' }, { timeout: 5000 })
+      await within(reports).findByRole(
+        'tab',
+        { name: 'Changes since publication' },
+        { timeout: 5000 }
+      )
     );
     const select = await within(reports).findByLabelText('Compare with baseline');
     const baseline = (await table('publication_baselines')).find(
@@ -407,7 +401,9 @@ describe('(6) "Changes since publication", read after the import, over the basel
     panel.unmount();
 
     const right = await changesAgainst(1);
-    expect(right).toMatch(/: (\d+) games then, \1 now: \1 unchanged, 0 changed, 0 no longer saved, 0 new\./);
+    expect(right).toMatch(
+      /: (\d+) games then, \1 now: \1 unchanged, 0 changed, 0 no longer saved, 0 new\./
+    );
     expect(right).toMatch(/TIME TBD: 3 then, 3 now\./);
     expect(right).not.toMatch(/: 0 games then/);
 
@@ -440,7 +436,9 @@ describe('(6) "Changes since publication", read after the import, over the basel
     await waitFor(() => expect(step()).toMatch(/2 of 4/));
     fireEvent.click(screen.getByRole('button', { name: 'Preview the import' }));
     await waitFor(() => expect(step()).toMatch(/3 of 4/));
-    if (checkbox(RECORD).checked) fireEvent.click(checkbox(RECORD));
+    // this import is the writer of the move only: it records no baseline of its own
+    expect(checkbox(RECORD).checked).toBe(true);
+    fireEvent.click(checkbox(RECORD));
     await confirm();
     expect(screen.getByTestId('schedule-import-applied').textContent).toMatch(/1 changed/);
     second.unmount();

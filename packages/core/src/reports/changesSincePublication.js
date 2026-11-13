@@ -96,8 +96,13 @@ function sameInstant(a, b) {
  * the division only breaks a tie). A Home row with no Away row, or with more than one that
  * reads like it, is unreadable (and claims what is ambiguous, so the Away rows are not reported again); an Away row
  * nobody claimed is unreadable too.
+ *
+ * **An outside club has no rows of its own** (`generateScheduleExports` names it as the opponent only), so a game
+ * against one is ONE row: the own team's. A row with no partner whose Opponent is exactly one outside club of its
+ * division (`outsideClubOf`) is that game, the club's side made from the row; any other row with no partner is
+ * unreadable, as before.
  */
-function pairRows(homes, aways, matches) {
+function pairRows(homes, aways, matches, outsideClubOf) {
   const claimed = new Set();
   const pairs = [];
   const unreadable = [];
@@ -114,6 +119,11 @@ function pairRows(homes, aways, matches) {
       pairs.push([home, candidates[0]]);
       continue;
     }
+    const club = candidates.length === 0 ? outsideClubOf(home) : null;
+    if (club !== null) {
+      pairs.push([home, clubSide(home, club)]);
+      continue;
+    }
     for (const candidate of candidates) claimed.add(candidate);
     unreadable.push({
       team: text(home['Team Name']),
@@ -126,6 +136,11 @@ function pairRows(homes, aways, matches) {
   }
   for (const away of aways) {
     if (claimed.has(away)) continue;
+    const club = outsideClubOf(away);
+    if (club !== null) {
+      pairs.push([clubSide(away, club), away]);
+      continue;
+    }
     unreadable.push({
       team: text(away['Team Name']),
       opponent: text(away.Opponent),
@@ -135,8 +150,22 @@ function pairRows(homes, aways, matches) {
   return { pairs, unreadable };
 }
 
+/**
+ * The outside club's side of a one-row game: the own team's row with the two teams crossed (the slot, times, field,
+ * division and note are the game's, the same on both sides).
+ */
+function clubSide(row, clubId) {
+  return {
+    ...row,
+    'Team ID': clubId,
+    'Team Name': text(row.Opponent),
+    Opponent: text(row['Team Name']),
+    Role: row.Role === 'Home' ? 'Away' : 'Home',
+  };
+}
+
 /** The games of a baseline's rows: placed games, TIME TBD games, and the rows that could not be read. */
-function readBaselineGames(rows, weekOfSlot) {
+function readBaselineGames(rows, weekOfSlot, outsideClubOf) {
   const dated = { homes: [], aways: [] };
   const tbd = { homes: [], aways: [] };
   const unreadable = [];
@@ -166,12 +195,14 @@ function readBaselineGames(rows, weekOfSlot) {
       text(away.Slot) === text(home.Slot) &&
       text(away.Start) === text(home.Start) &&
       text(away.End) === text(home.End) &&
-      text(away.Field) === text(home.Field)
+      text(away.Field) === text(home.Field),
+    outsideClubOf
   );
   const waiting = pairRows(
     tbd.homes,
     tbd.aways,
-    (home, away) => crossNames(home, away) && text(away.Notes) === text(home.Notes)
+    (home, away) => crossNames(home, away) && text(away.Notes) === text(home.Notes),
+    outsideClubOf
   );
   unreadable.push(...placed.unreadable, ...waiting.unreadable);
 
@@ -225,7 +256,8 @@ const reasonLabel = (code) =>
  *   the chosen baseline: the master export's rows as they were published, and when the baseline was recorded
  * @param {Array<Record<string, any>>} input.savedGames - the saved schedule (camelCase rows of the latest run)
  * @param {Array<{ homeTeamId: string, awayTeamId: string, weekIndex: number, reason: string, gameDate?: string | null }>} [input.tbdGames] - the TIME TBD games now
- * @param {Array<{ id: string, name: string, division?: string | null }>} input.teams - the registry
+ * @param {Array<{ id: string, name: string, division?: string | null, isExternal?: boolean }>} input.teams - the registry,
+ *   outside clubs included (a game against one is one row of the baseline)
  * @param {Array<{ id: string, name: string, venueId?: string | null }>} input.fields
  * @param {Array<{ id: string, name: string }>} input.venues
  * @param {Array<{ id: string, weekIndex: number }>} input.slots - the game slots, for the week of a baseline's slot
@@ -266,7 +298,19 @@ export function buildChangesSincePublication({
     if (week !== null) weekOfSlot.set(idText(slot.id), week);
   }
 
-  const read = readBaselineGames(baseline.rows, weekOfSlot);
+  // An outside club, by the name and division a row prints (`pairRows`): one exactly, or none.
+  const outsideClubs = new Map();
+  for (const team of teams) {
+    if (team?.isExternal !== true) continue;
+    const key = `${text(team.division)}\u0000${text(team.name)}`;
+    outsideClubs.set(key, [...(outsideClubs.get(key) ?? []), text(team.id)]);
+  }
+  const outsideClubOf = (row) => {
+    const ids = outsideClubs.get(`${text(row.Division)}\u0000${text(row.Opponent)}`) ?? [];
+    return ids.length === 1 ? ids[0] : null;
+  };
+
+  const read = readBaselineGames(baseline.rows, weekOfSlot, outsideClubOf);
 
   /** The team's name now, else the name the baseline printed, else the id. */
   const nameNow = (id, printed) => names.team(id)?.name ?? (printed || names.teamName(id));

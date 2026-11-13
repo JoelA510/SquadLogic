@@ -10,6 +10,9 @@ import Papa from 'papaparse';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ALIAS_CSV,
+  DIVISIONS,
+  FILE_ROWS,
+  HOLD_ONLY_ROW,
   ORG,
   SEASON,
   SPRING_ROWS,
@@ -28,6 +31,7 @@ const { mockSupabase: client } = await import('../frontend/src/lib/mockSupabaseC
 const C = await import('../frontend/src/utils/practiceImportClient.js');
 const M = await import('../frontend/src/utils/practiceImportMapping.js');
 const core = await import('../packages/core/src/practiceImport/index.js');
+const { mockSyncScheduleTbdPractices } = await import('../frontend/src/lib/mockPracticeImport.js');
 
 /** Stage the file, decide every label as the admin would, store the mapping; the job and what was decided. */
 async function staged(rows) {
@@ -74,7 +78,13 @@ async function staged(rows) {
     }
     proposal = propose();
   }
-  return { jobId: started.jobId, proposal, choices };
+  const resolved = core.resolvePracticeRows({
+    rows: stagedRows,
+    league,
+    aliases,
+    decisions: M.decisionsFromChoices(choices, proposal),
+  });
+  return { jobId: started.jobId, proposal, choices, resolvedRows: resolved.rows, league };
 }
 
 beforeEach(() => {
@@ -202,5 +212,173 @@ describe('probable moves are the database’s', () => {
       probable_move: true,
       added: true,
     });
+  });
+});
+
+describe('a ground only a hold names (Codex on #732)', () => {
+  it('is stored as its exact existing ground, so the database knows it and flags the hold over a slot', async () => {
+    const { jobId, proposal, choices, resolvedRows } = await staged([...FILE_ROWS, HOLD_ONLY_ROW]);
+    const mapping = M.practiceMappingForJob(proposal, choices, [], resolvedRows);
+    // CONTROL: the screen's entries do not name Venue C (only a hold does)
+    expect(proposal.locations.map((e) => e.label)).not.toContain('Venue C');
+    expect(Object.values(mapping.locations).map((d) => d.id)).toContain(
+      '0b000000-0000-4000-8000-000000000025'
+    );
+    await C.savePracticeImportMapping(client, jobId, mapping);
+    const preview = await C.previewPracticeImport(client, jobId);
+    expect(preview.holds.find((h) => h.row === 16)).toMatchObject({ ground_known: true });
+    expect(
+      preview.flagged.filter((f) => f.code === 'hold-over-open-slot').map((f) => f.row)
+    ).toEqual([16]);
+  });
+
+  it('a hold creates nothing: a ground that is not the league’s is stored as nothing', async () => {
+    const elsewhere = { ...HOLD_ONLY_ROW, Location: 'Venue Z' };
+    const { proposal, choices, resolvedRows } = await staged([...FILE_ROWS, elsewhere]);
+    const mapping = M.practiceMappingForJob(proposal, choices, [], resolvedRows);
+    expect(Object.keys(mapping.locations).some((k) => k.includes('venue z'))).toBe(false);
+    expect(JSON.stringify(mapping)).not.toContain('create:venue z');
+  });
+});
+
+describe('the confirm is the Edge function’s: the stale check is on the server (review item 4)', () => {
+  it('the client sends the confirm to import-validation, which refuses a stale one and writes nothing', async () => {
+    const { jobId, proposal, choices } = await staged();
+    await C.savePracticeImportMapping(
+      client,
+      jobId,
+      M.practiceMappingForJob(proposal, choices, [])
+    );
+    const preview = await C.previewPracticeImport(client, jobId);
+    const invoke = vi.spyOn(client.functions, 'invoke');
+    const rpc = vi.spyOn(client, 'rpc');
+    const outcome = await C.confirmPracticeImport(client, {
+      organizationId: ORG,
+      seasonSettingsId: SEASON,
+      jobId,
+      confirmed: { ...C.practiceImportConfirmCounts(preview), held_back: 0 },
+    });
+    expect(outcome.status).toBe('stale');
+    expect(outcome.differing).toEqual(['held_back']);
+    expect(invoke.mock.calls.map(([, o]) => /** @type {any} */ (o).body.action)).toEqual(['apply']);
+    // the client itself ran no dry run and no apply
+    expect(rpc.mock.calls.filter(([name]) => name === 'apply_practice_import_job')).toEqual([]);
+    vi.restoreAllMocks();
+  });
+});
+
+describe('re-staging (review item 9)', () => {
+  it('a staged (ready) job is refused another file, and keeps its rows', async () => {
+    const { jobId } = await staged();
+    const before = (
+      await client.from('staging_import_rows').select('id').eq('import_job_id', jobId)
+    ).data.length;
+    expect(before).toBe(15);
+    const { error } = await client.functions.invoke('import-validation', {
+      body: {
+        import_type: 'practice_schedule',
+        action: 'stage',
+        organization_id: ORG,
+        import_job_id: jobId,
+        headers: ['Day', 'Start', 'End', 'Location', 'Field'],
+        rows: [],
+        dates: null,
+      },
+    });
+    const body = await /** @type {any} */ (error).context.json();
+    expect(body.code).toBe('import_not_importing');
+    const after = (await client.from('staging_import_rows').select('id').eq('import_job_id', jobId))
+      .data.length;
+    expect(after).toBe(before);
+  });
+});
+
+describe('division settings: the roster rules are sent back only when unchanged (review item 6)', () => {
+  it('refuses, in words, when the division’s rules changed after the import read them, and writes nothing', async () => {
+    const rpc = vi.spyOn(client, 'rpc');
+    const out = await C.applyPracticeDivisionSettings(client, {
+      organizationId: ORG,
+      seasonSettingsId: SEASON,
+      patches: [
+        {
+          divisionId: DIVISIONS.u10,
+          name: 'U10 Boys',
+          practiceMinutes: 60,
+          // what the import read: another admin has since set the max roster to 12
+          roster: {
+            max_roster_size: 14,
+            min_roster_size: 8,
+            target_team_size: 10,
+            team_count_override: null,
+            min_teams: 2,
+            max_teams: 6,
+          },
+        },
+      ],
+    });
+    expect(out.saved).toEqual([]);
+    expect(out.failed[0].message).toMatch(
+      /team rules \(max roster size\) changed after this import read them/
+    );
+    expect(rpc.mock.calls.filter(([name]) => name === 'admin_upsert_division_settings')).toEqual(
+      []
+    );
+    vi.restoreAllMocks();
+  });
+
+  it('saves when they are unchanged, and reads the TIME TBD list back as counted with the new settings', async () => {
+    // The mock's refresh rebuilds nothing (its header says so: not mirrored); here the SQL's rebuild is stood in by
+    // PR 10's twin of it (`mockSyncScheduleTbdPractices`, held to the SQL by tests/mockPracticeImport.test.js), so the
+    // list the client reads back is the one the database would count with the saved setting.
+    const realRpc = client.rpc.bind(client);
+    vi.spyOn(client, 'rpc').mockImplementation(async (name, params) => {
+      const answer = await realRpc(name, params);
+      if (name === 'refresh_schedule_tbd_practices' && !answer.error) {
+        const db = /** @type {any} */ (window).__MOCK_DB__;
+        mockSyncScheduleTbdPractices(
+          db,
+          ORG,
+          SEASON,
+          new Date().toISOString().slice(0, 10),
+          () => globalThis.crypto.randomUUID(),
+          new Date().toISOString()
+        );
+        /** @type {any} */ (window).__saveMockDB__(db);
+      }
+      return answer;
+    });
+    const { jobId, proposal, choices } = await staged();
+    await C.savePracticeImportMapping(
+      client,
+      jobId,
+      M.practiceMappingForJob(proposal, choices, [])
+    );
+    const preview = await C.previewPracticeImport(client, jobId);
+    // CONTROL: before the settings, two U12 Girls teams are one practice short of two a week
+    expect(preview.time_tbd.teams.map((t) => t.team_id)).toEqual(
+      expect.arrayContaining([TEAMS['U12G-02'], TEAMS['U12G-03']])
+    );
+    const league = await C.readPracticeImportLeague(client, {
+      organizationId: ORG,
+      seasonSettingsId: SEASON,
+    });
+    const u12 = league.divisions.find((d) => d.id === DIVISIONS.u12);
+    const applied = await C.confirmPracticeImport(client, {
+      organizationId: ORG,
+      seasonSettingsId: SEASON,
+      jobId,
+      confirmed: C.practiceImportConfirmCounts(preview),
+      extra: {
+        settings: [
+          { divisionId: DIVISIONS.u12, name: 'U12 Girls', practicesPerWeek: 1, roster: u12.roster },
+        ],
+      },
+    });
+    expect(applied.settings.saved).toEqual([{ name: 'U12 Girls' }]);
+    // lowered from two to one: the deficit is gone from the list read back
+    const ids = applied.settings.tbd.map((t) => t.team_id);
+    expect(ids).not.toContain(TEAMS['U12G-02']);
+    expect(ids).not.toContain(TEAMS['U12G-03']);
+    vi.restoreAllMocks();
   });
 });

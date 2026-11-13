@@ -23,6 +23,7 @@
  */
 
 import {
+  type GameImportRpc,
   parseScheduleDate,
   parseScheduleLength,
   parseScheduleTime,
@@ -204,12 +205,20 @@ function fileRefusal(code: string, message: string, column?: string): PracticeIm
   };
 }
 
+/** Core's `PracticeImportDateError`: a date the caller gave that is not a calendar date. */
+export class PracticeImportDateError extends TypeError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PracticeImportDateError';
+  }
+}
+
 /** A date from the caller: present and not a date is the caller's defect (core: `callerDate`). */
 function callerDate(value: unknown, what: string): string | null {
   if (value === undefined || value === null || value === '') return null;
   const date = parseScheduleDate(value);
   if (date === null) {
-    throw new TypeError(
+    throw new PracticeImportDateError(
       `parsePracticeRows: ${what} must be YYYY-MM-DD, got ${JSON.stringify(value)}`
     );
   }
@@ -700,6 +709,14 @@ export function stagePracticeFile({
     .filter((h) => h.cleaned.trim() !== '');
   const fileHeaders = named.map((h) => h.cleaned);
   const keptNames = named.filter((h) => practiceImportReadsHeader(h.cleaned));
+  // Each kept header's canonical column, worked out once (not once per row).
+  const keptColumns = keptNames.map((h) => {
+    const key = scheduleLabelKey(h.cleaned);
+    const column: string =
+      Object.values(C).find((name) => scheduleLabelKey(name) === key) ??
+      PRACTICE_IMPORT_HEADER_ALIASES[key];
+    return { cleaned: h.cleaned, column };
+  });
   const allowlisted = rows.map((row) => {
     const out: Record<string, string> = {};
     for (const h of keptNames) out[h.cleaned] = cleanCell(row?.[h.original]);
@@ -719,16 +736,9 @@ export function stagePracticeFile({
   };
   const parsed = parsePracticeRows({ headers: fileHeaders, rows: allowlisted, season, dates });
   if (!parsed.ok) return { refusal: parsed.refusal, staged: [], summary: empty };
-  const canonical = (cleaned: string): string => {
-    const key = scheduleLabelKey(cleaned);
-    return (
-      Object.values(C).find((name) => scheduleLabelKey(name) === key) ??
-      PRACTICE_IMPORT_HEADER_ALIASES[key]
-    );
-  };
   const staged = parsed.rows.map((row, i) => {
     const raw: Record<string, string> = {};
-    for (const h of keptNames) raw[canonical(h.cleaned)] = allowlisted[i][h.cleaned];
+    for (const h of keptColumns) raw[h.column] = allowlisted[i][h.cleaned];
     return { ...toStagedPracticeRow(row), raw_payload: raw };
   });
   return {
@@ -756,4 +766,112 @@ export function stagePracticeFile({
         })),
     },
   };
+}
+
+// ------------------------------------------------------------------------------------------------ the confirm
+
+/** Core's `PRACTICE_IMPORT_CONFIRM_MAX_KEYS`. */
+export const PRACTICE_IMPORT_CONFIRM_MAX_KEYS = 40;
+/** Core's `PRACTICE_IMPORT_PREVIEW_STALE`. */
+export const PRACTICE_IMPORT_PREVIEW_STALE = 'practice_import_preview_stale';
+
+export type PracticeConfirmCounts = Record<string, number>;
+
+const record = (value: unknown): Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+
+/** Core's `practiceImportConfirmCounts`: the dry run's own numeric counts, by key, in key order. */
+export function practiceImportConfirmCounts(result: unknown): PracticeConfirmCounts {
+  const counts = record(record(result).counts);
+  return Object.fromEntries(
+    Object.entries(counts)
+      .filter(([, value]) => typeof value === 'number')
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+  ) as PracticeConfirmCounts;
+}
+
+/** Core's `isPracticeImportConfirmCounts`. */
+export function isPracticeImportConfirmCounts(value: unknown): value is PracticeConfirmCounts {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const r = value as Record<string, unknown>;
+  const keys = Object.keys(r);
+  if (keys.length === 0 || keys.length > PRACTICE_IMPORT_CONFIRM_MAX_KEYS) return false;
+  if (typeof r.rows !== 'number') return false;
+  return keys.every(
+    (key) => key.length <= 80 && typeof r[key] === 'number' && Number.isFinite(r[key] as number)
+  );
+}
+
+/** Core's `diffPracticeImportConfirmCounts`: the keys whose counts differ, sorted. */
+export function diffPracticeImportConfirmCounts(a: unknown, b: unknown): string[] {
+  const x = record(a);
+  const y = record(b);
+  return [...new Set([...Object.keys(x), ...Object.keys(y)])]
+    .sort()
+    .filter((key) => Number(x[key] ?? 0) !== Number(y[key] ?? 0));
+}
+
+export type PracticeImportApplyOutcome =
+  | { kind: 'applied'; result: unknown }
+  | {
+      kind: 'stale';
+      code: typeof PRACTICE_IMPORT_PREVIEW_STALE;
+      message: string;
+      differing: string[];
+      confirmed: PracticeConfirmCounts;
+      current: PracticeConfirmCounts;
+      preview: unknown;
+    }
+  | {
+      kind: 'error';
+      stage: 'preview' | 'apply';
+      error: { code?: string; message?: string; details?: string | null };
+    };
+
+/**
+ * The confirm of a practice schedule import, as `applyGameImportConfirmed` is the games one (its own function: the
+ * games one is not changed): the dry run again AS THE CALLER, its counts compared with the ones the admin confirmed,
+ * and the apply only when every one still holds. When any differs nothing is written, and the answer carries both sets
+ * of counts and the fresh preview. A finished job answers with its stored result (`replayed: true`).
+ *
+ * Declared: the dry run and the apply are two statements, so a change that lands between them is not seen here; the
+ * apply then plans against what it finds, and its result says what it did.
+ */
+export async function applyPracticeImportConfirmed({
+  rpc,
+  jobId,
+  confirmed,
+}: {
+  rpc: GameImportRpc;
+  jobId: string;
+  confirmed: PracticeConfirmCounts;
+}): Promise<PracticeImportApplyOutcome> {
+  const preview = await rpc('apply_practice_import_job', {
+    p_import_job_id: jobId,
+    p_dry_run: true,
+  });
+  if (preview.error) return { kind: 'error', stage: 'preview', error: preview.error };
+  if (record(preview.data).replayed === true) return { kind: 'applied', result: preview.data };
+  const current = practiceImportConfirmCounts(preview.data);
+  const differing = diffPracticeImportConfirmCounts(confirmed, current);
+  if (differing.length > 0) {
+    return {
+      kind: 'stale',
+      code: PRACTICE_IMPORT_PREVIEW_STALE,
+      message:
+        'The schedule changed after this preview was made, so the import would no longer do what was confirmed. Nothing was written. Review the new preview and confirm again.',
+      differing,
+      confirmed,
+      current,
+      preview: preview.data,
+    };
+  }
+  const applied = await rpc('apply_practice_import_job', {
+    p_import_job_id: jobId,
+    p_dry_run: false,
+  });
+  if (applied.error) return { kind: 'error', stage: 'apply', error: applied.error };
+  return { kind: 'applied', result: applied.data };
 }

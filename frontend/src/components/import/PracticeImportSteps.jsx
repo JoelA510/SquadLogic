@@ -1,7 +1,8 @@
 import React, { useId, useMemo } from 'react';
 import Papa from 'papaparse';
+import { PRACTICE_ALIAS_COLUMNS } from '@squadlogic/core/practiceImport/aliases.js';
+import { practiceLabelKey } from '@squadlogic/core/practiceImport/slotKey.js';
 import {
-  describePracticeImportReason,
   divisionSettingsToApply,
   proposeDivisionSettings,
   proposePracticeMapping,
@@ -11,6 +12,7 @@ import {
 import Button from '../ui/Button.jsx';
 import { importFileSizeProblem } from '../../utils/importFileLimits.js';
 import { practiceProbableMoves } from '../../utils/practiceImportClient.js';
+import { practiceImportWords, readablePracticeDetail } from '../../utils/practiceImportWords.js';
 import {
   PRACTICE_MAPPING_GROUPS,
   UNDECIDED,
@@ -21,6 +23,7 @@ import {
   recordsInScope,
   shownChoice,
   shownProblem,
+  withoutOutOfScopeChoices,
 } from '../../utils/practiceImportMapping.js';
 import { NAMED, NamedList, Notice } from './importParts.jsx';
 
@@ -42,22 +45,16 @@ import { NAMED, NamedList, Notice } from './importParts.jsx';
  * record is created only after the confirm listed it and the admin ticked that list.
  */
 
-/** A reason or flag code in words; a code this build has no words for is shown as it is, never hidden. */
-function words(code) {
-  try {
-    return describePracticeImportReason(code);
-  } catch (error) {
-    if (!(error instanceof Error)) throw error;
-    return String(code);
-  }
-}
-/** The same, as a clause (no closing full stop). */
+const words = practiceImportWords;
+/** The label keys the alias file is read by: its columns, and `Venue` for `Location` (core's `aliases.js`). */
+const ALIAS_HEADER_KEYS = new Set(
+  [...Object.values(PRACTICE_ALIAS_COLUMNS), 'Venue'].map((name) => practiceLabelKey(name))
+);
+/** @param {string} header */
+const practiceAliasReadsHeader = (header) => ALIAS_HEADER_KEYS.has(practiceLabelKey(header));
+/** A code in words, as a clause (no closing full stop). */
 const clause = (code) => words(code).replace(/\.$/, '');
-/** The database's own sentence with a record id taken out: an id is not words to an admin. */
-const readable = (text) =>
-  String(text ?? '')
-    .replace(/\s*\([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\)/gi, '')
-    .trim();
+const readable = readablePracticeDetail;
 const capital = (text) => (text ? `${text[0].toUpperCase()}${text.slice(1)}` : text);
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const sameList = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
@@ -217,10 +214,13 @@ export default function PracticeImportSteps(props) {
     () => proposeDivisionSettings({ rows: resolved.rows, league }),
     [resolved, league]
   );
+  // A division this import creates is not offered a setting: its row would then differ from what the apply wrote, and
+  // a roll back would keep it as changed. It is set on the Team Analysis page after the confirm.
   const offered = settings.filter(
     (p) =>
-      (p.practicesPerWeek.differs && p.practicesPerWeek.storable) ||
-      (p.practiceMinutes.differs && p.practiceMinutes.storable)
+      !p.isNew &&
+      ((p.practicesPerWeek.differs && p.practicesPerWeek.storable) ||
+        (p.practiceMinutes.differs && p.practiceMinutes.storable))
   );
   // Only a ticked division, and only values the database would take (decision 26: never silent).
   const patches = useMemo(() => {
@@ -234,10 +234,11 @@ export default function PracticeImportSteps(props) {
       )
       .map((patch) => {
         const p = settings.find((x) => x.divisionId === patch.divisionId);
-        const created = resolved.creations.divisions.find((d) => d.id === patch.divisionId);
-        return { ...patch, name: created?.name ?? p?.label ?? '' };
+        const stored = league.divisions.find((d) => d.id === patch.divisionId);
+        // the division's other rules as this import read them: the save refuses if they have changed since
+        return { ...patch, name: stored?.name ?? p?.label ?? '', roster: stored?.roster ?? null };
       });
-  }, [offered, settings, practice.settingsTicks, resolved]);
+  }, [offered, settings, practice.settingsTicks, league]);
 
   // The probable moves of the preview on screen: the database's flagged rows, team by team.
   const moves = useMemo(() => (preview ? practiceProbableMoves(preview) : []), [preview]);
@@ -250,15 +251,21 @@ export default function PracticeImportSteps(props) {
   const storedTicks = props.sent?.mapping?.options?.add_moved_rows ?? [];
   const ticksChanged = preview !== null && !sameList(ticked, storedTicks);
 
+  // Every change of the choices drops a `map:<id>` its label's scope no longer holds (a team of the division its
+  // division label was mapped to before): it would be sent and refused, or hidden behind a select that shows "not
+  // decided".
+  const settle = (next) => withoutOutOfScopeChoices(next, proposal, league);
   const setChoice = (group, key, value) =>
-    props.setChoices((prev) => ({ ...prev, [group]: { ...(prev[group] ?? {}), [key]: value } }));
+    props.setChoices((prev) =>
+      settle({ ...prev, [group]: { ...(prev[group] ?? {}), [key]: value } })
+    );
   const setAllUndecided = (group, value) =>
     props.setChoices((prev) => {
       const next = { ...(prev[group] ?? {}) };
       for (const entry of proposal[group]) {
         if (shownChoice(entry, prev[group]?.[entry.key]) === UNDECIDED) next[entry.key] = value;
       }
-      return { ...prev, [group]: next };
+      return settle({ ...prev, [group]: next });
     });
 
   // The proposals an admin may take in one press: a label nobody decided, with one record every proposal names and no
@@ -289,12 +296,12 @@ export default function PracticeImportSteps(props) {
         next = { ...next, [group]: { ...(next[group] ?? {}), [key]: `map:${id}` } };
       }
     }
-    props.setChoices(next);
+    props.setChoices(settle(next));
   };
 
   const preview_ = () => {
     // The mapping that is sent, the names IT would create, and the ticked settings: taken once, here.
-    const mapping = practiceMappingForJob(proposal, choices, ticked);
+    const mapping = practiceMappingForJob(proposal, choices, ticked, resolved.rows);
     props.onPreview(mapping, resolved.creations, patches);
   };
   const previewWithTicks = () => {
@@ -331,11 +338,26 @@ export default function PracticeImportSteps(props) {
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
-      complete: ({ data, meta }) =>
+      complete: ({ data, meta }) => {
+        // The CSV reader renames a repeated header (`Location`, `Location_1`) and goes on, so the alias reader would
+        // never see the second column, and one of two conflicting columns would be used without a word. A repeat of a
+        // column the alias file is read by refuses the file, as the main upload does.
+        const repeated = Object.values(meta.renamedHeaders ?? {}).find((original) =>
+          practiceAliasReadsHeader(String(original))
+        );
         props.setPractice((prev) => ({
           ...prev,
-          aliasFile: { name: file.name, headers: meta.fields ?? [], rows: data },
-        })),
+          aliasFile:
+            repeated !== undefined
+              ? {
+                  name: file.name,
+                  headers: [],
+                  rows: [],
+                  problem: `the file has the column "${String(repeated).trim()}" more than once (or two names for it). Remove one and choose it again`,
+                }
+              : { name: file.name, headers: meta.fields ?? [], rows: data },
+        }));
+      },
       error: (err) =>
         props.setPractice((prev) => ({
           ...prev,
@@ -632,6 +654,8 @@ export default function PracticeImportSteps(props) {
                         />
                         <span>{settingsWords(p)}</span>
                       </label>
+                    ) : p.isNew ? (
+                      <span>{`${settingsWords(p)} This import creates the division, so its settings are not saved here: set them on the Team Analysis page after you confirm.`}</span>
                     ) : (
                       <span>{`${settingsWords(p)} Nothing to save.`}</span>
                     )}
@@ -683,9 +707,16 @@ export default function PracticeImportSteps(props) {
       return `Row ${x.row}: ${words(x.reason)}${said ? ` ${said}` : ''}`;
     });
   /** @param {any} r @param {string} testPrefix */
-  const lists = (r, testPrefix) => {
-    const short = (r?.time_tbd?.teams ?? []).filter((t) => t.in_file);
-    const elsewhere = (r?.time_tbd?.teams ?? []).filter((t) => !t.in_file);
+  const lists = (r, testPrefix, shortNote = null, teamsNow = null) => {
+    const inFile = new Set([
+      ...(r?.time_tbd?.teams ?? []).filter((t) => t.in_file).map((t) => String(t.team_id)),
+      ...(r?.arriving ?? []).map((a) => String(a.team_id)),
+    ]);
+    const teams = teamsNow
+      ? teamsNow.map((t) => ({ ...t, in_file: inFile.has(String(t.team_id)) }))
+      : (r?.time_tbd?.teams ?? []);
+    const short = teams.filter((t) => t.in_file);
+    const elsewhere = teams.filter((t) => !t.in_file);
     return (
       <>
         <NamedList
@@ -745,6 +776,7 @@ export default function PracticeImportSteps(props) {
             <p className="text-xs text-text-muted mb-1 max-w-prose">
               They are on the TIME TBD list, and the next practice run places only them; every saved
               practice stays where it is.
+              {shortNote && ` ${shortNote}`}
             </p>
             <ul className="text-sm text-text-secondary space-y-1 list-disc pl-5">
               {short.slice(0, NAMED).map((t) => (
@@ -873,7 +905,7 @@ export default function PracticeImportSteps(props) {
             </ul>
             <p className="text-xs text-text-muted mt-1">
               The flags below are judged with the settings stored now; the TIME TBD list is counted
-              again with the saved ones.
+              again with the saved ones. A roll back of this import does not undo them.
             </p>
           </section>
         )}
@@ -1058,7 +1090,18 @@ export default function PracticeImportSteps(props) {
           </div>
         )}
         {countTable(r, false)}
-        {lists(r, 'practice-import-result')}
+        {lists(
+          r,
+          'practice-import-result',
+          // After the ticked division settings were saved the list was counted again and read back: those are the
+          // teams short NOW. When it could not be read back, the apply's own list is said to be from before them.
+          outcome?.saved?.length > 0
+            ? outcome.tbd
+              ? 'Counted again after the division settings were saved.'
+              : 'As counted before the division settings were saved; the next practice save counts it again.'
+            : null,
+          outcome?.saved?.length > 0 && outcome.tbd ? outcome.tbd : null
+        )}
         <div className="flex flex-wrap gap-3 mt-4">
           {!props.rolledBackHere && props.jobId && (
             <Button

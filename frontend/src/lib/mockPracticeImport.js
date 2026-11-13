@@ -35,6 +35,13 @@ import {
   PRACTICE_IMPORT_STAGE_LIMITS,
   stagePracticeFile,
 } from '@squadlogic/core/practiceImport/staging.js';
+import { PracticeImportDateError } from '@squadlogic/core/practiceImport/parseRows.js';
+import {
+  PRACTICE_IMPORT_PREVIEW_STALE,
+  diffPracticeImportConfirmCounts,
+  isPracticeImportConfirmCounts,
+  practiceImportConfirmCounts,
+} from '@squadlogic/core/practiceImport/previewCounts.js';
 import { sanitizeImportText } from '../utils/importRows.js';
 import { defaultProgramOf } from './mockPrograms.js';
 
@@ -2067,11 +2074,14 @@ const ISO_DATE_TEXT = /^\d{4}-\d{2}-\d{2}$/;
  * `supabase/functions/import-validation/index.ts`; plan 4.11, PR 11, task L1).
  *
  * **Mirrored.** The caller is signed in and an admin of the organization; the request's shape (at most 2,400 rows, the
- * two dates `YYYY-MM-DD` or null); the job is a practice schedule job of the organization that still takes rows; the
- * season's window is the JOB's; the file is read whole by core's `stagePracticeFile` (the function the Edge mirror is
- * held to); a date that is not a calendar date is refused; a refused file stages nothing and answers
- * `status: 'refused'`; a staged file replaces everything the job had staged. **Not mirrored:** the rate limit, the
- * payload byte limit, the demo fence (the mock's own league is no demo here) and the audit rows.
+ * two dates `YYYY-MM-DD` or null); the job is a practice schedule job of the organization. `action: 'stage'`: the job
+ * is still `importing` (a staged job is never staged again); the season's window is the JOB's; the file is read whole
+ * by core's `stagePracticeFile` (the function the Edge mirror is held to); only a date that is not a calendar date
+ * (`PracticeImportDateError`) is refused as `bad-date`, and any other error is thrown; a refused file stages nothing
+ * and answers `status: 'refused'`. `action: 'apply'`: the counts the admin confirmed are required, the dry run is run
+ * again and the apply is refused as `practice_import_preview_stale` (409, nothing written) when its counts differ
+ * (`applyPracticeImportConfirmed`). **Not mirrored:** the rate limit, the payload byte limit, the demo fence (the mock's
+ * own league is no demo here) and the audit rows.
  *
  * @param {any} db
  * @param {any} body
@@ -2088,14 +2098,17 @@ export function handlePracticeImportFunction(db, body, ctx) {
   const dates = body?.dates ?? null;
   const badDate = (v) =>
     v !== undefined && v !== null && !(typeof v === 'string' && ISO_DATE_TEXT.test(v));
+  const action = body?.action ?? 'stage';
+  const headers = body?.headers ?? [];
+  const rows = body?.rows ?? [];
   if (
     !body?.organization_id ||
     !body?.import_job_id ||
-    (body.action ?? 'stage') !== 'stage' ||
-    !Array.isArray(body.headers) ||
-    body.headers.length > PRACTICE_IMPORT_STAGE_LIMITS.MAX_HEADERS ||
-    !Array.isArray(body.rows) ||
-    body.rows.length > PRACTICE_IMPORT_STAGE_LIMITS.MAX_ROWS ||
+    !['stage', 'apply'].includes(action) ||
+    !Array.isArray(headers) ||
+    headers.length > PRACTICE_IMPORT_STAGE_LIMITS.MAX_HEADERS ||
+    !Array.isArray(rows) ||
+    rows.length > PRACTICE_IMPORT_STAGE_LIMITS.MAX_ROWS ||
     (dates !== null &&
       (typeof dates !== 'object' || badDate(dates.valid_from) || badDate(dates.valid_until)))
   ) {
@@ -2125,11 +2138,84 @@ export function handlePracticeImportFunction(db, body, ctx) {
       })
     );
   }
-  if (['completed', 'completed_with_warnings', 'failed', 'needs_fix'].includes(job.status)) {
+  if (action === 'apply') {
+    if (!isPracticeImportConfirmCounts(body.confirmed)) {
+      return done(
+        httpRefusal(400, {
+          status: 'error',
+          code: 'confirmed_counts_required',
+          message:
+            'The confirm must carry the counts of the preview it confirms. Preview the import again.',
+        })
+      );
+    }
+    const call = (dry) =>
+      handlePracticeImportRpc(
+        db,
+        'apply_practice_import_job',
+        { p_import_job_id: job.id, p_dry_run: dry },
+        { ...ctx, newId, now }
+      );
+    const refused = (error) => {
+      const status =
+        error.code === '42501'
+          ? 403
+          : error.code === 'P0002'
+            ? 404
+            : error.code === '22023' || error.code === '23505'
+              ? 409
+              : 500;
+      return done(
+        httpRefusal(status, {
+          status: 'error',
+          code: error.details || error.code || 'practice_import_failed',
+          message:
+            status === 500
+              ? 'The import could not be applied.'
+              : (error.message ?? 'The import was refused.'),
+        })
+      );
+    };
+    const preview = call(true);
+    if (preview.error) return refused(preview.error);
+    if (preview.data?.replayed === true) {
+      return done({
+        data: { status: 'success', import_type: 'practice_schedule', result: preview.data },
+        error: null,
+      });
+    }
+    const current = practiceImportConfirmCounts(preview.data);
+    const differing = diffPracticeImportConfirmCounts(body.confirmed, current);
+    if (differing.length > 0) {
+      return done(
+        httpRefusal(409, {
+          status: 'error',
+          code: PRACTICE_IMPORT_PREVIEW_STALE,
+          message:
+            'The schedule changed after this preview was made, so the import would no longer do what was confirmed. Nothing was written. Review the new preview and confirm again.',
+          differing,
+          confirmed: body.confirmed,
+          current,
+          preview: preview.data,
+        })
+      );
+    }
+    const applied = call(false);
+    if (applied.error) return refused(applied.error);
+    return done(
+      {
+        data: { status: 'success', import_type: 'practice_schedule', result: applied.data },
+        error: null,
+      },
+      true
+    );
+  }
+  if (job.status !== 'importing') {
     return done(
       httpRefusal(409, {
         status: 'error',
-        message: `Import job cannot accept staged rows while ${job.status}`,
+        code: 'import_not_importing',
+        message: `Import job cannot accept staged rows while ${job.status}: a new file is a new import.`,
       })
     );
   }
@@ -2146,14 +2232,15 @@ export function handlePracticeImportFunction(db, body, ctx) {
   let staged;
   try {
     staged = stagePracticeFile({
-      headers: body.headers,
-      rows: body.rows,
+      headers,
+      rows,
       season: { startDate: season.season_start ?? null, endDate: season.season_end ?? null },
       dates: { validFrom: dates?.valid_from ?? null, validUntil: dates?.valid_until ?? null },
       clean: sanitizeImportText,
     });
   } catch (error) {
-    if (!(error instanceof TypeError)) throw error;
+    // Only a date that is not a calendar date is the file's answer; anything else is a defect, thrown.
+    if (!(error instanceof PracticeImportDateError)) throw error;
     return done({
       data: {
         status: 'refused',

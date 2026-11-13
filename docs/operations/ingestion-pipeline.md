@@ -192,9 +192,12 @@ the upload step asks for (they fill a row's blank Valid From or Valid Until ahea
 `_shared/practice-import.ts` (a mirror of core's parse and `toStagedPracticeRow`; the allowlist is asserted on every
 staged key) and audits `import.started` or `import.failed`. The tab then reads the staged rows back for the mapping
 (exact names, the optional alias file read in the browser, and the previous practice import's mapping as proposals, each
-said with its source), stores the mapping with the ticked probable moves, and shows the dry run. The confirm runs the dry
-run again and applies only when its counts are still the ones the admin saw; then the ticked division settings are saved
-(`admin_upsert_division_settings`, the division's other rules sent as stored) and the TIME TBD list is counted again.
+said with its source), stores the mapping with the ticked probable moves, and shows the dry run. The confirm is the Edge
+function's (`action: 'apply'`): it runs the dry run again as the admin and applies only when its counts are still the
+ones the admin saw, else answers `practice_import_preview_stale` and writes nothing. Then the ticked division settings of
+existing divisions are saved (`admin_upsert_division_settings`, the division's other rules sent as stored, refused when
+they changed since the import read them) and the TIME TBD list is counted again and read back. A rollback does not undo a
+saved setting. A file is staged only into a job still `importing`.
 
 **Retention.** Staged practice schedule rows are not on a retention job: they hold venue, field, half, division and team labels, weekdays, times, dates and capacities, and the allowlist keeps no name of a person, no coach, no email and no contact (`tests/gameImportPipelineLists.test.js` holds the exemption with its reason).
 

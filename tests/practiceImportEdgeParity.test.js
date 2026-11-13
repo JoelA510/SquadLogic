@@ -492,3 +492,72 @@ describe('timed in the mode CI runs (lesson 59)', () => {
     expect(whole).toBeLessThan(500);
   });
 });
+
+describe('the confirm on the server: applyPracticeImportConfirmed (review item 4)', () => {
+  /** A database that answers the dry run with `preview` and the apply with `applied`, and records the calls. */
+  const fakeRpc = (preview, applied = { counts: { rows: 2, inserted: 1 } }) => {
+    const calls = [];
+    const rpc = async (name, params) => {
+      calls.push([name, params.p_dry_run]);
+      return { data: params.p_dry_run ? preview : applied, error: null };
+    };
+    return { rpc, calls };
+  };
+
+  it('applies when every confirmed count still holds', async () => {
+    const { rpc, calls } = fakeRpc({ counts: { rows: 2, inserted: 1 } });
+    const out = await edge.applyPracticeImportConfirmed({
+      rpc,
+      jobId: 'job',
+      confirmed: { inserted: 1, rows: 2 },
+    });
+    expect(out.kind).toBe('applied');
+    expect(calls).toEqual([
+      ['apply_practice_import_job', true],
+      ['apply_practice_import_job', false],
+    ]);
+  });
+
+  it('refuses as stale, with both sets of counts and the fresh preview, and never applies', async () => {
+    const preview = { counts: { rows: 2, inserted: 0, held_back: 1 } };
+    const { rpc, calls } = fakeRpc(preview);
+    const out = /** @type {any} */ (
+      await edge.applyPracticeImportConfirmed({
+        rpc,
+        jobId: 'job',
+        confirmed: { rows: 2, inserted: 1 },
+      })
+    );
+    expect(out).toMatchObject({
+      kind: 'stale',
+      code: 'practice_import_preview_stale',
+      differing: ['held_back', 'inserted'],
+      current: { held_back: 1, inserted: 0, rows: 2 },
+      preview,
+    });
+    expect(calls).toEqual([['apply_practice_import_job', true]]);
+  });
+
+  it('a finished job answers with its stored result, a replay and not a stale preview', async () => {
+    const { rpc, calls } = fakeRpc({ counts: { rows: 9 }, replayed: true });
+    const out = await edge.applyPracticeImportConfirmed({
+      rpc,
+      jobId: 'job',
+      confirmed: { rows: 2 },
+    });
+    expect(out.kind).toBe('applied');
+    expect(calls).toHaveLength(1);
+  });
+
+  it('holds the confirm-count helpers equal to core’s', async () => {
+    const core = await import('../packages/core/src/practiceImport/previewCounts.js');
+    const r = { counts: { rows: 3, inserted: 1, b: 2 }, other: 1 };
+    expect(edge.practiceImportConfirmCounts(r)).toEqual(core.practiceImportConfirmCounts(r));
+    expect(edge.diffPracticeImportConfirmCounts({ a: 1 }, { a: 2, b: 0 })).toEqual(
+      core.diffPracticeImportConfirmCounts({ a: 1 }, { a: 2, b: 0 })
+    );
+    for (const v of [{ rows: 1 }, {}, { rows: '1' }, { rows: 1, x: Infinity }, [1], null]) {
+      expect(edge.isPracticeImportConfirmCounts(v)).toBe(core.isPracticeImportConfirmCounts(v));
+    }
+  });
+});

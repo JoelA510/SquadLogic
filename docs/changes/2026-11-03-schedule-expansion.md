@@ -1860,12 +1860,19 @@ requirements of the PR 10 review and by this PR:
    about 90 ms with coverage on (500 rows: about 14 ms).
 4. **The confirm step's two dates (decision 25) are asked on the upload step**, because the parse fills a blank Valid
    From or Valid Until when the file is staged; changing them means choosing the file again.
-5. **The confirm re-runs the dry run in the client and refuses a stale one** (the games confirm does this in the Edge
-   function); the practice apply is the database's own RPC, called as the admin.
-6. **Division settings are saved after the apply**, through `admin_upsert_division_settings` with the division's other
-   rules read and sent back as stored (the RPC sets every rule it is given; a null clears it), then the TIME TBD list is
-   counted again. A division the import created is found by its name. The preview says the flags are judged with the
-   settings stored now; the result says what was saved and what was not.
+5. **The confirm is the Edge function's** (`import-validation`, `action: 'apply'`; review round): it runs the dry run
+   again as the admin, compares its counts with the confirmed ones and applies only when they hold, else answers
+   `practice_import_preview_stale` with the fresh preview and writes nothing (`applyPracticeImportConfirmed`, a sibling of
+   the games one, which is not changed). A file is staged only into a job still `importing`, so a ready job is never
+   emptied and staged again.
+6. **Division settings are saved after the apply, for existing divisions only**, through `admin_upsert_division_settings`
+   with the division's other rules sent back as stored (the RPC sets every rule it is given; a null clears it). The
+   division is read again just before the write and the save is refused, in words, when its roster rules are no longer
+   the ones the import read. Then the TIME TBD list is counted again and read back, and the result shows the teams short
+   as counted with the saved settings (or says its list is from before them). A division the import creates is offered
+   no setting (a setting would make the rollback keep it as changed): the screen says to set it on the Team Analysis page
+   after the confirm. The confirm list and the rollback say that a rollback does not undo a saved setting. **Follow-up:**
+   an RPC that sets a division's practice settings alone, without the roster rules, would end the read-then-write.
 7. **The confirm list** names every record to be created and counts the practice slots, and the confirm is refused until
    it is ticked; venues and fields created have no coordinates, said beside the list.
 8. **Every reason in words**: the reason's sentence and the database's own message with record ids taken out
@@ -1876,7 +1883,14 @@ requirements of the PR 10 review and by this PR:
    its 45 tests are unchanged and pass on the base and the branch alike. **Lazy:** the practice steps, the practice
    client and the practice parser are chunks of their own, loaded when the Practices tab uses them; first paint is
    281.08 KB gz against 281.09 on the base, and the Games tab's own chunks grow by about 2 KB gz (the kind's words).
-10. **A defect of PR 10's mock, fixed**: a division the mock's apply created had no `program_id` (the SQL's trigger fills
+10. **Review round (#732: three Codex findings and one review).** A repeated column in the alias file refuses it; a
+    ground only a hold names is stored as its exact existing ground (a hold creates nothing), so the database knows it
+    and flags a hold over a slot; a `map` that leaves its label's scope goes back to undecided in the choices; the stage
+    answers `bad-date` only for `PracticeImportDateError` and audits and rethrows anything else; the words helper catches
+    nothing; the header-to-column map is made once per file in core and the mirror; the clients share
+    `utils/importClientCommon.js`; the panel's kind checks are `KINDS` fields (`Steps`, `takesDates`,
+    `recordsBaseline`, `uploadNote`), with only `data-kind` left reading `kind`.
+11. **A defect of PR 10's mock, fixed**: a division the mock's apply created had no `program_id` (the SQL's trigger fills
     it), so the mock's read-time program backfill changed the row and the rollback kept the division as changed. The
     games mock creates divisions the same way and was not changed (follow-up). Lesson 112.
 

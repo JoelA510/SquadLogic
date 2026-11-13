@@ -47,6 +47,10 @@ export const SAVED = Object.freeze({
   u12g02: '0b000000-0000-4000-8000-000000000041',
 });
 export const COACH = '0b000000-0000-4000-8000-000000000050';
+/** A ground only a hold names in `HOLD_ONLY_ROW` (no placement or open slot is there), with a saved, unused slot. */
+export const VENUE_C = '0b000000-0000-4000-8000-000000000025';
+export const FIELD_C1 = '0b000000-0000-4000-8000-000000000026';
+export const SAVED_SLOT_C = '0b000000-0000-4000-8000-000000000032';
 export const RUN = '0b000000-0000-4000-8000-000000000060';
 
 const team = (n) => `0b000000-0000-4000-8000-0000000001${String(n).padStart(2, '0')}`;
@@ -150,10 +154,14 @@ export function seedPracticeImportWorld({ savedRange = FALL_RANGE } = {}) {
       },
     ],
     teams: Object.entries(TEAMS).map(([name, id]) => teamRow(name, id)),
-    locations: [{ id: VENUE_A, organization_id: ORG, name: 'Venue A', effective_to: null }],
+    locations: [
+      { id: VENUE_A, organization_id: ORG, name: 'Venue A', effective_to: null },
+      { id: VENUE_C, organization_id: ORG, name: 'Venue C', effective_to: null },
+    ],
     fields: [
       { id: FIELD_1, organization_id: ORG, location_id: VENUE_A, name: 'Field 1', active: true },
       { id: FIELD_2, organization_id: ORG, location_id: VENUE_A, name: 'Field 2', active: true },
+      { id: FIELD_C1, organization_id: ORG, location_id: VENUE_C, name: 'Field 1', active: true },
     ],
     field_subunits: [
       { id: HALF_A, organization_id: ORG, field_id: FIELD_1, label: 'A', effective_to: null },
@@ -162,6 +170,7 @@ export function seedPracticeImportWorld({ savedRange = FALL_RANGE } = {}) {
     practice_slots: [
       slot(SAVED_SLOT_MON, 'mon', '16:00', '17:00'),
       slot(SAVED_SLOT_WED, 'wed', '16:00', '17:00'),
+      { ...slot(SAVED_SLOT_C, 'wed', '16:00', '17:00'), field_id: FIELD_C1 },
     ],
     practice_assignments: [
       practice(SAVED.u10b03, TEAMS['U10B-03'], SAVED_SLOT_MON, savedRange),
@@ -348,6 +357,18 @@ export const SPRING_ROWS = Object.freeze(
       ? { ...row, 'Valid From': '2027-01-04', 'Valid Until': '2027-03-31' }
       : row
   )
+);
+
+/** A hold on Venue C, a ground no other row names, over its saved slot: `hold-over-open-slot` once its ground is known. */
+export const HOLD_ONLY_ROW = Object.freeze(
+  r({
+    Day: 'Wed',
+    Start: '16:00',
+    End: '17:00',
+    Location: 'Venue C',
+    Field: 'Field 1',
+    Use: 'hold',
+  })
 );
 
 /** The alias file: one label of the practice file to one of the league's locations. */

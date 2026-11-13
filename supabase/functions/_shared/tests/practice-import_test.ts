@@ -10,7 +10,11 @@
 
 import { assert, assertEquals, assertThrows } from 'https://deno.land/std@0.203.0/assert/mod.ts';
 import { sanitizeImportText } from '../import-rows.ts';
-import { PRACTICE_IMPORT_LIMITS, stagePracticeFile } from '../practice-import.ts';
+import {
+  applyPracticeImportConfirmed,
+  PRACTICE_IMPORT_LIMITS,
+  stagePracticeFile,
+} from '../practice-import.ts';
 import table from './fixtures/practice-import.vectors.json' with { type: 'json' };
 
 interface Vector {
@@ -73,4 +77,29 @@ Deno.test('a confirm-step date that is not a date is the caller’s defect, thro
       }),
     TypeError
   );
+});
+
+Deno.test('the confirm refuses a stale preview and applies only when the counts hold', async () => {
+  const calls: Array<boolean> = [];
+  const rpc = (preview: unknown) => (_name: string, params: Record<string, unknown>) => {
+    calls.push(params.p_dry_run === true);
+    return Promise.resolve({
+      data: params.p_dry_run ? preview : { counts: { rows: 2 } },
+      error: null,
+    });
+  };
+  const stale = await applyPracticeImportConfirmed({
+    rpc: rpc({ counts: { rows: 2, inserted: 0 } }),
+    jobId: 'job',
+    confirmed: { rows: 2, inserted: 1 },
+  });
+  assertEquals(stale.kind, 'stale');
+  assertEquals(calls, [true]);
+  const applied = await applyPracticeImportConfirmed({
+    rpc: rpc({ counts: { rows: 2, inserted: 1 } }),
+    jobId: 'job',
+    confirmed: { rows: 2, inserted: 1 },
+  });
+  assertEquals(applied.kind, 'applied');
+  assertEquals(calls, [true, true, false]);
 });

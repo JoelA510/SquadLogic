@@ -221,6 +221,18 @@ function fileRefusal(code, message, column) {
 }
 
 /**
+ * A date the caller gave (the season's, or the confirm step's) that is not a calendar date. Its own class, so the Edge
+ * function and the mock answer exactly this as `bad-date` and let every other error through (PR 11 review).
+ */
+export class PracticeImportDateError extends TypeError {
+  /** @param {string} message */
+  constructor(message) {
+    super(message);
+    this.name = 'PracticeImportDateError';
+  }
+}
+
+/**
  * A date that comes from the caller (the season, the confirm step): present and not a date is a defect
  * in the caller, not "no date" (which would turn a rule off in silence).
  */
@@ -228,7 +240,7 @@ function callerDate(value, what) {
   if (value === undefined || value === null || value === '') return null;
   const date = parseScheduleDate(value);
   if (date === null) {
-    throw new TypeError(
+    throw new PracticeImportDateError(
       `parsePracticeRows: ${what} must be YYYY-MM-DD, got ${JSON.stringify(value)}`
     );
   }

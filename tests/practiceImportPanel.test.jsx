@@ -403,3 +403,114 @@ describe('the result and the roll back', () => {
     expect((await table('divisions')).some((d) => d.name === 'U14 Boys')).toBe(false);
   });
 });
+
+describe('the review round of #732', () => {
+  it('C1: an alias file with a column twice is refused, never read with one copy dropped', async () => {
+    render(<ScheduleImportPanel kind="practices" />);
+    await toMapping();
+    const twice = 'Alias,Location,Field,Location\r\nVenue A Annex,Venue A,,Venue B\r\n';
+    fireEvent.change(screen.getByLabelText('Choose an alias file (optional)'), {
+      target: { files: [new File([twice], 'aliases.csv', { type: 'text/csv' })] },
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('practice-import-alias-summary').textContent).toMatch(
+        /aliases\.csv could not be read: the file has the column "Location" more than once/
+      )
+    );
+    // nothing it says is proposed
+    expect(screen.queryByText(/Proposed by the alias file/)).toBeNull();
+  });
+
+  it('1: a division the import creates is offered no setting, says where to set it, and the screens say a roll back keeps settings', async () => {
+    render(<ScheduleImportPanel kind="practices" />);
+    await toMapping();
+    decideEverything();
+    expect(screen.queryByLabelText('Save these settings for U14 Boys')).toBeNull();
+    expect(screen.getByTestId('practice-import-settings').textContent).toMatch(
+      /U14 Boys \(created by this import\).*set them on the Team Analysis page after you confirm/
+    );
+    fireEvent.click(checkbox('Save these settings for U10 Boys'));
+    await toPreview();
+    expect(screen.getByTestId('practice-import-settings-pending').textContent).toMatch(
+      /A roll back of this import does not undo them\./
+    );
+    fireEvent.click(checkbox(/Create the \d+ records listed above/));
+    fireEvent.click(button('Confirm and import'));
+    await waitFor(() => expect(step()).toMatch(/4 of 4/), { timeout: 5000 });
+    fireEvent.click(button('Roll back this import'));
+    await waitFor(() =>
+      expect(screen.getByTestId('schedule-import-rolled-back').textContent).toMatch(
+        /Division practice settings saved with the import are not undone by a roll back\./
+      )
+    );
+    // the division the import created is gone with the roll back (no setting made it differ)
+    expect((await table('divisions')).some((d) => d.name === 'U14 Boys')).toBe(false);
+  });
+
+  it('3: a team mapped in a division whose label then moves to another division goes back to undecided, and its old id is not sent', async () => {
+    render(<ScheduleImportPanel kind="practices" />);
+    await toMapping();
+    decideEverything();
+    choose('U10B-05 (U10 Boys)', `map:${TEAMS['U10B-04']}`);
+    expect(select('U10B-05 (U10 Boys)').value).toBe(`map:${TEAMS['U10B-04']}`);
+    choose('U10 Boys', `map:${DIVISIONS.u12}`);
+    expect(select('U10B-05 (U10 Boys)').value).toBe('undecided');
+    const row = select('U10B-05 (U10 Boys)').closest('tr');
+    expect(
+      within(/** @type {HTMLElement} */ (row)).getByText(
+        'Not decided: its rows will not be imported.'
+      )
+    ).toBeTruthy();
+    await toPreview();
+    const mapping = await storedMapping();
+    expect(JSON.stringify(mapping.teams)).not.toContain(TEAMS['U10B-04']);
+  });
+
+  it('C3: the result shows the teams short as counted again after the ticked settings were saved', async () => {
+    const { mockSyncScheduleTbdPractices } =
+      await import('../frontend/src/lib/mockPracticeImport.js');
+    // The mock's refresh rebuilds nothing (not mirrored, its header says); the SQL's rebuild is stood in by PR 10's twin.
+    const realRpc = mockSupabase.rpc.bind(mockSupabase);
+    vi.spyOn(mockSupabase, 'rpc').mockImplementation(async (name, params) => {
+      const answer = await realRpc(name, params);
+      if (name === 'refresh_schedule_tbd_practices' && !answer.error) {
+        const db = /** @type {any} */ (window).__MOCK_DB__;
+        mockSyncScheduleTbdPractices(
+          db,
+          ORG,
+          '0b000000-0000-4000-8000-000000000002',
+          new Date().toISOString().slice(0, 10),
+          () => globalThis.crypto.randomUUID(),
+          new Date().toISOString()
+        );
+        /** @type {any} */ (window).__saveMockDB__(db);
+      }
+      return answer;
+    });
+    render(<ScheduleImportPanel kind="practices" />);
+    await toMapping();
+    decideEverything();
+    // U12 Girls: the file holds one practice a week per team, two are stored
+    expect(screen.getByTestId('practice-import-settings').textContent).toMatch(
+      /U12 Girls: 1 a week \(stored: 2\)/
+    );
+    fireEvent.click(checkbox('Save these settings for U12 Girls'));
+    await toPreview();
+    // CONTROL: before the settings, the two U12 Girls teams are short
+    expect(screen.getByTestId('practice-import-short').textContent).toMatch(
+      /U12G-02: 1 practice short/
+    );
+    fireEvent.click(checkbox(/Create the \d+ records listed above/));
+    fireEvent.click(button('Confirm and import'));
+    await waitFor(() => expect(step()).toMatch(/4 of 4/), { timeout: 5000 });
+    await waitFor(() =>
+      expect(screen.getByTestId('practice-import-settings-saved').textContent).toMatch(
+        /Saved: U12 Girls/
+      )
+    );
+    const short = screen.queryByTestId('practice-import-result-short')?.textContent ?? '';
+    expect(short).not.toMatch(/U12G-02/);
+    expect(short).not.toMatch(/U12G-03/);
+    expect(short).toMatch(/Counted again after the division settings were saved\./);
+  });
+});

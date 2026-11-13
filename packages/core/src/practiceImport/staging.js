@@ -163,6 +163,14 @@ export function stagePracticeFile({ headers, rows, season, dates, clean }) {
     .filter((h) => h.cleaned.trim() !== '');
   const fileHeaders = named.map((h) => h.cleaned);
   const keptNames = named.filter((h) => practiceImportReadsHeader(h.cleaned));
+  // Each kept header's canonical column, worked out once (not once per row).
+  const keptColumns = keptNames.map((h) => {
+    const key = practiceLabelKey(h.cleaned);
+    const column =
+      Object.values(PRACTICE_IMPORT_COLUMNS).find((name) => practiceLabelKey(name) === key) ??
+      PRACTICE_IMPORT_HEADER_ALIASES[key];
+    return { cleaned: h.cleaned, column };
+  });
   const allowlisted = rows.map((row) => {
     /** @type {Record<string, string>} */
     const out = {};
@@ -183,18 +191,10 @@ export function stagePracticeFile({ headers, rows, season, dates, clean }) {
   };
   const parsed = parsePracticeRows({ headers: fileHeaders, rows: allowlisted, season, dates });
   if (!parsed.ok) return { refusal: parsed.refusal, staged: [], summary: empty };
-  /** @param {string} cleaned */
-  const canonical = (cleaned) => {
-    const key = practiceLabelKey(cleaned);
-    return (
-      Object.values(PRACTICE_IMPORT_COLUMNS).find((name) => practiceLabelKey(name) === key) ??
-      PRACTICE_IMPORT_HEADER_ALIASES[key]
-    );
-  };
   const staged = parsed.rows.map((row, i) => {
     /** @type {Record<string, string>} */
     const raw = {};
-    for (const h of keptNames) raw[canonical(h.cleaned)] = allowlisted[i][h.cleaned];
+    for (const h of keptColumns) raw[h.column] = allowlisted[i][h.cleaned];
     return { ...toStagedPracticeRow(row), raw_payload: raw };
   });
   return {

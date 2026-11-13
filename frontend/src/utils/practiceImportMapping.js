@@ -19,7 +19,9 @@ import {
   practiceDivisionDecisionKey,
   practiceFieldDecisionKey,
   practiceLocationDecisionKey,
+  practiceSubunitDecisionKey,
 } from '@squadlogic/core/practiceImport/mapping.js';
+import { practiceLabelKey } from '@squadlogic/core/practiceImport/slotKey.js';
 
 export const UNDECIDED = 'undecided';
 
@@ -104,11 +106,18 @@ export function shownChoice(entry, choice) {
  * The mapping the job stores: for every label the decision in effect (the admin's, else an exact match nothing
  * disagrees with), and the ticked probable moves. A label with neither has no decision, and its rows are `unknown-*`.
  *
+ * **A ground only a hold names** (`Use = hold`: no slot, so no entry on the mapping screen) is stored too when core
+ * found it among the league's EXISTING grounds by its exact name (`resolvePracticeRows`'s `ids` of a hold row): the SQL
+ * resolves a hold through the stored mapping only, so without it the hold's ground reads unknown and a hold over a slot
+ * goes unflagged (Codex on #732). A hold never creates anything: a ground it names that is not one of the league's is
+ * stored as nothing.
+ *
  * @param {Record<string, any[]>} proposal  `proposePracticeMapping`'s result (made with the admin's decisions)
  * @param {Record<string, Record<string, string>>} choices
  * @param {string[]} addMovedRows  the row keys of the ticked probable-move rows, and nothing else
+ * @param {any[]} [resolvedRows]  `resolvePracticeRows`'s rows, for the holds' grounds
  */
-export function practiceMappingForJob(proposal, choices, addMovedRows) {
+export function practiceMappingForJob(proposal, choices, addMovedRows, resolvedRows = []) {
   /** @type {Record<string, any>} */
   const mapping = { options: { add_moved_rows: [...new Set(addMovedRows)].sort() } };
   for (const { group } of PRACTICE_MAPPING_GROUPS) {
@@ -125,7 +134,50 @@ export function practiceMappingForJob(proposal, choices, addMovedRows) {
       mapping[group][entry.key] = stored;
     }
   }
+  for (const row of resolvedRows) {
+    if (row.status !== 'hold' || !row.ids) continue;
+    const exact = (group, key, id) => {
+      if (id && !String(id).startsWith('new:') && !Object.hasOwn(mapping[group], key)) {
+        mapping[group][key] = { action: 'map', id, source: 'exact' };
+      }
+    };
+    exact('locations', practiceLocationDecisionKey(row.locationLabel), row.ids.location);
+    exact('fields', practiceFieldDecisionKey(row.locationLabel, row.fieldLabel), row.ids.field);
+    if (practiceLabelKey(row.subunitLabel ?? '') !== '') {
+      exact(
+        'subunits',
+        practiceSubunitDecisionKey(row.locationLabel, row.fieldLabel, row.subunitLabel),
+        row.ids.subunit
+      );
+    }
+  }
   return mapping;
+}
+
+/**
+ * The choices with every `map:<id>` that is no longer among its label's records in scope taken out (the label goes back
+ * to what is proposed in its new scope, often nothing: undecided). A team mapped in one division whose division label is
+ * then mapped to another division names a team of the first: kept, it would be sent and refused, or hidden behind a
+ * select that shows "not decided". Fields go before halves, so a half under a field that moved goes too.
+ *
+ * @param {Record<string, Record<string, string>>} choices
+ * @param {Record<string, any[]>} proposal
+ * @param {any} league
+ * @returns {Record<string, Record<string, string>>} the same object when nothing was out of scope
+ */
+export function withoutOutOfScopeChoices(choices, proposal, league) {
+  let next = choices;
+  for (const group of ['fields', 'subunits', 'teams']) {
+    for (const entry of proposal[group] ?? []) {
+      const choice = next?.[group]?.[entry.key];
+      if (typeof choice !== 'string' || !choice.startsWith('map:')) continue;
+      const id = choice.slice(4);
+      if (recordsInScope(entry, league, proposal, next).some((r) => r.id === id)) continue;
+      const { [entry.key]: _gone, ...rest } = next[group];
+      next = { ...next, [group]: rest };
+    }
+  }
+  return next;
 }
 
 /**

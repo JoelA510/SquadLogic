@@ -50,7 +50,13 @@ import {
   type SeasonReader,
   stageGameChunk,
 } from '../_shared/schedule-import.ts';
-import { PRACTICE_IMPORT_LIMITS, stagePracticeFile } from '../_shared/practice-import.ts';
+import {
+  applyPracticeImportConfirmed,
+  isPracticeImportConfirmCounts,
+  PRACTICE_IMPORT_LIMITS,
+  PracticeImportDateError,
+  stagePracticeFile,
+} from '../_shared/practice-import.ts';
 
 // --- Constants ---
 const MAX_ROWS = 5000;
@@ -580,10 +586,13 @@ const GamesImportPayload = z.object({
 });
 
 /**
- * A practice schedule import (plan `docs/changes/2026-11-03-schedule-expansion.md` 4.11; PR 11, task L1). Stage only:
- * the mapping, the preview (the apply's dry run) and the apply are the database's own RPCs, called by the admin's
- * client (`apply_practice_import_job` is granted to `authenticated` and checks the caller itself).
+ * A practice schedule import (plan `docs/changes/2026-11-03-schedule-expansion.md` 4.11; PR 11, task L1). The mapping and
+ * the preview are the database's own RPCs, called by the admin's client.
  *
+ * - `action: 'stage'` (the default): read the file and stage it, into a job that is still `importing` (a staged job is
+ *   never staged again: a new file is a new job, so a ready job cannot be left with no rows).
+ * - `action: 'apply'`: the confirm. `confirmed` is the counts the admin saw; the dry run is run again AS THE CALLER and
+ *   the apply is refused with `practice_import_preview_stale` when its counts differ (`applyPracticeImportConfirmed`).
  * - **The whole file in one request** (at most 2,400 rows): the parse judges the file as a whole and a row key is
  *   unique in it; it converts no instant, so the cap is a few milliseconds of CPU (`_shared/practice-import.ts`).
  * - `dates`: the confirm step's two dates (decision 25), which stand in for a row's blank `Valid From`/`Valid Until`
@@ -592,18 +601,23 @@ const GamesImportPayload = z.object({
 const ISO_DATE_TEXT = /^\d{4}-\d{2}-\d{2}$/;
 const PracticeImportPayload = z.object({
   import_type: z.literal('practice_schedule'),
-  action: z.literal('stage').optional().default('stage'),
+  action: z.enum(['stage', 'apply']).optional().default('stage'),
   organization_id: z.string().uuid(),
   import_job_id: z.string().uuid(),
   headers: z
     .array(z.string().max(PRACTICE_IMPORT_LIMITS.MAX_CELL_LENGTH))
-    .max(PRACTICE_IMPORT_LIMITS.MAX_HEADERS),
+    .max(PRACTICE_IMPORT_LIMITS.MAX_HEADERS)
+    .optional()
+    .default([]),
   rows: z
     .array(z.record(z.unknown()))
     .max(
       PRACTICE_IMPORT_LIMITS.MAX_ROWS,
       `One import takes at most ${PRACTICE_IMPORT_LIMITS.MAX_ROWS} rows`
-    ),
+    )
+    .optional()
+    .default([]),
+  confirmed: z.record(z.number()).optional(),
   dates: z
     .object({
       valid_from: z.string().regex(ISO_DATE_TEXT).nullable().optional(),
@@ -990,9 +1004,72 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
         409
       );
     }
-    if (['completed', 'completed_with_warnings', 'failed', 'needs_fix'].includes(job.status)) {
+    // The confirm: the database is asked AS THE CALLER, so `auth.uid()` is the admin, the function's own checks hold,
+    // and the audit rows it writes are theirs.
+    if (practices.action === 'apply') {
+      if (!isPracticeImportConfirmCounts(practices.confirmed)) {
+        return jsonResponse(
+          {
+            status: 'error',
+            code: 'confirmed_counts_required',
+            message:
+              'The confirm must carry the counts of the preview it confirms. Preview the import again.',
+          },
+          400
+        );
+      }
+      const userClient = createUserClient(req, supabaseUrl, anonKey);
+      const outcome = await applyPracticeImportConfirmed({
+        rpc: (name, params) => userClient.rpc(name, params),
+        jobId: practices.import_job_id,
+        confirmed: practices.confirmed,
+      });
+      if (outcome.kind === 'stale') {
+        return jsonResponse(
+          {
+            status: 'error',
+            code: outcome.code,
+            message: outcome.message,
+            differing: outcome.differing,
+            confirmed: outcome.confirmed,
+            current: outcome.current,
+            preview: outcome.preview,
+          },
+          409
+        );
+      }
+      if (outcome.kind === 'error') {
+        const status = statusOfDatabaseError(outcome.error.code);
+        if (status === 500) {
+          await logFailure(logCtx, `Practice import ${outcome.stage} failed`, outcome.error);
+        }
+        return jsonResponse(
+          {
+            status: 'error',
+            code: outcome.error.details || outcome.error.code || 'practice_import_failed',
+            message:
+              status === 500
+                ? 'The import could not be applied.'
+                : (outcome.error.message ?? 'The import was refused.'),
+          },
+          status
+        );
+      }
+      return jsonResponse({
+        status: 'success',
+        import_type: 'practice_schedule',
+        result: outcome.result,
+      });
+    }
+
+    // A file is staged once, into a job still importing: a staged (ready) job is never emptied and staged again.
+    if (job.status !== 'importing') {
       return jsonResponse(
-        { status: 'error', message: `Import job cannot accept staged rows while ${job.status}` },
+        {
+          status: 'error',
+          code: 'import_not_importing',
+          message: `Import job cannot accept staged rows while ${job.status}: a new file is a new import.`,
+        },
         409
       );
     }
@@ -1017,6 +1094,7 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
       );
     }
 
+    const userClient = createUserClient(req, supabaseUrl, anonKey);
     let staged: ReturnType<typeof stagePracticeFile>;
     try {
       staged = stagePracticeFile({
@@ -1033,8 +1111,22 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
         clean: sanitizeImportText,
       });
     } catch (error) {
-      // The parse throws only on a date it was given that is not a calendar date (the request's, or the season's).
-      if (!(error instanceof TypeError)) throw error;
+      // Only a date it was given that is not a calendar date (the request's, or the season's) is the file's answer;
+      // anything else is a defect: audited as a failed import and rethrown, so the failure log has it too.
+      await recordAuditNow(userClient, logCtx, {
+        organizationId,
+        action: 'import.failed',
+        resourceType: 'import_job',
+        metadata: {
+          import_type: 'practice_schedule',
+          total_rows: practices.rows.length,
+          valid_rows: 0,
+          error_rows: practices.rows.length,
+          staged_rows: 0,
+          refusal: error instanceof PracticeImportDateError ? 'bad-date' : 'stage_error',
+        },
+      });
+      if (!(error instanceof PracticeImportDateError)) throw error;
       return jsonResponse(
         {
           status: 'refused',
@@ -1047,7 +1139,6 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
       );
     }
 
-    const userClient = createUserClient(req, supabaseUrl, anonKey);
     if (staged.refusal) {
       await recordAuditNow(userClient, logCtx, {
         organizationId,

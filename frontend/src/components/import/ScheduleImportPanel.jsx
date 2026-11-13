@@ -176,6 +176,19 @@ const KINDS = Object.freeze({
     exportFileName: 'squadlogic-game-schedule.csv',
     confirmCounts: scheduleImportConfirmCounts,
     readPrevious: null,
+    /** The steps after the upload: null is the panel's own (the games mapping, preview and result below). */
+    Steps: null,
+    /** Whether the upload step asks the confirm step's two dates (decision 25). */
+    takesDates: false,
+    /** Whether an applied import may be recorded as the publication baseline (G5). */
+    recordsBaseline: true,
+    /** @param {any} season */
+    uploadNote: (season) =>
+      `Times are read on the season's clock${
+        season?.timezone ? ` (${season.timezone})` : ''
+      }. One file holds at most ${SCHEDULE_IMPORT_LIMITS.MAX_ROWS.toLocaleString('en-US')} rows. The import goes into ${
+        season?.name || 'the active season'
+      }.`,
     /** @param {any} job */
     describeLast: (job) =>
       `${job.fileName || 'A file'}: ${Number(job.result?.games?.inserted ?? 0)} games added, ${Number(
@@ -227,6 +240,14 @@ const KINDS = Object.freeze({
     exportFileName: null,
     confirmCounts: practiceImportConfirmCounts,
     readPrevious: practiceCall('readPreviousPracticeMapping'),
+    Steps: PracticeImportSteps,
+    takesDates: true,
+    recordsBaseline: false,
+    /** @param {any} season */
+    uploadNote: (season) =>
+      `A practice is a weekday and two wall times, with no time zone. One file holds at most ${SCHEDULE_IMPORT_LIMITS.MAX_ROWS.toLocaleString('en-US')} rows. The import goes into ${
+        season?.name || 'the active season'
+      }.`,
     /** @param {any} job */
     describeLast: (job) =>
       `${job.fileName || 'A file'}: ${Number(job.result?.counts?.inserted ?? 0)} practices added, ${Number(
@@ -248,7 +269,7 @@ const KINDS = Object.freeze({
         deleted.field_subunits ?? 0
       )} halves or sides it created removed.${
         kept > 0 ? ` ${kept} records it created are still in use and were kept.` : ''
-      }`;
+      } Division practice settings saved with the import are not undone by a roll back.`;
     },
   },
 });
@@ -463,8 +484,8 @@ function ScheduleImportWorkflow({
   const decisions = useMemo(() => decisionsFromChoices(choices), [choices]);
   // The games mapping's own reading (the Practices tab's is its steps' own: `PracticeImportSteps.jsx`).
   const proposal = useMemo(
-    () => (league && kind === 'games' ? K.propose({ rows, league, decisions }) : null),
-    [K, kind, rows, league, decisions]
+    () => (league && K.propose ? K.propose({ rows, league, decisions }) : null),
+    [K, rows, league, decisions]
   );
   // What the rows resolve to under the mapping AS IT IS STORED (the admin's choices, and a match they left standing),
   // read the way the database reads it: a label with no stored decision is unknown, never matched for them.
@@ -556,13 +577,12 @@ function ScheduleImportWorkflow({
 
   // The confirm step's two dates (decision 25): sent with the file, where they stand in for a row's blank Valid From or
   // Valid Until ahead of the season's. The games file takes none.
-  const confirmDates =
-    kind === 'practices'
-      ? {
-          validFrom: practice.dates.validFrom || null,
-          validUntil: practice.dates.validUntil || null,
-        }
-      : null;
+  const confirmDates = K.takesDates
+    ? {
+        validFrom: practice.dates.validFrom || null,
+        validUntil: practice.dates.validUntil || null,
+      }
+    : null;
 
   const handleFile = (file) => {
     if (!file) return;
@@ -653,7 +673,7 @@ function ScheduleImportWorkflow({
                 })
               : null,
           ]);
-          if (kind === 'practices') setPractice((prev) => ({ ...prev, previous }));
+          if (K.readPrevious) setPractice((prev) => ({ ...prev, previous }));
           setJobId(started.jobId);
           setStaging(started.summary);
           setRows(stagedRows);
@@ -731,7 +751,7 @@ function ScheduleImportWorkflow({
     setBusy(null);
     setStep('result');
     refreshLast();
-    if (kind === 'games' && recordBaseline && jobId && baseline?.jobId !== jobId) {
+    if (K.recordsBaseline && recordBaseline && jobId && baseline?.jobId !== jobId) {
       setBaseline({ jobId, attempt: 1, status: 'recording' });
       setBusy('Recording the publication baseline');
     }
@@ -1065,17 +1085,9 @@ function ScheduleImportWorkflow({
             {K.columns}
           </p>
           <p className="text-sm text-text-secondary max-w-prose mt-2">
-            {kind === 'practices'
-              ? `A practice is a weekday and two wall times, with no time zone. One file holds at most ${SCHEDULE_IMPORT_LIMITS.MAX_ROWS.toLocaleString('en-US')} rows. The import goes into ${
-                  currentSeasonSetting?.name || 'the active season'
-                }.`
-              : `Times are read on the season's clock${
-                  currentSeasonSetting?.timezone ? ` (${currentSeasonSetting.timezone})` : ''
-                }. One file holds at most ${SCHEDULE_IMPORT_LIMITS.MAX_ROWS.toLocaleString('en-US')} rows. The import goes into ${
-                  currentSeasonSetting?.name || 'the active season'
-                }.`}
+            {K.uploadNote(currentSeasonSetting)}
           </p>
-          {kind === 'practices' && (
+          {K.takesDates && (
             <fieldset className="mt-4 max-w-prose" data-testid="practice-import-dates">
               <legend className="text-sm font-semibold text-text-primary">
                 Dates for rows that leave them blank (optional)
@@ -1218,13 +1230,13 @@ function ScheduleImportWorkflow({
               <Notice tone="success" testId="schedule-import-rolled-back">
                 {K.describeRolledBack(undone)}
               </Notice>
-              {kind === 'games' && <div className="mt-2">{rolledBaselineNote}</div>}
+              {K.recordsBaseline && <div className="mt-2">{rolledBaselineNote}</div>}
             </div>
           )}
         </div>
       )}
 
-      {kind === 'practices' && step !== 'upload' && staging && league && (
+      {K.Steps && step !== 'upload' && staging && league && (
         <Suspense
           fallback={
             <p role="status" className="text-sm text-text-secondary">
@@ -1232,7 +1244,7 @@ function ScheduleImportWorkflow({
             </p>
           }
         >
-          <PracticeImportSteps
+          <K.Steps
             step={step}
             fileName={fileName}
             staging={staging}
@@ -1269,7 +1281,7 @@ function ScheduleImportWorkflow({
         </Suspense>
       )}
 
-      {kind === 'games' && step === 'mapping' && proposal && staging && (
+      {!K.Steps && step === 'mapping' && proposal && staging && (
         <div>
           <p
             className="text-sm text-text-secondary max-w-prose"
@@ -1436,7 +1448,7 @@ function ScheduleImportWorkflow({
         </div>
       )}
 
-      {kind === 'games' && step === 'preview' && preview && counts && (
+      {!K.Steps && step === 'preview' && preview && counts && (
         <div>
           {stale && (
             <div className="mb-4">
@@ -1640,7 +1652,7 @@ function ScheduleImportWorkflow({
         </div>
       )}
 
-      {kind === 'games' && step === 'result' && result && (
+      {!K.Steps && step === 'result' && result && (
         <div>
           {rolledBackHere ? (
             <Notice tone="success" testId="schedule-import-rolled-back">

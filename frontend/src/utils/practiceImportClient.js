@@ -24,7 +24,7 @@
 
 import { practiceImportReadsHeader } from '@squadlogic/core/practiceImport/parseRows.js';
 import {
-  diffPracticeImportConfirmCounts,
+  PRACTICE_IMPORT_PREVIEW_STALE,
   practiceImportConfirmCounts,
 } from '@squadlogic/core/practiceImport/previewCounts.js';
 import {
@@ -36,21 +36,10 @@ import {
 export { practiceImportConfirmCounts };
 import { fetchAllPages } from '../lib/pagedFetch.js';
 import { readSeasonTeamDirectory } from './scheduleReportsRead.js';
-import { refreshScheduleTbd } from './scheduleTbdClient.js';
+import { readScheduleTbd, refreshScheduleTbd } from './scheduleTbdClient.js';
+import { functionErrorBody, refusal, requireClient, rpcRefusal } from './importClientCommon.js';
 
 const TYPE = 'practice_schedule';
-
-/** An error that carries the code a refusal gave. @param {string} message @param {string | null} [code] @param {any} [body] */
-function refusal(message, code = null, body = null) {
-  return Object.assign(new Error(message), { code, body });
-}
-
-/** @param {any} client */
-function requireClient(client) {
-  if (typeof client?.rpc !== 'function' || typeof client?.from !== 'function') {
-    throw new Error('there is no database connection to import with');
-  }
-}
 
 /** Words for a refusal whose database message is not written for a person. */
 const RPC_REFUSAL_WORDS = {
@@ -62,23 +51,7 @@ const RPC_REFUSAL_WORDS = {
 };
 
 /** A database error in its own words. @param {any} error @param {string} fallback */
-function fromRpc(error, fallback) {
-  return refusal(
-    RPC_REFUSAL_WORDS[error?.details] || error?.message || fallback,
-    error?.details || error?.code || null
-  );
-}
-
-/** The body of an Edge function's non-2xx answer (supabase-js puts the response on `context`), or null. */
-async function functionErrorBody(error) {
-  if (typeof error?.context?.json !== 'function') return null;
-  try {
-    return await error.context.json();
-  } catch {
-    // Best effort: a body that is absent, already read or not JSON leaves the client's own message, which is shown.
-    return null;
-  }
-}
+const fromRpc = (error, fallback) => rpcRefusal(error, fallback, RPC_REFUSAL_WORDS);
 
 /**
  * What the organization has that a label of the file could mean, as core's mapping reads it
@@ -93,7 +66,9 @@ export async function readPracticeImportLeague(client, { organizationId, seasonS
     fetchAllPages(() =>
       client
         .from('divisions')
-        .select('id, name, practices_per_week, practice_minutes')
+        .select(
+          'id, name, practices_per_week, practice_minutes, max_roster_size, min_roster_size, target_team_size, team_count_override, min_teams, max_teams'
+        )
         .eq('organization_id', organizationId)
         .eq('season_settings_id', seasonSettingsId)
     ),
@@ -120,6 +95,8 @@ export async function readPracticeImportLeague(client, { organizationId, seasonS
       name: String(d.name ?? ''),
       practicesPerWeek: d.practices_per_week ?? null,
       practiceMinutes: d.practice_minutes ?? null,
+      // The rules the settings save must send back as they are (`writeDivisionSettings`), as read for this import.
+      roster: rosterOf(d),
     })),
     teams: directory.teams.map((t) => ({
       id: t.id,
@@ -276,23 +253,38 @@ export async function previewPracticeImport(client, jobId) {
   return data;
 }
 
+/** The roster rules of a division row, which `admin_upsert_division_settings` SETS to what it is given. */
+export const ROSTER_RULES = Object.freeze([
+  'max_roster_size',
+  'min_roster_size',
+  'target_team_size',
+  'team_count_override',
+  'min_teams',
+  'max_teams',
+]);
+/** @param {Record<string, any>} row */
+function rosterOf(row) {
+  return Object.fromEntries(ROSTER_RULES.map((key) => [key, row?.[key] ?? null]));
+}
+
 /**
- * Read a division's stored rules and write them back with the practice settings changed: `admin_upsert_division_settings`
- * SETS the roster columns to what it is given (a null clears them), so every one is sent as it is stored.
+ * Save a division's practice settings, its other rules sent back as they are: `admin_upsert_division_settings` SETS the
+ * roster rules to what it is given (a null clears them), and no RPC sets the practice settings alone (a follow-up in
+ * the plan). The division is read again just before the write, and the write is refused, in words, when its roster
+ * rules are no longer the ones this import read (`expected`): another admin changed them, and sending the old values
+ * would undo that.
  *
  * @param {any} client
- * @param {{ organizationId: string, seasonSettingsId: string, divisionId: string,
+ * @param {{ organizationId: string, seasonSettingsId: string, divisionId: string, expected: Record<string, any> | null,
  *   practicesPerWeek?: number, practiceMinutes?: number | 'any' }} patch
  */
 async function writeDivisionSettings(
   client,
-  { organizationId, seasonSettingsId, divisionId, practicesPerWeek, practiceMinutes }
+  { organizationId, seasonSettingsId, divisionId, expected, practicesPerWeek, practiceMinutes }
 ) {
   const found = await client
     .from('divisions')
-    .select(
-      'id, name, max_roster_size, min_roster_size, target_team_size, team_count_override, min_teams, max_teams'
-    )
+    .select(`id, name, ${ROSTER_RULES.join(', ')}`)
     .eq('id', divisionId)
     .eq('organization_id', organizationId)
     .eq('season_settings_id', seasonSettingsId)
@@ -300,6 +292,16 @@ async function writeDivisionSettings(
   if (found.error) throw fromRpc(found.error, 'The division could not be read.');
   if (!found.data) throw refusal('The division is not one of this season’s.');
   const d = found.data;
+  const now = rosterOf(d);
+  const changed = ROSTER_RULES.filter(
+    (key) => expected === null || JSON.stringify(now[key]) !== JSON.stringify(expected[key] ?? null)
+  );
+  if (changed.length > 0) {
+    throw refusal(
+      `its team rules (${changed.join(', ').replace(/_/g, ' ')}) changed after this import read them, so saving here would undo that change; nothing was saved for it`,
+      'division_rules_changed'
+    );
+  }
   const { error } = await client.rpc('admin_upsert_division_settings', {
     p_organization_id: organizationId,
     p_season_settings_id: seasonSettingsId,
@@ -322,14 +324,18 @@ async function writeDivisionSettings(
 
 /**
  * The division settings the admin ticked, saved through the audited `admin_upsert_division_settings`, then the TIME TBD
- * list rebuilt so it counts by them. A division the import created is found by the name it was created under (its id
- * exists only after the apply). Each division is said, saved or not; one that fails does not stop the others, and the
- * import stays applied.
+ * list rebuilt so it counts by them and read back, so the result shows the teams short AFTER the settings. Only an
+ * existing division is offered a setting (one the import creates is set on the Team Analysis page after the confirm:
+ * a setting on it would make a roll back keep it as changed). Each division is said, saved or not; one that fails does
+ * not stop the others, and the import stays applied. A roll back of the import does not undo a saved setting.
  *
  * @param {any} client
  * @param {{ organizationId: string, seasonSettingsId: string,
- *   patches: Array<{ divisionId: string, isNew: boolean, name?: string, practicesPerWeek?: number, practiceMinutes?: number | 'any' }> }} input
- * @returns {Promise<{ saved: Array<{ name: string }>, failed: Array<{ name: string, message: string }>, refreshed: boolean, refreshMessage: string | null }>}
+ *   patches: Array<{ divisionId: string, isNew?: boolean, name?: string, roster?: Record<string, any> | null,
+ *     practicesPerWeek?: number, practiceMinutes?: number | 'any' }> }} input
+ * @returns {Promise<{ saved: Array<{ name: string }>, failed: Array<{ name: string, message: string }>,
+ *   refreshed: boolean, refreshMessage: string | null,
+ *   tbd: Array<{ team_id: string, missing_count: number }> | null }>}
  */
 export async function applyPracticeDivisionSettings(
   client,
@@ -338,31 +344,17 @@ export async function applyPracticeDivisionSettings(
   requireClient(client);
   const saved = [];
   const failed = [];
-  let byName = null;
   for (const patch of patches) {
     const label = patch.name ?? patch.divisionId;
     try {
-      let divisionId = patch.divisionId;
       if (patch.isNew) {
-        if (byName === null) {
-          const { data, error } = await client
-            .from('divisions')
-            .select('id, name')
-            .eq('organization_id', organizationId)
-            .eq('season_settings_id', seasonSettingsId);
-          if (error) throw fromRpc(error, 'The season’s divisions could not be read.');
-          byName = data ?? [];
-        }
-        const matches = byName.filter((d) => String(d.name) === String(patch.name ?? ''));
-        if (matches.length !== 1) {
-          throw refusal(`The division "${label}" the import created was not found by its name.`);
-        }
-        divisionId = String(matches[0].id);
+        throw refusal('a division this import creates is set on the Team Analysis page');
       }
       const name = await writeDivisionSettings(client, {
         organizationId,
         seasonSettingsId,
-        divisionId,
+        divisionId: patch.divisionId,
+        expected: patch.roster ?? null,
         practicesPerWeek: patch.practicesPerWeek,
         practiceMinutes: patch.practiceMinutes,
       });
@@ -373,20 +365,26 @@ export async function applyPracticeDivisionSettings(
   }
   let refreshed = false;
   let refreshMessage = null;
+  let tbd = null;
   if (saved.length > 0) {
     try {
       await refreshScheduleTbd(client, seasonSettingsId);
       refreshed = true;
+      const list = await readScheduleTbd(client, seasonSettingsId);
+      tbd = (list.rows ?? [])
+        .filter((row) => row.kind === 'practice' && row.team_id)
+        .map((row) => ({ team_id: String(row.team_id), missing_count: Number(row.missing_count) }));
     } catch (err) {
       refreshMessage = String(err?.message ?? err);
     }
   }
-  return { saved, failed, refreshed, refreshMessage };
+  return { saved, failed, refreshed, refreshMessage, tbd };
 }
 
 /**
- * The confirm: the dry run again, and the apply only when its counts are still the ones the admin saw (else nothing is
- * written and the fresh preview comes back as `stale`); then the ticked division settings.
+ * The confirm, through the Edge function (`import-validation`, `action: 'apply'`): it runs the dry run again as the
+ * admin and applies only when its counts are still the ones the admin saw; else nothing is written and the fresh
+ * preview comes back as `stale`. Then the ticked division settings.
  *
  * @param {any} client
  * @param {{ organizationId: string, seasonSettingsId?: string, jobId: string, confirmed: Record<string, number>,
@@ -397,29 +395,41 @@ export async function confirmPracticeImport(
   { organizationId, seasonSettingsId, jobId, confirmed, extra }
 ) {
   requireClient(client);
-  const current = await previewPracticeImport(client, jobId);
-  if (current.replayed === true) return { status: 'applied', result: current };
-  const now = practiceImportConfirmCounts(current);
-  const differing = diffPracticeImportConfirmCounts(confirmed, now);
-  if (differing.length > 0) {
-    return {
-      status: 'stale',
-      message:
-        'The schedule changed after this preview was made, so the import would no longer do what was confirmed. Nothing was written. Review the new preview and confirm again.',
-      differing,
+  const { data, error } = await client.functions.invoke('import-validation', {
+    body: {
+      import_type: TYPE,
+      action: 'apply',
+      organization_id: organizationId,
+      import_job_id: jobId,
       confirmed,
-      current: now,
-      preview: current,
-    };
-  }
-  const { data, error } = await client.rpc('apply_practice_import_job', {
-    p_import_job_id: jobId,
-    p_dry_run: false,
+    },
   });
-  if (error) throw fromRpc(error, 'The import could not be applied.');
-  if (!data || typeof data !== 'object' || !data.counts) {
+  if (error) {
+    const body = await functionErrorBody(error);
+    if (body?.code === PRACTICE_IMPORT_PREVIEW_STALE && body.preview) {
+      return {
+        status: 'stale',
+        message: String(body.message ?? 'The schedule changed after this preview was made.'),
+        differing: Array.isArray(body.differing) ? body.differing : [],
+        confirmed: body.confirmed ?? confirmed,
+        current: body.current ?? {},
+        preview: body.preview,
+      };
+    }
+    throw refusal(
+      RPC_REFUSAL_WORDS[body?.code] ||
+        body?.message ||
+        error.message ||
+        'The import could not be applied.',
+      body?.code ?? null,
+      body
+    );
+  }
+  const result = data?.result;
+  if (data?.status !== 'success' || !result || typeof result !== 'object' || !result.counts) {
     throw new Error('The import answered in a shape this page cannot read.');
   }
+  if (result.replayed === true) return { status: 'applied', result };
   const patches = extra?.settings ?? [];
   const settings =
     patches.length > 0 && seasonSettingsId
@@ -429,7 +439,7 @@ export async function confirmPracticeImport(
           patches,
         })
       : null;
-  return { status: 'applied', result: data, settings };
+  return { status: 'applied', result, settings };
 }
 
 /**

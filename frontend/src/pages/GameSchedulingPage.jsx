@@ -30,6 +30,7 @@ import PublishedControls, {
 import GamePublishedBar from '../components/scheduling/GamePublishedBar.jsx';
 import AllowChangesDialog from '../components/scheduling/AllowChangesDialog.jsx';
 import GameHistoryDialog from '../components/scheduling/GameHistoryDialog.jsx';
+import AddGameDialog from '../components/scheduling/AddGameDialog.jsx';
 import Button from '../components/ui/Button.jsx';
 import ProgressBar from '../components/ui/ProgressBar.jsx';
 import Tabs from '../components/ui/Tabs.jsx';
@@ -42,6 +43,7 @@ import {
   RotateCcw,
   XCircle,
   Trash2,
+  Plus,
 } from 'lucide-react';
 import GameReadinessPanel from '../components/GameReadinessPanel.jsx';
 import GameConflictBanner from '../components/scheduling/GameConflictBanner.jsx';
@@ -91,6 +93,12 @@ import {
   moveRefusal,
   stagedMoveNote,
 } from '../utils/gamePublishedText.js';
+import {
+  describeNewSlot,
+  doubleBookings,
+  planAddedGame,
+  resolveAddedSlots,
+} from '../utils/gameAddByHand.js';
 
 function normalizeAssignmentSource(source) {
   return source === 'manual' || source === 'locked' ? 'manual' : 'auto';
@@ -685,6 +693,8 @@ export default function GameSchedulingPage() {
   const [activeGame, setActiveGame] = useState(null);
   // The venues' names by id, for the bulk bar's "one venue" scope (the fields carry only their venue's id).
   const [venueNames, setVenueNames] = useState(/** @type {Record<string, string>} */ ({}));
+  // Bumped after Apply has found or made a slot for a game added by hand (PR 8), so the grid reads it.
+  const [referenceReloadKey, setReferenceReloadKey] = useState(0);
 
   const timezone = currentSeasonSetting?.timezone;
   // **"No clock yet" and "no clock at all" are different facts**, and the slot
@@ -868,7 +878,7 @@ export default function GameSchedulingPage() {
     return () => {
       isMounted = false;
     };
-  }, [currentOrganization?.id]);
+  }, [currentOrganization?.id, referenceReloadKey]);
 
   const practiceOnly = useMemo(
     () => practiceOnlyDivisionsOf(divisionRows, currentSeasonSetting?.id),
@@ -1511,7 +1521,14 @@ export default function GameSchedulingPage() {
   }, []);
 
   const persistReviewedAssignments = useCallback(
-    async ({ assignments, generationMode, resultSummary, resultDetails }) => {
+    async ({
+      assignments,
+      generationMode,
+      resultSummary,
+      resultDetails,
+      knownSlotIds = undefined,
+      extraWarnings = [],
+    }) => {
       const persistenceAssignments = assignments.map(toPersistenceAssignment);
       // The save is told which saved game each assignment is, by id (a moved, flipped or regenerated game keeps its
       // id, its Published state and its history); a new game carries none. The run's recorded `results.assignments`
@@ -1523,7 +1540,9 @@ export default function GameSchedulingPage() {
           : { ...persistenceAssignments[index], id };
       });
       const missingSlot = persistenceAssignments.find(
-        (assignment) => !assignment.slotId || !slotById.has(assignment.slotId)
+        (assignment) =>
+          !assignment.slotId ||
+          (!slotById.has(assignment.slotId) && !knownSlotIds?.has(String(assignment.slotId)))
       );
 
       if (assignments.length > 0 && missingSlot) {
@@ -1559,7 +1578,8 @@ export default function GameSchedulingPage() {
               ? parseGameUnscheduled(resultDetails.unscheduled)
               : undefined,
             sharedSlotUsage: resultDetails?.sharedSlotUsage ?? [],
-            warnings: resultDetails?.evaluation?.warnings ?? [],
+            // A game added by hand carries its double bookings (flagged, not blocked: PR 8), so the saved run says them.
+            warnings: [...(resultDetails?.evaluation?.warnings ?? []), ...extraWarnings],
           },
           completedAt: now,
         },
@@ -1653,24 +1673,100 @@ export default function GameSchedulingPage() {
     }
   }, [game?.assignments, reviewAssignments, savedReading, savedReadError, savedRunId]);
 
+  // The double bookings of the games added by hand, against the rest of the staged review: flagged in the conflict
+  // banner while the review is staged and recorded with the run it is saved as (PR 8; never a refusal).
+  const fieldNameOf = useCallback(
+    (id) => fields.find((field) => String(field.id) === String(id))?.name ?? String(id ?? ''),
+    [fields]
+  );
+  const externalTeamIds = useMemo(
+    () => new Set(seasonTeams.filter((entry) => entry.isExternal).map((entry) => String(entry.id))),
+    [seasonTeams]
+  );
+  const addedGameWarnings = useMemo(
+    () =>
+      (reviewAssignments ?? [])
+        .filter((assignment) => assignment.addedByHand === true)
+        .flatMap((assignment) =>
+          doubleBookings(assignment, reviewAssignments ?? [], {
+            isExternal: (id) => externalTeamIds.has(String(id)),
+            fieldName: fieldNameOf,
+          })
+        ),
+    [externalTeamIds, fieldNameOf, reviewAssignments]
+  );
+  // The slots Apply has had from `ensure_game_slot` in this session: known to exist before the slot read catches up.
+  const ensuredSlotIdsRef = useRef(new Set());
+  /** An error, with the new-time slots this Apply made and left unused named after it (the plan, 5.5). */
+  const withLeftSlots = useCallback(
+    (message, made) => {
+      if (!made || made.length === 0) return message;
+      const named = made.map((slot) => describeNewSlot(slot, fieldNameOf(slot.fieldId), timezone));
+      return made.length === 1
+        ? `${message} The new time slot ${named[0]} was made before the save and is kept, unused: it holds no game and does no harm.`
+        : `${message} The new time slots ${named.join('; ')} were made before the save and are kept, unused: they hold no game and do no harm.`;
+    },
+    [fieldNameOf, timezone]
+  );
+
   const handleApplySchedule = useCallback(async () => {
     if (!canManageSchedule || !canApplySchedule || reviewAssignments == null) return;
 
     setApplyStatus('applying');
     setApplyError(null);
 
+    // A game added by hand at a new time needs its slot first: found or made by the database, which also says
+    // whether that slot holds a Published game (refused here, before anything is saved).
+    /** @type {{ review: Array<Record<string, any>>, made: Array<Record<string, any>>, slotIds: Set<string> }} */
+    let resolved;
+    try {
+      resolved = await resolveAddedSlots(reviewAssignments, async (pending) => {
+        const { data, error } = await supabase.rpc('ensure_game_slot', {
+          p_organization_id: currentOrganization?.id,
+          p_field_id: pending.fieldId,
+          p_slot_date: pending.date,
+          p_start_time: pending.startTime,
+          p_end_time: pending.endTime,
+          p_week_index: pending.weekIndex,
+          p_start: pending.start,
+          p_end: pending.end,
+        });
+        if (error || !data?.id) {
+          throw new Error(
+            `The new time could not be made: ${error?.message ?? 'the database returned no slot'}. Nothing was saved.`
+          );
+        }
+        ensuredSlotIdsRef.current.add(String(data.id));
+        return data;
+      });
+    } catch (err) {
+      const made = /** @type {any} */ (err)?.madeSlots ?? [];
+      setApplyStatus('error');
+      setApplyError(withLeftSlots(err instanceof Error ? err.message : String(err), made));
+      if (made.length > 0) setReferenceReloadKey((key) => key + 1);
+      return;
+    }
+    const review = resolved.review;
+    if (resolved.slotIds.size > 0) {
+      // The review names the database's slots from here on, so a second Apply does not ask again.
+      setReviewAssignments(review);
+      setReferenceReloadKey((key) => key + 1);
+    }
+
     try {
       const { result } = await persistReviewedAssignments({
-        assignments: reviewAssignments,
+        assignments: review,
         generationMode: 'round-robin',
         resultSummary: schedulerResult?.summary,
         resultDetails: schedulerResult,
+        knownSlotIds: ensuredSlotIdsRef.current,
+        extraWarnings: addedGameWarnings,
       });
 
       const appliedRunId = result.runId ?? game?.runId ?? null;
       setLastRollbackAssignments(localAssignments);
       setLocalAssignments(
-        reviewAssignments.map((assignment) => ({
+        review.map((assignment) => ({
           ...assignment,
           runId: appliedRunId,
           assignmentSource: normalizeAssignmentSource(assignment.assignmentSource),
@@ -1681,7 +1777,7 @@ export default function GameSchedulingPage() {
       // A game moved, flipped or regenerated keeps its id, its Published state and its history (the save updates it
       // in place). A game that had a Published history and that the new schedule no longer holds stays in the old run
       // with it. Said, not hidden.
-      const leftBehind = leftBehindHistoryGames(reviewAssignments, savedAssignments);
+      const leftBehind = leftBehindHistoryGames(review, savedAssignments);
       setStatusMessage(
         `Game schedule applied through the persistence workflow.${
           leftBehind.length > 0 ? leftBehindNote(leftBehind.length) : ''
@@ -1693,12 +1789,16 @@ export default function GameSchedulingPage() {
       refetchSaved?.();
     } catch (err) {
       setApplyStatus('error');
-      setApplyError(err.message || 'Game schedule changes could not be applied.');
+      setApplyError(
+        withLeftSlots(err.message || 'Game schedule changes could not be applied.', resolved.made)
+      );
       rereadAfterUnknownOutcome(err);
     }
   }, [
+    addedGameWarnings,
     canApplySchedule,
     canManageSchedule,
+    currentOrganization?.id,
     game?.runId,
     localAssignments,
     markSavedStale,
@@ -1708,6 +1808,7 @@ export default function GameSchedulingPage() {
     reviewAssignments,
     savedAssignments,
     schedulerResult,
+    withLeftSlots,
   ]);
 
   const handleRollbackLastApply = useCallback(async () => {
@@ -1915,6 +2016,98 @@ export default function GameSchedulingPage() {
     [cellLabels, claimMoveFocus, emptyCells, moveGameTo]
   );
 
+  // ---------------------------------------------------------------------------
+  // Add one game by hand (plan docs/changes/2026-11-03-schedule-expansion.md, 5.5, PR 8)
+  //
+  // A dialog stages one `manual` game into the review, in an open slot (the cells "Move to" offers) or at a new time;
+  // Apply saves it like a move. The rules are `planAddedGame`'s: never over a held (Published or scored) slot, a double
+  // booking flagged and not blocked, and the game starts not Published.
+  // ---------------------------------------------------------------------------
+  const [addDialogKey, setAddDialogKey] = useState(/** @type {number | null} */ (null));
+  const addKeyRef = useRef(0);
+  /** The divisions that play games, each with its teams: the league's own and its outside clubs (4.6). */
+  const addDivisions = useMemo(() => {
+    const byDivision = new Map();
+    const put = (division, entry) => {
+      const name = String(division ?? '').trim();
+      if (!name || practiceOnly.names.has(name.toLowerCase())) return;
+      if (!byDivision.has(name)) byDivision.set(name, new Map());
+      byDivision.get(name).set(String(entry.id), entry);
+    };
+    for (const entry of gameTeams) {
+      put(entry.division, { id: entry.id, name: entry.name, isExternal: false });
+    }
+    for (const entry of seasonTeams) {
+      if (entry.divisionId && practiceOnly.ids.has(String(entry.divisionId))) continue;
+      put(entry.division, {
+        id: entry.id,
+        name: entry.name,
+        isExternal: entry.isExternal === true,
+      });
+    }
+    return [...byDivision.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([name, teams]) => ({
+        name,
+        teams: [...teams.values()].sort(
+          (a, b) => Number(a.isExternal) - Number(b.isExternal) || a.name.localeCompare(b.name)
+        ),
+      }));
+  }, [gameTeams, practiceOnly, seasonTeams]);
+  const planAddChoice = useCallback(
+    (choice) =>
+      planAddedGame(choice, {
+        review: displayedAssignmentsRef.current,
+        slots: gameSlots,
+        fields,
+        teams: new Map(
+          addDivisions.flatMap((division) =>
+            division.teams.map((entry) => [String(entry.id), entry])
+          )
+        ),
+        timezone,
+        seasonStart: currentSeasonSetting?.season_start ?? null,
+        key: addKeyRef.current,
+      }),
+    [addDivisions, currentSeasonSetting?.season_start, fields, gameSlots, timezone]
+  );
+  const openAddGame = useCallback(() => {
+    addKeyRef.current += 1;
+    setAddDialogKey(addKeyRef.current);
+  }, []);
+  const stageAddedGame = useCallback(({ game: added, warnings }) => {
+    const { home, away } = matchupOf(added);
+    setReviewAssignments([...displayedAssignmentsRef.current, added]);
+    setApplyStatus('review');
+    setApplyError(null);
+    setStatusMessage(
+      `${home} vs ${away} added to the review as a game placed by hand. It starts not Published.` +
+        (added.newSlot ? ` The new time on ${added.fieldName} is made when you apply.` : '') +
+        (warnings.length > 0
+          ? ` Flagged: ${warnings.map((warning) => warning.message).join(' ')}`
+          : '') +
+        ' Apply the schedule to save it.'
+    );
+    setAddDialogKey(null);
+  }, []);
+  /** Why "Add a game" is off right now, or null. */
+  const addGameReason = !canManageSchedule
+    ? null
+    : savedReadState === 'unreadable'
+      ? 'The saved schedule could not be read, so a game cannot be added to it.'
+      : savedReadState === 'reading'
+        ? 'Reading the saved schedule…'
+        : referenceError
+          ? 'The fields and game slots could not be read, so a game cannot be placed.'
+          : seasonClockLoading
+            ? 'Loading this season\u2019s settings…'
+            : !timezone
+              ? 'This season has no time zone, so a game cannot be placed on its clock.'
+              : applyStatus === 'applying' || applyStatus === 'rollingBack'
+                ? 'Saving…'
+                : null;
+  const addGameReasonId = useId();
+
   const gridSensors = useGameGridSensors();
 
   // What a screen reader hears during a keyboard drag: the game and the cell
@@ -1995,7 +2188,24 @@ export default function GameSchedulingPage() {
           </p>
         </div>
         {canManageSchedule && (
-          <div className="flex gap-3">
+          <div className="flex gap-3 items-start">
+            <div className="flex flex-col items-end">
+              <Button
+                variant="secondary"
+                onClick={openAddGame}
+                disabled={addGameReason !== null}
+                aria-describedby={addGameReason ? addGameReasonId : undefined}
+                className="flex items-center gap-2"
+              >
+                <Plus size={18} />
+                Add a game
+              </Button>
+              {addGameReason && (
+                <p id={addGameReasonId} className="text-xs text-text-muted mt-1">
+                  {addGameReason}
+                </p>
+              )}
+            </div>
             <Button
               variant={canEditSchedule ? 'primary' : 'secondary'}
               onClick={() => setIsEditMode(!isEditMode)}
@@ -2021,7 +2231,11 @@ export default function GameSchedulingPage() {
       <DataErrorBanner message={dataError} />
 
       <GameConflictBanner
-        warnings={[...(reviewSnapshot?.warnings ?? game?.warnings ?? []), ...blackoutWarnings]}
+        warnings={[
+          ...(reviewSnapshot?.warnings ?? game?.warnings ?? []),
+          ...blackoutWarnings,
+          ...addedGameWarnings,
+        ]}
       />
 
       {/* The season's TIME TBD games: not on the grid, so listed here. A game an import gave a date and no time is
@@ -2276,6 +2490,21 @@ export default function GameSchedulingPage() {
           notice={dialogNotice}
           onConfirm={confirmAllowChanges}
           onClose={() => setAllowDialog(null)}
+        />
+      )}
+      {addDialogKey !== null && (
+        <AddGameDialog
+          key={addDialogKey}
+          open
+          divisions={addDivisions}
+          openSlots={emptyCells}
+          fields={fields.map((field) => ({
+            id: String(field.id),
+            name: String(field.name ?? field.id),
+          }))}
+          plan={planAddChoice}
+          onAdd={stageAddedGame}
+          onClose={() => setAddDialogKey(null)}
         />
       )}
       {historyGame && currentOrganization?.id && (

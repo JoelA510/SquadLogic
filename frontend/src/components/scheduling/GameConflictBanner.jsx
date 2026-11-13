@@ -32,6 +32,8 @@ const SEVERITY_MAP = {
   // Staged since 20261122010000: the parse's two warnings reach the saved result.
   'bad-time': 'warning',
   'bad-week': 'warning',
+  // A game added by hand in a slot reserved for another division (PR 8): flagged, not refused.
+  'slot-other-division': 'warning',
 };
 
 /**
@@ -53,6 +55,7 @@ const TYPE_LABELS = {
   'time-ambiguous': 'Import: clock repeat',
   'bad-time': 'Import: time not read',
   'bad-week': 'Import: week from date',
+  'slot-other-division': 'Other division',
 };
 
 /** The warnings a schedule import writes about one game of its file. */

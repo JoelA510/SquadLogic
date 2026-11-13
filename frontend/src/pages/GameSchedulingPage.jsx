@@ -30,6 +30,7 @@ import PublishedControls, {
 import GamePublishedBar from '../components/scheduling/GamePublishedBar.jsx';
 import AllowChangesDialog from '../components/scheduling/AllowChangesDialog.jsx';
 import GameHistoryDialog from '../components/scheduling/GameHistoryDialog.jsx';
+import AddGameDialog from '../components/scheduling/AddGameDialog.jsx';
 import Button from '../components/ui/Button.jsx';
 import ProgressBar from '../components/ui/ProgressBar.jsx';
 import Tabs from '../components/ui/Tabs.jsx';
@@ -42,6 +43,7 @@ import {
   RotateCcw,
   XCircle,
   Trash2,
+  Plus,
 } from 'lucide-react';
 import GameReadinessPanel from '../components/GameReadinessPanel.jsx';
 import GameConflictBanner from '../components/scheduling/GameConflictBanner.jsx';
@@ -91,6 +93,13 @@ import {
   moveRefusal,
   stagedMoveNote,
 } from '../utils/gamePublishedText.js';
+import {
+  addedGameWarningsToSave,
+  describeNewSlot,
+  planAddedGame,
+  resolveAddedSlots,
+  warningsOfAddedGames,
+} from '../utils/gameAddByHand.js';
 
 function normalizeAssignmentSource(source) {
   return source === 'manual' || source === 'locked' ? 'manual' : 'auto';
@@ -523,6 +532,9 @@ function summarizeGameResult({ assignments, byes, unscheduled }) {
   };
 }
 
+/** Why no edit can be staged right now: the saved schedule is being read (C12 follow-up). */
+const EDITS_WAIT_REASON = 'Changes wait while the saved schedule is read.';
+
 function buildDisplayAssignment({ assignment, index, runId, teamById, slotById, fieldById }) {
   const slotId = getAssignmentSlotId(assignment);
   const slot = slotById.get(slotId);
@@ -663,11 +675,26 @@ export default function GameSchedulingPage() {
   const [schedulerStatus, setSchedulerStatus] = useState('idle');
   const [schedulerProgress, setSchedulerProgress] = useState(null);
   const [schedulerResult, setSchedulerResult] = useState(null);
+  // What this page's last Apply saved over the current generated result, kept as two sets and never written into the
+  // result itself (Codex re-review of #731, C12): the generator's own warnings, saved only when the review applied was
+  // the generated one, and the flags of games added by hand, worked out afresh on every Apply. Null until an Apply
+  // follows a generation: the generated review is then still the one being applied.
+  const [appliedRunWarnings, setAppliedRunWarnings] = useState(
+    /** @type {null | { generator: Array<Record<string, any>>, manual: Array<Record<string, any>> }} */ (
+      null
+    )
+  );
   const [schedulerError, setSchedulerError] = useState(null);
   const [applyStatus, setApplyStatus] = useState('idle');
   const [applyError, setApplyError] = useState(null);
   const [statusMessage, setStatusMessage] = useState(null);
   const [lastRollbackAssignments, setLastRollbackAssignments] = useState(null);
+  /** The flags and games of the run a rollback restores (C14): set with `lastRollbackAssignments`. */
+  const [lastRollbackFlags, setLastRollbackFlags] = useState(
+    /** @type {null | { savedWarnings: Array<Record<string, any>>, savedGames: Array<Record<string, any>> }} */ (
+      null
+    )
+  );
   const [fields, setFields] = useState([]);
   // **Every field the organisation holds, live or retired.** The scheduler's
   // list above is filtered to live ground; a venue-scoped blackout still has to
@@ -720,6 +747,7 @@ export default function GameSchedulingPage() {
 
   useEffect(() => {
     setLastRollbackAssignments(null);
+    setLastRollbackFlags(null);
   }, [currentOrganization?.id, currentSeasonSetting?.id]);
 
   useEffect(() => {
@@ -991,10 +1019,6 @@ export default function GameSchedulingPage() {
     [displayTeamById, fieldById, game?.assignments, game?.runId, slotById]
   );
 
-  useEffect(() => {
-    setLocalAssignments(savedAssignments);
-  }, [savedAssignments, game?.generatedAt]);
-
   const displayedAssignments = reviewAssignments ?? localAssignments;
   const isReviewing = Boolean(reviewAssignments);
   const displayedAssignmentsRef = useRef(displayedAssignments);
@@ -1025,11 +1049,29 @@ export default function GameSchedulingPage() {
   useEffect(() => {
     savedGamesRef.current = game?.assignments;
   }, [game?.assignments]);
-  // The saved rows the screen last held when a change was made. While `game.assignments` is still that array
-  // the read that follows has not landed, and the ids and flags on screen are not known to be the database's.
+  // The saved rows the screen last held when a change was made. While `game.assignments` is still that array the read
+  // that follows has not landed, and the ids and flags on screen are not known to be the database's. Nor while the
+  // re-read is still loading: it is two reads (the latest run, then the games of the run on screen), and a save that
+  // made a new run can have the games of the OLD run (what the save left in it) answer first, before the run read names
+  // the new one (C12 follow-up; `rekeyReview`'s marker below allows for the same order).
   const [staleAgainst, setStaleAgainst] = useState(/** @type {unknown} */ (null));
-  const savedIsStale = staleAgainst !== null && staleAgainst === game?.assignments;
+  const savedIsStale =
+    staleAgainst !== null && (staleAgainst === game?.assignments || Boolean(loading.game));
   const markSavedStale = useCallback(() => setStaleAgainst(savedGamesRef.current ?? null), []);
+  // Once read, the mark is cleared: a later change of run (another organization, season or save) is not this read.
+  useEffect(() => {
+    if (staleAgainst !== null && !savedIsStale) setStaleAgainst(null);
+  }, [savedIsStale, staleAgainst]);
+  useEffect(() => {
+    setStaleAgainst(null);
+  }, [currentOrganization?.id, currentSeasonSetting?.id]);
+  // The list follows the saved rows, except while they are known to be the rows from before a change (an Apply, a
+  // rollback): a re-render then (a slot read landing, the season clock) would put the list back to the schedule before
+  // the save until the saved schedule is read again (review of #731).
+  useEffect(() => {
+    if (savedIsStale) return;
+    setLocalAssignments(savedAssignments);
+  }, [savedAssignments, game?.generatedAt, savedIsStale]);
   const [listFilter, setListFilter] = useState('all');
   const [publishBusy, setPublishBusy] = useState(false);
   const publishBusyRef = useRef(false);
@@ -1057,6 +1099,10 @@ export default function GameSchedulingPage() {
     : loading.game || savedIsStale
       ? 'reading'
       : 'ready';
+  // Every edit waits for the saved schedule while it is read (after an Apply, and on the first load): a change staged
+  // from the rows before it would be staged from the schedule before the save, and the next save carries its flags
+  // forward from it (C12).
+  const applyWaitsForRead = savedReadState === 'reading';
   /** Why the Published controls are off right now, or null. Said once, in the bar, and pointed at by each switch. */
   let publishedReason = null;
   if (!canChangePublished) {
@@ -1314,7 +1360,14 @@ export default function GameSchedulingPage() {
   // clock. The banner already says "Loading this season's settings…" in that
   // window (see `composeSchedulerReadinessMessage`), so this makes the button
   // agree with the sentence beside it rather than inventing a new rule.
+  // A game added by hand and not yet applied would be dropped by a fresh generation (it replaces the review), so
+  // generating waits until the review is applied or discarded, and says so (PR 8).
+  const addedGamesStaged = (reviewAssignments ?? []).some(
+    (assignment) => assignment.addedByHand === true
+  );
   const schedulerDisabled =
+    addedGamesStaged ||
+    applyWaitsForRead ||
     loading.game ||
     !canManageSchedule ||
     schedulerStatus === 'running' ||
@@ -1344,13 +1397,17 @@ export default function GameSchedulingPage() {
     if (!source) return game?.snapshot ?? {};
     return {
       ...source,
+      // After an Apply, what it saved: the two sets, each once (C12); before it, the generator's own.
+      warnings: appliedRunWarnings
+        ? [...appliedRunWarnings.generator, ...appliedRunWarnings.manual]
+        : (source.warnings ?? []),
       generatedAt: schedulerResult.generatedAt,
       unscheduled: (schedulerResult.unscheduled ?? []).map((entry) => ({
         ...entry,
         matchup: formatUnscheduledMatchup(entry),
       })),
     };
-  }, [game?.snapshot, schedulerResult]);
+  }, [appliedRunWarnings, game?.snapshot, schedulerResult]);
 
   const reviewSummary = useMemo(
     () =>
@@ -1447,6 +1504,7 @@ export default function GameSchedulingPage() {
 
       setReviewAssignments(nextAssignments);
       setSchedulerResult(nextResult);
+      setAppliedRunWarnings(null);
       setSchedulerProgress({
         iteration: 1,
         bestScore: summary.scheduledRate,
@@ -1495,6 +1553,7 @@ export default function GameSchedulingPage() {
     setSchedulerStatus('idle');
     setSchedulerProgress(null);
     setSchedulerResult(null);
+    setAppliedRunWarnings(null);
     setSchedulerError(null);
     setReviewAssignments(null);
     setApplyStatus('idle');
@@ -1505,13 +1564,36 @@ export default function GameSchedulingPage() {
   const discardReview = useCallback(() => {
     setReviewAssignments(null);
     setSchedulerResult(null);
+    setAppliedRunWarnings(null);
     setApplyStatus('discarded');
     setApplyError(null);
     setStatusMessage(null);
   }, []);
 
   const persistReviewedAssignments = useCallback(
-    async ({ assignments, generationMode, resultSummary, resultDetails }) => {
+    async ({
+      assignments,
+      generationMode,
+      resultSummary,
+      resultDetails,
+      knownSlotIds = undefined,
+      generatorWarnings = [],
+      flags,
+    }) => {
+      // Every save records the flags of the games added by hand, worked out here and nowhere else, over the games it
+      // saves (Codex C11 to C14): the flags of games added in this review, and the flags the run it replaces recorded
+      // for games added before, judged again against these games. No save path can leave them out.
+      if (!flags)
+        throw new Error(
+          'A game save was asked for without the context its flags are worked out from.'
+        );
+      const addedWarnings = addedGameWarningsToSave({
+        review: assignments,
+        slotRows: flags.slotRows,
+        savedWarnings: flags.savedWarnings,
+        savedGames: flags.savedGames,
+        names: flags.names,
+      });
       const persistenceAssignments = assignments.map(toPersistenceAssignment);
       // The save is told which saved game each assignment is, by id (a moved, flipped or regenerated game keeps its
       // id, its Published state and its history); a new game carries none. The run's recorded `results.assignments`
@@ -1523,7 +1605,9 @@ export default function GameSchedulingPage() {
           : { ...persistenceAssignments[index], id };
       });
       const missingSlot = persistenceAssignments.find(
-        (assignment) => !assignment.slotId || !slotById.has(assignment.slotId)
+        (assignment) =>
+          !assignment.slotId ||
+          (!slotById.has(assignment.slotId) && !knownSlotIds?.has(String(assignment.slotId)))
       );
 
       if (assignments.length > 0 && missingSlot) {
@@ -1559,13 +1643,15 @@ export default function GameSchedulingPage() {
               ? parseGameUnscheduled(resultDetails.unscheduled)
               : undefined,
             sharedSlotUsage: resultDetails?.sharedSlotUsage ?? [],
-            warnings: resultDetails?.evaluation?.warnings ?? [],
+            // The generator's own warnings when the generated review is the one saved (given by the caller, C12), and
+            // the flags of the games added by hand (flagged, not blocked: PR 8), worked out above.
+            warnings: [...generatorWarnings, ...addedWarnings],
           },
           completedAt: now,
         },
       });
 
-      return { result, persistenceAssignments };
+      return { result, persistenceAssignments, addedWarnings };
     },
     [
       currentOrganization?.id,
@@ -1653,53 +1739,240 @@ export default function GameSchedulingPage() {
     }
   }, [game?.assignments, reviewAssignments, savedReading, savedReadError, savedRunId]);
 
+  // The double bookings of the games added by hand, against the rest of the staged review: flagged in the conflict
+  // banner while the review is staged and recorded with the run it is saved as (PR 8; never a refusal).
+  const fieldNameOf = useCallback(
+    (id) => fields.find((field) => String(field.id) === String(id))?.name ?? String(id ?? ''),
+    [fields]
+  );
+  const externalTeamIds = useMemo(
+    () => new Set(seasonTeams.filter((entry) => entry.isExternal).map((entry) => String(entry.id))),
+    [seasonTeams]
+  );
+  const isExternalTeam = useCallback((id) => externalTeamIds.has(String(id)), [externalTeamIds]);
+  const divisionNameOf = useCallback(
+    (id) => divisionRows.find((row) => String(row.id) === String(id))?.name ?? null,
+    [divisionRows]
+  );
+  // The flags of the games added by hand, each clash once, judged where each game is NOW (its slot's reserved division,
+  // its field and times; C5): shown in the banner while the review is staged. Apply works them out again over the
+  // slots it resolves (C9), through the same function.
+  const addedGameWarnings = useMemo(
+    () =>
+      warningsOfAddedGames(reviewAssignments ?? [], gameSlotRows, {
+        isExternal: isExternalTeam,
+        fieldName: fieldNameOf,
+        divisionName: divisionNameOf,
+      }),
+    [divisionNameOf, fieldNameOf, gameSlotRows, isExternalTeam, reviewAssignments]
+  );
+  /** An error, with the new-time slots this Apply made and left unused named after it (the plan, 5.5). */
+  const withLeftSlots = useCallback(
+    (message, made, { unknown = false } = {}) => {
+      if (!made || made.length === 0) return message;
+      const named = made.map((slot) => describeNewSlot(slot, fieldNameOf(slot.fieldId), timezone));
+      // A save whose outcome is not known may have been written: the slot may hold the saved game.
+      if (unknown) {
+        return `${message} The new time ${made.length === 1 ? 'slot' : 'slots'} ${named.join('; ')} ${
+          made.length === 1 ? 'was' : 'were'
+        } made before the save; whether the game was saved into ${
+          made.length === 1 ? 'it' : 'them'
+        } is being checked.`;
+      }
+      return made.length === 1
+        ? `${message} The new time slot ${named[0]} was made before the save and is kept, unused: it holds no game and does no harm.`
+        : `${message} The new time slots ${named.join('; ')} were made before the save and are kept, unused: they hold no game and do no harm.`;
+    },
+    [fieldNameOf, timezone]
+  );
+
   const handleApplySchedule = useCallback(async () => {
     if (!canManageSchedule || !canApplySchedule || reviewAssignments == null) return;
+    // Not while the saved schedule is being read (after an Apply): the flags it carries forward come from it (C12).
+    if (applyWaitsForRead) return;
 
     setApplyStatus('applying');
     setApplyError(null);
 
+    // Apply is one sequence over RESOLVED state (Codex re-review of #731, C9 and C10). Nothing in state changes until
+    // the save has succeeded: a failure at any step leaves the staged review exactly as it was (its new times still
+    // pending), says why, and Apply again redoes every step (`ensure_game_slot` finds a slot it made before).
+    //
+    // 1. Resolve: the database's slot for each new time, the slot it already had checked against the new time, and
+    //    the one-game-per-slot and one-place-per-pair checks, all on a local copy of the review.
+    /** @type {{ review: Array<Record<string, any>>, made: Array<Record<string, any>>, slotIds: Set<string> }} */
+    let resolved;
     try {
-      const { result } = await persistReviewedAssignments({
-        assignments: reviewAssignments,
+      resolved = await resolveAddedSlots(
+        reviewAssignments,
+        async (pending) => {
+          const { data, error } = await supabase.rpc('ensure_game_slot', {
+            p_organization_id: currentOrganization?.id,
+            p_field_id: pending.fieldId,
+            p_slot_date: pending.date,
+            p_start_time: pending.startTime,
+            p_end_time: pending.endTime,
+            p_week_index: pending.weekIndex,
+            p_start: pending.start,
+            p_end: pending.end,
+          });
+          if (error || !data?.id) {
+            throw new Error(
+              `The new time could not be made: ${error?.message ?? 'the database returned no slot'}. Nothing was saved.`
+            );
+          }
+          if (data.created) return data;
+          // A slot it already had: its result is the id alone, so the slot is read back to be compared.
+          const { data: row, error: readError } = await supabase
+            .from('game_slots')
+            .select('id, field_id, slot_date, start_time, end_time, week_index, start, end')
+            .eq('id', data.id)
+            .maybeSingle();
+          if (readError) {
+            throw new Error(
+              `The slot the database found could not be read back: ${readError.message}. Nothing was saved.`
+            );
+          }
+          return { ...data, row: row ?? undefined };
+        },
+        { fieldName: fieldNameOf }
+      );
+    } catch (err) {
+      setApplyStatus('error');
+      setApplyError(
+        withLeftSlots(
+          err instanceof Error ? err.message : String(err),
+          /** @type {any} */ (err)?.madeSlots ?? []
+        )
+      );
+      return;
+    }
+
+    // 2. Read every resolved slot the page does not hold, whether this Apply made it or another admin did (C8). If the
+    //    read fails, stop here: the review is untouched, so Apply again resolves and reads again.
+    const missingSlotIds = [...resolved.slotIds].filter(
+      (id) => !gameSlotRows.some((row) => String(row.id) === id)
+    );
+    /** @type {Array<Record<string, any>>} */
+    let freshRows = [];
+    if (missingSlotIds.length > 0) {
+      const { data, error } = await supabase
+        .from('game_slots')
+        .select('*, divisions(id, name)')
+        .in('id', missingSlotIds);
+      const read = data ?? [];
+      if (error || read.length !== missingSlotIds.length) {
+        setApplyStatus('error');
+        setApplyError(
+          withLeftSlots(
+            `The new time slots could not be read: ${error?.message ?? 'not every slot was returned'}. Nothing was saved, and the review is as it was: apply again.`,
+            resolved.made
+          )
+        );
+        return;
+      }
+      freshRows = read;
+    }
+
+    // 3. The final games, their flags and their summary, from the resolved review and the slot rows it is saved in:
+    //    the same rules the screen uses, given these rows, never the flags worked out before the slots were known (C9).
+    const freshIds = new Set(freshRows.map((row) => String(row.id)));
+    const slotRows = [...gameSlotRows.filter((row) => !freshIds.has(String(row.id))), ...freshRows];
+    const review = resolved.review;
+    // Their flags are worked out by the save itself, from these rows and the run it replaces (C11, C14): the saved
+    // run's own flags of games added before are carried forward while they still hold, so an unrelated addition never
+    // clears an open conflict.
+    const flags = {
+      slotRows,
+      savedWarnings: game?.warnings ?? [],
+      savedGames: savedAssignments,
+      names: { isExternal: isExternalTeam, fieldName: fieldNameOf, divisionName: divisionNameOf },
+    };
+    // The generator's own warnings, unchanged, only while the review being applied is the generated one (C12).
+    const generatorWarnings =
+      schedulerResult && appliedRunWarnings === null
+        ? (schedulerResult.evaluation?.warnings ?? [])
+        : [];
+    // The summary of the games actually saved (C7): a generated review's own summary does not count a game added by
+    // hand. The generator's byes and unscheduled games stay; with no generation the save makes it from the games
+    // itself, as it always did.
+    const finalSummary = schedulerResult
+      ? summarizeGameResult({
+          assignments: review,
+          byes: schedulerResult.byes ?? [],
+          unscheduled: schedulerResult.unscheduled ?? [],
+        })
+      : undefined;
+
+    // 4. Save. The save is told which slots exist: the rows the page holds and those just read, nothing else.
+    try {
+      const { result, addedWarnings: finalWarnings } = await persistReviewedAssignments({
+        assignments: review,
         generationMode: 'round-robin',
-        resultSummary: schedulerResult?.summary,
+        resultSummary: finalSummary,
         resultDetails: schedulerResult,
+        knownSlotIds: new Set(slotRows.map((row) => String(row.id))),
+        generatorWarnings,
+        flags,
       });
 
+      // 5. Only now is anything committed: the slots, the applied games, the review cleared, the result brought to
+      //    what the run saved.
+      if (freshRows.length > 0) setGameSlotRows(slotRows);
       const appliedRunId = result.runId ?? game?.runId ?? null;
       setLastRollbackAssignments(localAssignments);
+      // What the rollback restores is judged against the run it restores: its flags and its games (C14).
+      setLastRollbackFlags({ savedWarnings: game?.warnings ?? [], savedGames: savedAssignments });
       setLocalAssignments(
-        reviewAssignments.map((assignment) => ({
+        review.map((assignment) => ({
           ...assignment,
           runId: appliedRunId,
           assignmentSource: normalizeAssignmentSource(assignment.assignmentSource),
         }))
       );
       setReviewAssignments(null);
+      // A generated review's result is what the banner and the readiness panel read after Apply, so its summary is
+      // brought to the final games (C7). Its warnings stay the generator's own; what this Apply saved is kept beside
+      // them, each set replaced, never appended to (C12).
+      setSchedulerResult((current) =>
+        current ? { ...current, summary: finalSummary ?? current.summary } : current
+      );
+      setAppliedRunWarnings({ generator: generatorWarnings, manual: finalWarnings });
       setApplyStatus('applied');
       // A game moved, flipped or regenerated keeps its id, its Published state and its history (the save updates it
       // in place). A game that had a Published history and that the new schedule no longer holds stays in the old run
       // with it. Said, not hidden.
-      const leftBehind = leftBehindHistoryGames(reviewAssignments, savedAssignments);
+      const leftBehind = leftBehindHistoryGames(review, savedAssignments);
       setStatusMessage(
         `Game schedule applied through the persistence workflow.${
           leftBehind.length > 0 ? leftBehindNote(leftBehind.length) : ''
         }`
       );
       // The games on screen are the staged ones; the saved schedule (its ids and flags) is read again, and the
-      // Published controls wait for it.
+      // Published controls and every edit wait for it.
       markSavedStale();
       refetchSaved?.();
     } catch (err) {
+      // The review is left as it was staged; Apply again resolves the same slots (found, not made, this time).
       setApplyStatus('error');
-      setApplyError(err.message || 'Game schedule changes could not be applied.');
+      setApplyError(
+        withLeftSlots(err.message || 'Game schedule changes could not be applied.', resolved.made, {
+          unknown: isUnknownPersistenceOutcome(err),
+        })
+      );
       rereadAfterUnknownOutcome(err);
     }
   }, [
     canApplySchedule,
     canManageSchedule,
+    currentOrganization?.id,
+    divisionNameOf,
+    fieldNameOf,
     game?.runId,
+    game?.warnings,
+    appliedRunWarnings,
+    gameSlotRows,
+    isExternalTeam,
     localAssignments,
     markSavedStale,
     persistReviewedAssignments,
@@ -1707,7 +1980,9 @@ export default function GameSchedulingPage() {
     rereadAfterUnknownOutcome,
     reviewAssignments,
     savedAssignments,
+    applyWaitsForRead,
     schedulerResult,
+    withLeftSlots,
   ]);
 
   const handleRollbackLastApply = useCallback(async () => {
@@ -1717,7 +1992,7 @@ export default function GameSchedulingPage() {
     setApplyError(null);
 
     try {
-      const { result } = await persistReviewedAssignments({
+      const { result, addedWarnings } = await persistReviewedAssignments({
         assignments: lastRollbackAssignments,
         generationMode: 'rollback',
         resultSummary: summarizeGameResult({
@@ -1726,6 +2001,17 @@ export default function GameSchedulingPage() {
           unscheduled: [],
         }),
         resultDetails: null,
+        // The restored games keep the flags their run recorded while those still hold (C14).
+        flags: {
+          slotRows: gameSlotRows,
+          savedWarnings: lastRollbackFlags?.savedWarnings ?? [],
+          savedGames: lastRollbackFlags?.savedGames ?? [],
+          names: {
+            isExternal: isExternalTeam,
+            fieldName: fieldNameOf,
+            divisionName: divisionNameOf,
+          },
+        },
       });
 
       const rollbackRunId = result.runId ?? null;
@@ -1737,6 +2023,11 @@ export default function GameSchedulingPage() {
         }))
       );
       setLastRollbackAssignments(null);
+      setLastRollbackFlags(null);
+      // A generated result on screen shows what the last save recorded: the rollback's flags now (C14).
+      setAppliedRunWarnings((current) =>
+        current ? { generator: [], manual: addedWarnings } : current
+      );
       setApplyStatus('rolledBack');
       setStatusMessage('Game schedule rolled back through the persistence workflow.');
       markSavedStale();
@@ -1749,7 +2040,12 @@ export default function GameSchedulingPage() {
   }, [
     canApplySchedule,
     canManageSchedule,
+    divisionNameOf,
+    fieldNameOf,
+    gameSlotRows,
+    isExternalTeam,
     lastRollbackAssignments,
+    lastRollbackFlags,
     markSavedStale,
     persistReviewedAssignments,
     refetchSaved,
@@ -1780,6 +2076,12 @@ export default function GameSchedulingPage() {
     (gameId, targetCellId, { focusMoved = false } = {}) => {
       if (!canEditSchedule) return;
       if (!targetCellId) return;
+      if (applyWaitsForRead) {
+        // Staged from the rows before the save, a move would carry them into the next one (C12 follow-up).
+        setApplyError(null);
+        setStatusMessage(`Nothing was moved. ${EDITS_WAIT_REASON}`);
+        return;
+      }
 
       const { fieldId: targetFieldId, slotId: targetSlotId } = parseCellId(targetCellId);
       if (!targetFieldId || !targetSlotId) return;
@@ -1862,7 +2164,7 @@ export default function GameSchedulingPage() {
           : 'Manual game move staged. Apply the schedule to persist it.'
       );
     },
-    [canEditSchedule, fields, slotByCellSlotId]
+    [applyWaitsForRead, canEditSchedule, fields, slotByCellSlotId]
   );
 
   const handleDragEnd = useCallback(
@@ -1913,6 +2215,140 @@ export default function GameSchedulingPage() {
   const gameMove = useMemo(
     () => ({ cellLabels, emptyCells, moveGame: moveGameTo, claimFocus: claimMoveFocus }),
     [cellLabels, claimMoveFocus, emptyCells, moveGameTo]
+  );
+
+  // ---------------------------------------------------------------------------
+  // Add one game by hand (plan docs/changes/2026-11-03-schedule-expansion.md, 5.5, PR 8)
+  //
+  // A dialog stages one `manual` game into the review, in an open slot (the cells "Move to" offers) or at a new time;
+  // Apply saves it like a move. The rules are `planAddedGame`'s: never over a held (Published or scored) slot, a double
+  // booking flagged and not blocked, and the game starts not Published.
+  // ---------------------------------------------------------------------------
+  const [addDialogKey, setAddDialogKey] = useState(/** @type {number | null} */ (null));
+  const addKeyRef = useRef(0);
+  /** The divisions that play games, each with its teams: the league's own and its outside clubs (4.6). */
+  const addDivisions = useMemo(() => {
+    const byDivision = new Map();
+    const put = (division, entry) => {
+      const name = String(division ?? '').trim();
+      if (!name || practiceOnly.names.has(name.toLowerCase())) return;
+      if (!byDivision.has(name)) byDivision.set(name, new Map());
+      byDivision.get(name).set(String(entry.id), entry);
+    };
+    for (const entry of gameTeams) {
+      put(entry.division, { id: entry.id, name: entry.name, isExternal: false });
+    }
+    for (const entry of seasonTeams) {
+      if (entry.divisionId && practiceOnly.ids.has(String(entry.divisionId))) continue;
+      put(entry.division, {
+        id: entry.id,
+        name: entry.name,
+        isExternal: entry.isExternal === true,
+      });
+    }
+    return [...byDivision.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([name, teams]) => ({
+        name,
+        teams: [...teams.values()].sort(
+          (a, b) => Number(a.isExternal) - Number(b.isExternal) || a.name.localeCompare(b.name)
+        ),
+      }));
+  }, [gameTeams, practiceOnly, seasonTeams]);
+  const addTeamNames = useMemo(
+    () =>
+      new Map(
+        addDivisions.flatMap((division) =>
+          division.teams.map((entry) => [String(entry.id), String(entry.name)])
+        )
+      ),
+    [addDivisions]
+  );
+  const planAddChoice = useCallback(
+    (choice) =>
+      planAddedGame(choice, {
+        review: displayedAssignmentsRef.current,
+        slots: gameSlots,
+        teamName: (id) => addTeamNames.get(String(id)) ?? String(id),
+        isExternal: isExternalTeam,
+        fieldName: fieldNameOf,
+        divisionName: divisionNameOf,
+        timezone,
+        seasonStart: currentSeasonSetting?.season_start ?? null,
+        key: addKeyRef.current,
+      }),
+    [
+      addTeamNames,
+      currentSeasonSetting?.season_start,
+      divisionNameOf,
+      fieldNameOf,
+      gameSlots,
+      isExternalTeam,
+      timezone,
+    ]
+  );
+  const openAddGame = useCallback(() => {
+    addKeyRef.current += 1;
+    setAddDialogKey(addKeyRef.current);
+  }, []);
+  const stageAddedGame = useCallback(({ game: added, warnings }) => {
+    const { home, away } = matchupOf(added);
+    setReviewAssignments([...displayedAssignmentsRef.current, added]);
+    setApplyStatus('review');
+    setApplyError(null);
+    setStatusMessage(
+      `${home} vs ${away} added to the review as a game placed by hand. It starts not Published.` +
+        (added.newSlot ? ` The new time on ${added.fieldName} is made when you apply.` : '') +
+        (warnings.length > 0
+          ? ` Flagged: ${warnings.map((warning) => warning.message).join(' ')}`
+          : '') +
+        ' Apply the schedule to save it.'
+    );
+    setAddDialogKey(null);
+  }, []);
+  /** Why "Add a game" is off right now, or null. */
+  const addGameReason = !canManageSchedule
+    ? null
+    : savedReadState === 'unreadable'
+      ? 'The saved schedule could not be read, so a game cannot be added to it.'
+      : savedReadState === 'reading'
+        ? 'Reading the saved schedule…'
+        : referenceError
+          ? 'The fields and game slots could not be read, so a game cannot be placed.'
+          : seasonClockLoading
+            ? 'Loading this season\u2019s settings…'
+            : !timezone
+              ? 'This season has no time zone, so a game cannot be placed on its clock.'
+              : applyStatus === 'applying' || applyStatus === 'rollingBack'
+                ? 'Saving…'
+                : schedulerStatus === 'running'
+                  ? 'The scheduler is running: add a game once it has finished.'
+                  : null;
+  const addGameReasonId = useId();
+
+  // The new times of games added by hand, not yet made by the database (C4, review of #731): drawn in the preview grid
+  // under their own field so the game is seen and can be moved before Apply. Shown, never offered: "Move to" and a
+  // drop still take only the season's real slots (`gameSlots`), and a pending time a game has left is not drawn.
+  const pendingAddedSlots = useMemo(
+    () =>
+      displayedAssignments
+        .filter(
+          (assignment) =>
+            assignment.newSlot && String(assignment.slotId) === assignment.newSlot.placeholderId
+        )
+        .map((assignment) => ({
+          id: assignment.newSlot.placeholderId,
+          fieldId: assignment.newSlot.fieldId,
+          start: assignment.newSlot.start,
+          end: assignment.newSlot.end,
+          weekIndex: assignment.newSlot.weekIndex,
+          label: `${formatDateTime(assignment.newSlot.start, timezone)} (new time, made on Apply)`,
+        })),
+    [displayedAssignments, timezone]
+  );
+  const gridTimeSlots = useMemo(
+    () => (pendingAddedSlots.length > 0 ? [...gameSlots, ...pendingAddedSlots] : gameSlots),
+    [gameSlots, pendingAddedSlots]
   );
 
   const gridSensors = useGameGridSensors();
@@ -1995,7 +2431,29 @@ export default function GameSchedulingPage() {
           </p>
         </div>
         {canManageSchedule && (
-          <div className="flex gap-3">
+          <div className="flex gap-3 items-start">
+            <div className="flex flex-col items-end">
+              <Button
+                variant="secondary"
+                onClick={openAddGame}
+                disabled={addGameReason !== null}
+                aria-describedby={addGameReason ? addGameReasonId : undefined}
+                className="flex items-center gap-2"
+              >
+                <Plus size={18} />
+                Add a game
+              </Button>
+              {addGameReason && (
+                <p id={addGameReasonId} className="text-xs text-text-muted mt-1">
+                  {addGameReason}
+                </p>
+              )}
+              {savedIsStale && (
+                <p className="text-xs text-text-muted mt-1" data-testid="edits-wait-for-read">
+                  {EDITS_WAIT_REASON}
+                </p>
+              )}
+            </div>
             <Button
               variant={canEditSchedule ? 'primary' : 'secondary'}
               onClick={() => setIsEditMode(!isEditMode)}
@@ -2021,7 +2479,11 @@ export default function GameSchedulingPage() {
       <DataErrorBanner message={dataError} />
 
       <GameConflictBanner
-        warnings={[...(reviewSnapshot?.warnings ?? game?.warnings ?? []), ...blackoutWarnings]}
+        warnings={[
+          ...(reviewSnapshot?.warnings ?? game?.warnings ?? []),
+          ...blackoutWarnings,
+          ...addedGameWarnings,
+        ]}
       />
 
       {/* The season's TIME TBD games: not on the grid, so listed here. A game an import gave a date and no time is
@@ -2087,6 +2549,13 @@ export default function GameSchedulingPage() {
                       Only an organization admin can apply a game schedule.
                     </p>
                   )}
+                {/* The saved schedule is read again after an Apply; the next Apply waits for it, because the flags it
+                    carries forward come from it (C12). */}
+                {canApplySchedule && isReviewing && applyWaitsForRead && (
+                  <p id="game-apply-waits-for-read" className="mt-1 text-text-muted">
+                    Apply waits while the saved schedule is read.
+                  </p>
+                )}
               </div>
             </div>
             {isReviewing && canManageSchedule && (
@@ -2102,8 +2571,14 @@ export default function GameSchedulingPage() {
                   variant="primary"
                   onClick={handleApplySchedule}
                   loading={applyStatus === 'applying'}
-                  disabled={applyStatus === 'applying' || !canApplySchedule}
-                  aria-describedby={canApplySchedule ? undefined : 'game-apply-admin-only'}
+                  disabled={applyStatus === 'applying' || !canApplySchedule || applyWaitsForRead}
+                  aria-describedby={
+                    !canApplySchedule
+                      ? 'game-apply-admin-only'
+                      : applyWaitsForRead
+                        ? 'game-apply-waits-for-read'
+                        : undefined
+                  }
                 >
                   Apply Schedule
                 </Button>
@@ -2193,7 +2668,7 @@ export default function GameSchedulingPage() {
                       <GameScheduleGrid
                         assignments={displayedAssignments}
                         fields={fields}
-                        timeSlots={gameSlots}
+                        timeSlots={gridTimeSlots}
                         conflictSet={conflictSet}
                         activeGameId={activeGame?.id}
                         timezone={timezone}
@@ -2238,6 +2713,12 @@ export default function GameSchedulingPage() {
         </div>
 
         <div className="lg:col-span-1 space-y-6">
+          {addedGamesStaged && canManageSchedule && (
+            <p className="text-sm text-text-muted" data-testid="generate-waits-for-added">
+              Generating is off while a game added by hand is staged: a new schedule would drop it.
+              Apply or discard the review first.
+            </p>
+          )}
           <AutoSchedulerPanel
             title="Game Auto-Scheduler"
             description="Generate round-robin matchups from current teams and game slots"
@@ -2276,6 +2757,21 @@ export default function GameSchedulingPage() {
           notice={dialogNotice}
           onConfirm={confirmAllowChanges}
           onClose={() => setAllowDialog(null)}
+        />
+      )}
+      {addDialogKey !== null && (
+        <AddGameDialog
+          key={addDialogKey}
+          open
+          divisions={addDivisions}
+          openSlots={emptyCells}
+          fields={fields.map((field) => ({
+            id: String(field.id),
+            name: String(field.name ?? field.id),
+          }))}
+          plan={planAddChoice}
+          onAdd={stageAddedGame}
+          onClose={() => setAddDialogKey(null)}
         />
       )}
       {historyGame && currentOrganization?.id && (

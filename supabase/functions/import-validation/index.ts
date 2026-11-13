@@ -570,7 +570,7 @@ const GamesImportPayload = z.object({
   import_job_id: z.string().uuid(),
   headers: z
     .array(z.string().max(GAME_IMPORT_LIMITS.MAX_CELL_LENGTH))
-    .max(GAME_IMPORT_LIMITS.MAX_HEADERS)
+    .max(GAME_IMPORT_LIMITS.MAX_COLUMNS)
     .optional()
     .default([]),
   rows: z

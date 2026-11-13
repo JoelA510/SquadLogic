@@ -68,8 +68,11 @@ export const GAME_IMPORT_LIMITS = Object.freeze({
   MAX_GAME_ID_LENGTH: 40,
   /** A cell longer than this is cut before it is read (no label of a schedule is this long). */
   MAX_CELL_LENGTH: 500,
-  /** The header row: more is refused (`too-many-columns`), never cut (core: `SCHEDULE_IMPORT_LIMITS.MAX_COLUMNS`). */
-  MAX_HEADERS: 200,
+  /**
+   * The headers one request may send: more is a 400 of the request shape, and the stage and the parse refuse more
+   * with `too-many-columns`, never cut (core: `SCHEDULE_IMPORT_LIMITS.MAX_COLUMNS`).
+   */
+  MAX_COLUMNS: 200,
 });
 
 /** The columns of plan 4.3, by the name the template uses (core: `SCHEDULE_IMPORT_COLUMNS`). */
@@ -87,6 +90,11 @@ export const GAME_IMPORT_COLUMNS = Object.freeze({
   WEEK: 'Week',
 } as const);
 const C = GAME_IMPORT_COLUMNS;
+
+/** Core's `describeTooManyColumns`, word for word (the vectors hold the two equal). */
+export function describeTooManyColumns(count: number, max: number): string {
+  return `The file has ${count} columns; one import reads at most ${max}. Remove the columns it does not need and choose it again.`;
+}
 
 // ------------------------------------------------------------------------------------------------ labels and keys
 
@@ -319,10 +327,10 @@ export function parseGameImportRows({
   if (!Number.isInteger(rowOffset) || rowOffset < 0) {
     throw new TypeError('parseScheduleRows: rowOffset must be a whole number, 0 or more');
   }
-  if (headers.length > GAME_IMPORT_LIMITS.MAX_HEADERS) {
+  if (headers.length > GAME_IMPORT_LIMITS.MAX_COLUMNS) {
     return fileRefusal(
       R.TOO_MANY_COLUMNS,
-      `The file has ${headers.length} columns; one import reads at most ${GAME_IMPORT_LIMITS.MAX_HEADERS}. Remove the columns it does not need and choose it again.`
+      describeTooManyColumns(headers.length, GAME_IMPORT_LIMITS.MAX_COLUMNS)
     );
   }
 
@@ -856,13 +864,33 @@ export function stageGameChunk({
   season: GameImportSeason | null;
   rowOffset: number;
 }): GameChunkResult {
+  const empty = {
+    rows: 0,
+    ok: 0,
+    tbd: 0,
+    refused: 0,
+    flagged: 0,
+    by_reason: {},
+    dropped_columns: [],
+    warnings: [],
+    refused_rows: [],
+  };
+  // Core's backstop: more headers than one request may send, counted as sent (a blank one included), is refused.
+  if (headers.length > GAME_IMPORT_LIMITS.MAX_COLUMNS) {
+    return {
+      refusal: {
+        code: R.TOO_MANY_COLUMNS,
+        message: describeTooManyColumns(headers.length, GAME_IMPORT_LIMITS.MAX_COLUMNS),
+      },
+      staged: [],
+      summary: empty,
+    };
+  }
   const byKey = new Map<string, string>(
     Object.values(C).map((name) => [scheduleLabelKey(name), name])
   );
-  // The header row as the file wrote it; names the allowlist does not hold stay in the list (so the parse can report
-  // them as dropped) and their VALUES are never read. Every header is read: a file with more than the cap is refused
-  // by the parse (`too-many-columns`), never cut (a column the import reads past the cap would be dropped while its
-  // values stayed).
+  // The header row as sent; names the allowlist does not hold stay in the list (so the parse can report them as
+  // dropped) and their VALUES are never read. Every header is read: nothing cuts the row by position.
   // A VALUE is read by the header as the file wrote it (the row is keyed by that); the cleaned name only says which
   // column it is. Reading by the cleaned name lost every value of a column whose header had a stray space.
   const named = headers
@@ -884,17 +912,6 @@ export function stageGameChunk({
     season,
     rowOffset,
   });
-  const empty = {
-    rows: 0,
-    ok: 0,
-    tbd: 0,
-    refused: 0,
-    flagged: 0,
-    by_reason: {},
-    dropped_columns: [],
-    warnings: [],
-    refused_rows: [],
-  };
   if (!parsed.ok) return { refusal: parsed.refusal, staged: [], summary: empty };
   const staged = parsed.rows.map((row, i) => {
     const raw: Record<string, string> = {};

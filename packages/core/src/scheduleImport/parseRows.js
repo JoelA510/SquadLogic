@@ -53,7 +53,11 @@
 import { seasonCalendarDate, resolveZonedInstant } from '../timing/seasonClock.js';
 import { TIMING_REASON } from '../timing/reasonCodes.js';
 import { scheduleLabelKey } from './mapping.js';
-import { SCHEDULE_IMPORT_LIMITS, SCHEDULE_IMPORT_REASON as R } from './reasonCodes.js';
+import {
+  SCHEDULE_IMPORT_LIMITS,
+  SCHEDULE_IMPORT_REASON as R,
+  describeTooManyColumns,
+} from './reasonCodes.js';
 import { SCHEDULE_IMPORT_COLUMNS, SCHEDULE_IMPORT_TEMPLATE_HEADER } from './columns.js';
 
 // The column names and the template's header row live in a module of constants (`columns.js`), so a caller that only
@@ -318,7 +322,7 @@ export function parseScheduleRows({ headers, rows, season, rowOffset = 0 }) {
   if (headers.length > SCHEDULE_IMPORT_LIMITS.MAX_COLUMNS) {
     return fileRefusal(
       R.TOO_MANY_COLUMNS,
-      `The file has ${headers.length} columns; one import reads at most ${SCHEDULE_IMPORT_LIMITS.MAX_COLUMNS}. Remove the columns it does not need and choose it again.`
+      describeTooManyColumns(headers.length, SCHEDULE_IMPORT_LIMITS.MAX_COLUMNS)
     );
   }
 

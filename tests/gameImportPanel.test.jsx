@@ -138,10 +138,11 @@ describe('upload: the file is read by the server, and what it kept or refused is
     expect(screen.getByTestId('schedule-import-upload-refused').textContent).toMatch(
       /Row 10: "13\/04\/2026" is not a date/
     );
-    // ...and never left the browser: the request carried the header NAMES and only the columns the import reads
+    // ...and never left the browser: the request carried only the columns the import reads, found by name (the dropped
+    // ones are named by the browser, above)
     const sent = invoke.mock.calls.map((call) => /** @type {any} */ (call[1]).body);
     expect(sent.length).toBeGreaterThanOrEqual(1);
-    expect(sent[0].headers).toContain('Notes');
+    expect(sent[0].headers).not.toContain('Notes');
     expect(Object.keys(sent[0].rows[0])).not.toContain('Notes');
     expect(JSON.stringify(sent)).not.toContain('placeholder note');
     // one job, for this season, waiting for its confirm
@@ -164,25 +165,52 @@ describe('upload: the file is read by the server, and what it kept or refused is
     expect(await table('import_jobs')).toHaveLength(0);
   });
 
-  it('refuses a file whose Game ID is its 201st column on upload, in words; no job is made, nothing staged', async () => {
-    const rpc = vi.spyOn(mockSupabase, 'rpc');
+  /** A file of the template's rows under `headers`, a value under every column the import does not read. */
+  const wideCsv = (headers) => {
+    const cell = (v) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+    return [
+      headers.join(','),
+      ...FILE_ROWS.map((r) =>
+        headers.map((h) => cell(FILE_HEADERS.includes(h) ? (r[h] ?? '') : `unread ${h}`)).join(',')
+      ),
+    ].join('\n');
+  };
+
+  it('a 250-column file with Home Team at column 230 imports, and its Home Team is read', async () => {
     const invoke = vi.spyOn(mockSupabase.functions, 'invoke');
     render(<ScheduleImportPanel />);
-    const extra = Array.from({ length: 201 - FILE_HEADERS.length }, (_, i) => `Extra ${i}`);
-    const headers = [...FILE_HEADERS.filter((h) => h !== 'Game ID'), ...extra, 'Game ID'];
-    expect(headers).toHaveLength(201);
-    const cell = (v) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-    upload(
-      [headers.join(','), headers.map((h) => cell(FILE_ROWS[0][h] ?? '')).join(',')].join('\n'),
-      'wide.csv'
+    const rest = FILE_HEADERS.filter((h) => h !== 'Home Team');
+    const extra = (n, from) => Array.from({ length: n }, (_, i) => `Extra ${from + i}`);
+    const headers = [...rest, ...extra(229 - rest.length, 0), 'Home Team', ...extra(20, 230)];
+    expect([headers.length, headers.indexOf('Home Team')]).toEqual([250, 229]);
+    upload(wideCsv(headers), 'wide.csv');
+    await waitFor(() => expect(step()).toMatch(/2 of 4/));
+    // the same file as the narrow one: every row read, the Home Team of each among them
+    expect(screen.getByTestId('schedule-import-staged').textContent).toMatch(
+      /13 rows read\. 10 placed games, 2 with no time \(TIME TBD\), 1 that cannot be imported\./
     );
-    const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toMatch(/201 columns; one import reads at most 200/);
-    expect(step()).toMatch(/1 of 4/);
-    expect(rpc.mock.calls.filter(([name]) => name === 'create_import_job')).toEqual([]);
-    expect(invoke).not.toHaveBeenCalled();
-    expect(await table('import_jobs')).toHaveLength(0);
-    expect(await table('staging_import_rows')).toEqual([]);
+    const staged = await table('staging_import_rows');
+    const homes = new Set(staged.map((r) => r.raw_payload?.['Home Team']));
+    for (const r of FILE_ROWS) expect(homes.has(r['Home Team'])).toBe(true);
+    // only the columns the import reads were sent, by name; the others are named on screen and stored nowhere
+    const sent = invoke.mock.calls.map((call) => /** @type {any} */ (call[1]).body);
+    expect(sent[0].headers).toContain('Home Team');
+    expect(sent[0].headers).not.toContain('Extra 0');
+    expect(JSON.stringify(sent)).not.toContain('unread');
+    expect(JSON.stringify(staged)).not.toContain('unread');
+    expect(screen.getByTestId('schedule-import-staged').textContent).toMatch(/Extra 249/);
+  });
+
+  it('a 201-column file whose columns past 200 the import does not read imports', async () => {
+    render(<ScheduleImportPanel />);
+    const headers = [
+      ...FILE_HEADERS,
+      ...Array.from({ length: 201 - FILE_HEADERS.length }, (_, i) => `Extra ${i}`),
+    ];
+    expect(headers).toHaveLength(201);
+    upload(wideCsv(headers), 'wide.csv');
+    await waitFor(() => expect(step()).toMatch(/2 of 4/));
+    expect(await table('import_jobs')).toHaveLength(1);
   });
 
   it('reads no file in a demo: the notice is asked for instead', async () => {

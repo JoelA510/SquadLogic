@@ -969,7 +969,7 @@ describe('schedule import: the file', () => {
     expect(exact.rows).toHaveLength(2400);
   });
 
-  it('takes 200 columns and refuses 201, never cutting a column it reads (the follow-up of PR 11’s C5)', () => {
+  it('takes 200 headers and refuses 201, never cutting a column it reads (the backstop behind the browser, which sends only the columns it reads)', () => {
     const filler = (n) => Array.from({ length: n }, (_, i) => `Extra ${i}`);
     // A Game ID at column 200 is read: the row keeps its key.
     const at200 = [...HEADERS.filter((h) => h !== 'Game ID'), ...filler(190), 'Game ID'];

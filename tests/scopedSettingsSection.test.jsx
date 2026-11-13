@@ -574,7 +574,11 @@ describe('a save whose read-back fails (Codex C2 on #737)', () => {
   });
 });
 
-describe("the rows read are only the pair's, and none is cut (Codex C3 on #737)", () => {
+// The two 1,001-division cases seed and read over a thousand rows; on CI's loaded runner that has
+// taken longer than Vitest's 5 s per-test default (C3 timed out at 5 s on #738), so each gets 30 s.
+const SLOW = { timeout: 30000 };
+
+describe("the rows read are only the pair's, and none is cut (Codex C3 on #737)", SLOW, () => {
   it('reads all of 1,001 division rows when the server cuts every answer at a page (the page size stubbed at 50)', async () => {
     const CAP = 50;
     const many = Array.from({ length: 1001 }, (_, i) => `d-many-${String(i).padStart(4, '0')}`);
@@ -705,7 +709,7 @@ describe('overlapping reads of one organization and season (Codex C5 on #737)', 
   });
 });
 
-describe('more than 1,000 divisions in a season (Codex C6 on #737)', () => {
+describe('more than 1,000 divisions in a season (Codex C6 on #737)', SLOW, () => {
   it("lists every division, past the server's 1,000-row answer, and reads each one's setting", async () => {
     // the mock cuts every list answer at 1,000 rows, as the hosted API does
     const many = Array.from({ length: 1001 }, (_, i) => `d-many-${String(i).padStart(4, '0')}`);

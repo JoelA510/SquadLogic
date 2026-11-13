@@ -1360,7 +1360,8 @@ function planAndWrite(db, jobId, season, map, ctx, env) {
     });
   const createdIds = (table) =>
     new Set([...table.values()].filter((e) => e.creator).map((e) => String(e.ref)));
-  for (const [table, ids] of [
+  /** @type {Array<[string, Set<string>]>} */
+  const written = [
     ['divisions', createdIds(divTable)],
     ['locations', createdIds(locTable)],
     ['fields', createdIds(fldTable)],
@@ -1368,7 +1369,8 @@ function planAndWrite(db, jobId, season, map, ctx, env) {
     ['teams', new Set(shellIds.map(String))],
     ['practice_slots', new Set(liveGroups.filter((g) => g.created).map((g) => String(g.slot_id)))],
     ['practice_assignments', new Set(asg.filter((a) => a.new_id).map((a) => String(a.new_id)))],
-  ]) {
+  ];
+  for (const [table, ids] of written) {
     for (const row of db[table] || []) if (ids.has(String(row.id))) record(table, row);
   }
 

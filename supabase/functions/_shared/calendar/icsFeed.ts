@@ -281,6 +281,29 @@ interface FieldRef {
   locations?: { name?: string | null } | null;
 }
 
+/** How long the feed makes a game with its own start and no length to read (review R6): an hour. */
+export const DEFAULT_GAME_MINUTES = 60;
+
+/** Minutes of `HH:MM[:SS]`, or null. */
+const wallMinutes = (value: unknown): number | null => {
+  const m = /^(\d{2}):(\d{2})/.exec(String(value ?? ''));
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+};
+
+/**
+ * A slot's length in minutes: its two instants, else its two wall times; null when it has no positive length. The
+ * team page's twin is `slotMinutes` in `frontend/src/utils/savedGamesClient.js`, held to this by one table.
+ */
+export function gameSlotMinutes(slot: GameRow['game_slots']): number | null {
+  if (!slot) return null;
+  const a = slot.start ? Date.parse(String(slot.start)) : Number.NaN;
+  const b = slot.end ? Date.parse(String(slot.end)) : Number.NaN;
+  if (Number.isFinite(a) && Number.isFinite(b) && b > a) return Math.round((b - a) / 60_000);
+  const s = wallMinutes(slot.start_time);
+  const e = wallMinutes(slot.end_time);
+  return s !== null && e !== null && e > s ? e - s : null;
+}
+
 export interface GameRow {
   id: string;
   /**
@@ -599,9 +622,9 @@ export function buildFeedEvents(input: {
     const title = `Game: ${teamName}`;
 
     const hasOwn = (value: unknown) => value !== null && value !== undefined && value !== '';
-    if (!slot && !(hasOwn(g.start) && hasOwn(g.end))) {
+    if (!slot && !hasOwn(g.start)) {
       // Reported, not dropped -- see `refuseAssignment` above. A game with no
-      // `game_slots` row and no instants of its own is a game nobody can attend, and silence about it is
+      // `game_slots` row and no start of its own is a game nobody can attend, and silence about it is
       // how a family learns of a fixture from someone else's parent.
       events.push({
         kind: 'unplaceable',
@@ -615,23 +638,38 @@ export function buildFeedEvents(input: {
       return;
     }
 
-    // The game's own instant first, then the slot's, then the slot's wall reading (`placeSlotTime`'s order).
-    const start = placeSlotTime(
-      hasOwn(g.start) ? g.start : slot?.start,
-      slot?.slot_date,
-      slot?.start_time,
-      timezone,
-      'game start'
-    );
-    // The pre-existing fallback `end_time || start_time` is kept: a slot with
-    // no end is a zero-length event, not a dropped one.
-    const end = placeSlotTime(
-      hasOwn(g.end) ? g.end : slot?.end,
-      slot?.slot_date,
-      slot?.end_time || slot?.start_time,
-      timezone,
-      'game end'
-    );
+    // When the game is played (review R6; the team page's `savedGameWallTimes` follows the same rule, and
+    // `_shared/tests/game-end-cases.ts` holds both to one table). A saved game carries its own start: the event
+    // starts there, and ends at its own end when that is not before its start; else after the slot's LENGTH from its
+    // own start (an imported game can start at another time than its slot), else after DEFAULT_GAME_MINUTES. A row
+    // with no start of its own is placed on its slot as before (the slot's instant, then its wall reading).
+    let start: { at: Date | null; findings: TimingFinding[] };
+    let end: { at: Date | null; findings: TimingFinding[] };
+    if (hasOwn(g.start)) {
+      start = placeSlotTime(g.start, slot?.slot_date, slot?.start_time, timezone, 'game start');
+      const own = hasOwn(g.end)
+        ? placeSlotTime(g.end, slot?.slot_date, slot?.end_time, timezone, 'game end')
+        : null;
+      if (start.at && own?.at && own.at.getTime() >= start.at.getTime()) {
+        end = own;
+      } else if (start.at) {
+        const minutes = gameSlotMinutes(slot) ?? DEFAULT_GAME_MINUTES;
+        end = { at: new Date(start.at.getTime() + minutes * 60_000), findings: [] };
+      } else {
+        end = { at: null, findings: [] };
+      }
+    } else {
+      start = placeSlotTime(slot?.start, slot?.slot_date, slot?.start_time, timezone, 'game start');
+      // The pre-existing fallback `end_time || start_time` is kept: a slot with
+      // no end is a zero-length event, not a dropped one.
+      end = placeSlotTime(
+        slot?.end,
+        slot?.slot_date,
+        slot?.end_time || slot?.start_time,
+        timezone,
+        'game end'
+      );
+    }
 
     const findings = [...start.findings, ...end.findings];
 

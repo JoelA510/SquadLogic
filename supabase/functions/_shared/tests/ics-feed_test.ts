@@ -23,6 +23,7 @@ import {
   type PracticeRow,
 } from '../calendar/icsFeed.ts';
 import { composeTeamFeed, PRACTICE_EXCEPTIONS_READ_CAP } from '../calendar/teamFeed.ts';
+import { GAME_END_CASES, GAME_END_TIMEZONE } from './game-end-cases.ts';
 import {
   CURRENT_RUNS,
   exerciseOf,
@@ -487,3 +488,21 @@ Deno.test('saved schedule - a failed read is said and logged, never swallowed', 
   assertEquals(none.readFailures, []);
   assert(!none.client.calls.some((call) => call.table === 'game_assignments'));
 });
+
+// F11-3 review R6: when a saved game ends, over the table the team page's test reads too (`game-end-cases.ts`).
+Deno.test(
+  'saved schedule - a game ends at its own end, else the slot length from its start, never before it',
+  () => {
+    for (const { name, game, feedStart, feedEnd } of GAME_END_CASES) {
+      const [event] = buildFeedEvents({
+        teamName: 'Tigers',
+        timezone: GAME_END_TIMEZONE,
+        games: [game as GameRow],
+      });
+      assertEquals(event.kind, 'timed', name);
+      const timed = event as { dtstart: string; dtend: string };
+      assertEquals([timed.dtstart, timed.dtend], [feedStart, feedEnd], name);
+      assert(timed.dtend >= timed.dtstart, `${name}: DTEND before DTSTART`);
+    }
+  }
+);

@@ -122,10 +122,33 @@ export function withScore({ game_scores: scores, ...row }) {
   };
 }
 
+/** Minutes of `HH:MM[:SS]`, or null. */
+const wallMinutes = (value) => {
+  const m = /^(\d{2}):(\d{2})/.exec(String(value ?? ''));
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+};
+
 /**
- * When a saved game is played, on the season's clock: the game's own `start` and `end` read in `timeZone`. With no
- * zone, or an instant that cannot be read, the slot's wall date and times stand in (the reading before F11-3), and
- * with neither there is no date.
+ * A slot's length in minutes (its two instants, else its two wall times), or null: the twin of the feed's
+ * `gameSlotMinutes` (`_shared/calendar/icsFeed.ts`), held to it by `tests/gameEndRule.test.js`.
+ *
+ * @param {Record<string, any> | null | undefined} slot
+ */
+export function slotMinutes(slot) {
+  if (!slot) return null;
+  const a = slot.start ? Date.parse(String(slot.start)) : Number.NaN;
+  const b = slot.end ? Date.parse(String(slot.end)) : Number.NaN;
+  if (Number.isFinite(a) && Number.isFinite(b) && b > a) return Math.round((b - a) / 60_000);
+  const s = wallMinutes(slot.start_time);
+  const e = wallMinutes(slot.end_time);
+  return s !== null && e !== null && e > s ? e - s : null;
+}
+
+/**
+ * When a saved game is played, on the season's clock (review R6: the feed's rule). It starts at its own `start`; it
+ * ends at its own `end` when that is not before its start, else after the slot's length from its own start, else the
+ * page shows no end (the feed writes an hour, `DEFAULT_GAME_MINUTES`). With no zone, or a start that cannot be read,
+ * the slot's wall date and times stand in (the reading before F11-3), and with neither there is no date.
  *
  * @param {Record<string, any>} game - a row of {@link SAVED_GAME_SELECT}
  * @param {string | null | undefined} timeZone - the season's IANA zone
@@ -134,7 +157,16 @@ export function withScore({ game_scores: scores, ...row }) {
 export function savedGameWallTimes(game, timeZone) {
   const start = wallOfInstant(game?.start, timeZone);
   if (start) {
-    const end = wallOfInstant(game?.end, timeZone);
+    const startMs = Date.parse(game.start);
+    const ownEndMs = game?.end ? Date.parse(game.end) : Number.NaN;
+    const minutes = slotMinutes(game?.game_slot);
+    const endIso =
+      Number.isFinite(ownEndMs) && ownEndMs >= startMs
+        ? game.end
+        : minutes !== null
+          ? new Date(startMs + minutes * 60_000).toISOString()
+          : null;
+    const end = endIso ? wallOfInstant(endIso, timeZone) : null;
     return {
       date: start.date,
       startTime: `${start.time}:00`,

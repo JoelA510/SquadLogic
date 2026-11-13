@@ -32,6 +32,7 @@ const { fetchCurrentGameRunIds, fetchCurrentSavedGames, fetchSavedGames, fetchTe
 const { fetchTeamEvents } = await import('../frontend/src/hooks/useTeamPortal.js');
 const { confirmPreview, stageMapPreview } = await import('./helpers/gameImportFlow.js');
 const { rollbackGameImport } = await import('../frontend/src/utils/gameImportClient.js');
+const { composeTeamFeed } = await import('../supabase/functions/_shared/calendar/teamFeed.ts');
 
 /** Every product file that reads the saved schedule, and the reader it calls. */
 const READERS = {
@@ -240,5 +241,80 @@ describe("the rows the mock's writers store are the tables' rows (lessons 104 an
       organization_id: ORG,
       season_settings_id: SEASON,
     });
+  });
+});
+
+describe('the team page and the feed show the same games (F11-3 review R6, R8)', () => {
+  const { ORG, SEASON, TEAMS, TZ, DIVISION, assignment, save } = world;
+
+  /** The feed's games of a team, as the Edge function reads them (the team's season is its division's). */
+  async function feedGames(teamId) {
+    const { data: team } = await mockSupabase.from('teams').select('*').eq('id', teamId).single();
+    const { data: division } = await mockSupabase
+      .from('divisions')
+      .select('*')
+      .eq('id', team.division_id)
+      .single();
+    const { events, readFailures } = await composeTeamFeed({
+      client: mockSupabase,
+      team: {
+        id: team.id,
+        name: team.name,
+        organization_id: team.organization_id,
+        season_settings_id: division?.season_settings_id ?? null,
+      },
+      orgName: 'Synthetic FC',
+      now: new Date('2026-09-01T00:00:00Z'),
+      log: () => {},
+    });
+    expect(readFailures).toEqual([]);
+    return events
+      .filter((event) => event.title?.startsWith('Game'))
+      .map((event) => [event.uid, event.dtstart ?? null, event.dtend ?? null])
+      .sort();
+  }
+  /** The team page's games of a team, as instants in the feed's spelling. */
+  async function pageGames(teamId) {
+    const { rows } = await fetchTeamEvents(teamId, TZ);
+    const ics = (iso) =>
+      iso
+        ? new Date(iso)
+            .toISOString()
+            .replace(/[-:]/g, '')
+            .replace(/\.\d{3}/, '')
+        : null;
+    return rows.games.map((game) => [game.id, ics(game.start), ics(game.end)]).sort();
+  }
+
+  beforeEach(() => world.seedLeague());
+
+  it('the same games at the same instants, a long game included', async () => {
+    await save([
+      assignment('comets', 'rockets', 'slot-1', { minutes: 90 }),
+      assignment('meteors', 'comets', 'slot-4', { week: 2 }),
+    ]);
+    for (const team of Object.values(TEAMS)) {
+      expect(await pageGames(team), team).toEqual(await feedGames(team));
+    }
+    expect((await pageGames(TEAMS.comets)).length).toBe(2);
+  });
+
+  it('a division moved to another season: both show that season’s schedule, which has none', async () => {
+    await save([assignment('comets', 'rockets', 'slot-1')]);
+    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__'));
+    db.season_settings.push({
+      id: 'season-next',
+      organization_id: ORG,
+      status: 'draft',
+      timezone: TZ,
+    });
+    db.divisions = db.divisions.map((d) =>
+      d.id === DIVISION ? { ...d, season_settings_id: 'season-next' } : d
+    );
+    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+    if (window.__MOCK_DB__) window.__MOCK_DB__ = db;
+    expect(await feedGames(TEAMS.comets)).toEqual([]);
+    expect(await pageGames(TEAMS.comets)).toEqual([]);
+    expect(SEASON).toBeTruthy();
   });
 });

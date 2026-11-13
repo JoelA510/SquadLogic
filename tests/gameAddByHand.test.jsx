@@ -138,7 +138,7 @@ vi.mock('../frontend/src/utils/gamePersistenceClient.js', () => ({
 
 const { default: GameSchedulingPage } =
   await import('../frontend/src/pages/GameSchedulingPage.jsx');
-const { planAddedGame, occupantAt, duplicateTupleRefusal } =
+const { planAddedGame, occupantAt, duplicateTupleRefusal, addedGameWarningsToSave } =
   await import('../frontend/src/utils/gameAddByHand.js');
 
 const at = (date, hhmm) => {
@@ -1495,6 +1495,81 @@ describe('Codex re-review of #731, round 5: a later Apply keeps an earlier added
     await waitFor(() => expect(SAVE.calls).toHaveLength(2));
     await screen.findByText(/Game schedule applied through the persistence workflow\./);
     expect(SAVE.calls[1].runMetadata.results.warnings).toEqual([]);
+  });
+
+  it('the pure rule: a carried double booking is kept only while the same two games clash, never one with another', () => {
+    const game = (id, homeTeamId, awayTeamId, slotId, start) => ({
+      id,
+      homeTeamId,
+      awayTeamId,
+      homeTeamName: id,
+      awayTeamName: id,
+      division: 'U10',
+      fieldId: 'f-north',
+      slotId,
+      weekIndex: 1,
+      start: at('2026-10-03', start),
+      end: at('2026-10-03', `${String(Number(start.slice(0, 2)) + 1).padStart(2, '0')}:00`),
+    });
+    // Saved: the game added earlier (now id g-added) and the one it double-booked team-1 against (g-other).
+    const added = game('g-added', 'team-1', 'team-3', 'gs-a', '09:00');
+    const other = game('g-other', 'team-1', 'team-4', 'gs-b', '09:00');
+    const place = (g) => ({
+      homeTeamId: g.homeTeamId,
+      awayTeamId: g.awayTeamId,
+      slotId: g.slotId,
+      weekIndex: g.weekIndex,
+    });
+    const saved = [{ ...added }, { ...other }];
+    const savedWarnings = [
+      {
+        type: 'team-double-booked',
+        message: 'old words',
+        details: {
+          teamId: 'team-1',
+          gameIds: ['added-1', 'g-other'],
+          places: [place(added), place(other)],
+        },
+      },
+      // A warning the generator wrote has no places: never carried.
+      {
+        type: 'team-double-booked',
+        message: 'generator',
+        details: { teamId: 'team-4', gameIds: ['g-other'] },
+      },
+    ];
+    const names = {
+      isExternal: () => false,
+      fieldName: (id) => id,
+      divisionName: () => null,
+    };
+    const run = (review) =>
+      addedGameWarningsToSave({ review, slotRows: [], savedWarnings, savedGames: saved, names });
+
+    // Still clashing: carried, now naming the saved ids.
+    expect(run([added, other])).toEqual([
+      expect.objectContaining({
+        type: 'team-double-booked',
+        details: expect.objectContaining({ teamId: 'team-1', gameIds: ['g-added', 'g-other'] }),
+      }),
+    ]);
+    // The partner moved to another hour, and a third game of team-1 now clashes with the added game instead: that clash
+    // is not this warning, so nothing is carried (no game is newly flagged).
+    const third = game('g-third', 'team-1', 'team-4', 'gs-c', '09:00');
+    expect(
+      run([
+        added,
+        {
+          ...other,
+          slotId: 'gs-d',
+          start: at('2026-10-03', '12:00'),
+          end: at('2026-10-03', '13:00'),
+        },
+        third,
+      ])
+    ).toEqual([]);
+    // The partner gone from the schedule: the warning is gone with it.
+    expect(run([added])).toEqual([]);
   });
 });
 

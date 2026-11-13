@@ -1765,16 +1765,19 @@ answers; none adds scope):
 - **A later Apply keeps an earlier added game's open flag** (Codex C11). Once saved, a game added by hand is a saved game
   with nothing to say it was added, so each Apply carries forward the saved run's own added-game warnings. Each warning
   records the places it names (`details.places`, the save's unique key: pair, slot, week; jsonb in `results.warnings`, no
-  schema change), because a new game has no id until it is saved. The place finds the saved game, its id finds it in the
-  final schedule, and it is judged again there. The warning is kept only while one of the same kind, on the same team or
-  field, still holds. No other game is flagged (moves record no warnings).
+  schema change), because a new game has no id until it is saved. Each place finds the saved game, its id finds it in
+  the final schedule, and the added game is judged again there against the games the warning named only. The warning is
+  kept only while one of the same kind, on the same team or field, still holds between the same games; a game it named
+  that is gone takes it with it. No other game is flagged (moves record no warnings).
 - **Divisions offered** are those that play games; their teams are the run's teams and the season's outside clubs.
 - **A failed save after a slot was made** keeps the slot and names it in the error. When the outcome is unknown (a
   timeout, an unreadable answer) the error says instead that whether the game was saved into it is being checked. The
   review is left as staged, and a second Apply finds the slot rather than making it again.
-- **Plant evidence** (executed, 2026-11-13, re-run in full after the review round): twenty-four plants after the
-  fifth Codex round, each turning its cases red against the 42 cases of `tests/gameAddByHand.test.jsx`, the restored
-  code green. The plan's three: a Published slot addable (4 red), a double booking blocked (8 red), a new game arriving
+- **Plant evidence** (executed, 2026-11-13, re-run in full after the review round): twenty-seven plants after the
+  fifth Codex round, each turning its cases red against the 43 cases of `tests/gameAddByHand.test.jsx`, the restored
+  code green. C11's four: no carry-forward on the page (1 red), the carried flags dropped in the pure rule (2 red), a
+  carried flag kept as saved, not judged again (2 red), one judged against the whole schedule rather than the games it
+  named (1 red). The plan's three: a Published slot addable (4 red), a double booking blocked (8 red), a new game arriving
   Published (6 red). The E2E
   refusal scenario fails under the first. "Arriving Published" is caught on the staged game; once saved, the database
   cannot be told to publish it through this save, so the post-Apply assertions hold under that plant too (said, not

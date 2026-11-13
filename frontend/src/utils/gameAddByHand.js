@@ -400,10 +400,11 @@ export function warningsOfAddedGames(review, slotRows, { isExternal, fieldName, 
  * The flags a save records for the games added by hand: those of the games added in this review, and those the saved
  * run recorded for games added before, carried forward (Codex re-review of #731, C11). A game added earlier is a saved
  * game now, with nothing to say it was added by hand, so a save that left its warning out would clear an open conflict
- * by the way. Each saved warning names its game by where it was saved (`details.places[0]`); that place finds the saved
- * game, its id finds it in the final schedule (a move keeps the id), and it is judged again there: the warning is kept
- * only while a warning of the same kind, on the same team or field, still holds. A game no warning named is never
- * flagged here (moves record no warnings). Each clash once.
+ * by the way. Each saved warning names its games by where they were saved (`details.places`, the added game first,
+ * then the game it clashed with): a place finds the saved game, its id finds it in the final schedule (a move keeps the
+ * id), and the added game is judged again there against the games the warning named only: the warning is kept only
+ * while one of the same kind, on the same team or field, still holds between the same games. A game no warning named
+ * is never flagged here (moves record no warnings). Each clash once.
  *
  * @param {{ review: ReadonlyArray<Record<string, any>>, slotRows: ReadonlyArray<Record<string, any>>,
  *   savedWarnings: ReadonlyArray<Record<string, any>>, savedGames: ReadonlyArray<Record<string, any>>,
@@ -418,12 +419,19 @@ export function addedGameWarningsToSave({ review, slotRows, savedWarnings, saved
     );
   const judge = { isExternal: names.isExternal, fieldName: names.fieldName, slotDivision };
   const carried = savedWarnings.flatMap((warning) => {
-    const place = warning?.details?.places?.[0];
-    if (!ADDED_GAME_WARNING_TYPES.has(warning?.type) || !place) return [];
-    const saved = savedGames.find((game) => samePlace(place, game));
-    const now = saved ? review.find((game) => sameId(game.id, saved.id)) : undefined;
-    if (!now) return [];
-    return addedGameWarnings(now, review, judge).filter(
+    const places = warning?.details?.places;
+    if (!ADDED_GAME_WARNING_TYPES.has(warning?.type) || !Array.isArray(places) || !places[0]) {
+      return [];
+    }
+    // Every game the warning names, found in the final schedule by its saved id; one gone, and the warning is gone.
+    const games = places.map((place) => {
+      const saved = savedGames.find((game) => samePlace(place, game));
+      return saved ? review.find((game) => sameId(game.id, saved.id)) : undefined;
+    });
+    if (games.some((game) => !game)) return [];
+    const [now, ...partners] = games;
+    // Judged against the games it named only: a clash with some other game is not this warning.
+    return addedGameWarnings(now, partners, judge).filter(
       (fresh) =>
         fresh.type === warning.type &&
         String(fresh.details?.teamId ?? '') === String(warning.details?.teamId ?? '') &&

@@ -3,7 +3,6 @@ import {
   practiceChangesNoteOf,
   readUnshownPracticeChanges,
 } from '../utils/practiceExportChanges.js';
-import { generateScheduleExports } from '@squadlogic/core/outputGeneration.js';
 import {
   exportObjectPath,
   removeScheduleExports,
@@ -21,8 +20,8 @@ import {
   teamsWithCoachSourceDisagreement,
   teamsWithUncorroboratedCoachIdentity,
 } from '@squadlogic/core/people/coachList.js';
-import { teamCoachFields, teamCoaches } from '../utils/teamCoaches.js';
-import { readSeasonTeamDirectory } from '../utils/scheduleReportsRead.js';
+import { teamCoaches } from '../utils/teamCoaches.js';
+import { generateMasterExport } from '../utils/masterExport.js';
 import {
   refreshAndReadScheduleTbd,
   scheduleTbdCounts,
@@ -63,221 +62,6 @@ import { describeMarkFailure, describeSetResult } from '../utils/gamePublishedTe
  */
 
 const MOCK_UPLOAD = IS_MOCK_MODE;
-const DAY_INDEX = {
-  sun: 0,
-  sunday: 0,
-  mon: 1,
-  monday: 1,
-  tue: 2,
-  tuesday: 2,
-  wed: 3,
-  wednesday: 3,
-  thu: 4,
-  thursday: 4,
-  fri: 5,
-  friday: 5,
-  sat: 6,
-  saturday: 6,
-};
-
-function getAssignmentTeamId(assignment) {
-  return assignment?.teamId ?? assignment?.team_id ?? assignment?.teams?.id ?? null;
-}
-
-function getAssignmentSlotId(assignment) {
-  return (
-    assignment?.slotId ??
-    assignment?.slot_id ??
-    assignment?.practiceSlotId ??
-    assignment?.practice_slot_id ??
-    assignment?.practiceSlots?.id ??
-    assignment?.practice_slots?.id ??
-    null
-  );
-}
-
-function normalizeTeamForExport(team) {
-  const id = team?.id ?? team?.teamId ?? team?.team_id;
-  if (!id) return null;
-
-  const division =
-    team.division ??
-    team.divisionName ??
-    team.division_id ??
-    team.divisionId ??
-    team.divisions?.name ??
-    '';
-
-  return {
-    id,
-    name: team.name ?? team.teamName ?? id,
-    division,
-    // An outside club is named as an opponent and has no rows of its own (`generateScheduleExports`).
-    isExternal: team.isExternal === true || team.is_external === true,
-    // 8.2: the row's coach fields under one spelling, **both sources intact**,
-    // so `generateScheduleExports()` reconciles them and its `coachFindings`
-    // carry any disagreement. Reconciling here and passing the settled list
-    // left the core one source to read, and the message below could never
-    // fire — the export said "generated successfully" for a team whose two
-    // sources named different people in slot 1.
-    ...teamCoachFields(team),
-  };
-}
-
-function getDateFromRange(range) {
-  const match = String(range ?? '').match(/\d{4}-\d{2}-\d{2}/);
-  return match?.[0] ?? '2026-01-01';
-}
-
-function getDateForDay(baseDate, day) {
-  const date = new Date(`${baseDate}T00:00:00Z`);
-  const dayIndex = DAY_INDEX[String(day ?? '').toLowerCase()];
-  if (Number.isNaN(date.getTime()) || dayIndex == null) {
-    return baseDate;
-  }
-
-  const delta = (dayIndex - date.getUTCDay() + 7) % 7;
-  date.setUTCDate(date.getUTCDate() + delta);
-  return date.toISOString().slice(0, 10);
-}
-
-function normalizeTime(value) {
-  const trimmed = String(value ?? '').trim();
-  if (!trimmed) return null;
-  const [hours = '00', minutes = '00', seconds = '00'] = trimmed.split(':');
-  return `${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}:${seconds.padStart(2, '0')}`;
-}
-
-function normalizePracticeForExport(assignment) {
-  const teamId = getAssignmentTeamId(assignment);
-  const slot = assignment?.practiceSlots ?? assignment?.practice_slots ?? {};
-  const startTime = normalizeTime(
-    assignment?.startTime ?? assignment?.start_time ?? slot.startTime ?? slot.start_time
-  );
-  const endTime = normalizeTime(
-    assignment?.endTime ?? assignment?.end_time ?? slot.endTime ?? slot.end_time
-  );
-  const range = assignment?.effectiveDateRange ?? assignment?.effective_date_range;
-  const day =
-    assignment?.dayOfWeek ?? assignment?.day_of_week ?? slot.dayOfWeek ?? slot.day_of_week;
-  const date = getDateForDay(getDateFromRange(range), day);
-
-  if (!teamId || (!assignment?.start && !startTime) || (!assignment?.end && !endTime)) {
-    return null;
-  }
-
-  return {
-    teamId,
-    start: assignment.start ?? `${date}T${startTime}`,
-    end: assignment.end ?? `${date}T${endTime}`,
-    fieldId:
-      assignment.fieldId ??
-      assignment.field_id ??
-      slot.fieldId ??
-      slot.field_id ??
-      slot.fields?.id ??
-      slot.fields?.name ??
-      '',
-    slotId: getAssignmentSlotId(assignment) ?? '',
-    notes: assignment.notes ?? '',
-  };
-}
-
-function normalizeGameForExport(assignment) {
-  if (!assignment?.start || !assignment?.end) return null;
-
-  return {
-    homeTeamId: assignment.homeTeamId ?? assignment.home_team_id,
-    awayTeamId: assignment.awayTeamId ?? assignment.away_team_id,
-    start: assignment.start,
-    end: assignment.end,
-    fieldId: assignment.fieldId ?? assignment.field_id ?? '',
-    slotId: assignment.slotId ?? assignment.slot_id ?? '',
-    notes: assignment.notes ?? '',
-  };
-}
-
-export function buildExportPayload({
-  teams,
-  teamSummary,
-  practiceAssignments,
-  gameAssignments,
-  directory = [],
-}) {
-  const teamDirectory = new Map();
-  const addTeam = (team) => {
-    const normalized = normalizeTeamForExport(team);
-    if (normalized) teamDirectory.set(normalized.id, normalized);
-  };
-
-  // The season's teams as the tables hold them come first, outside clubs included (an outside club is in no team run, so
-  // the run's teams never name one); the run's own teams, which carry the coaches, replace their entries.
-  (Array.isArray(directory) ? directory : []).forEach(addTeam);
-  (Array.isArray(teams) ? teams : []).forEach(addTeam);
-  (Array.isArray(teamSummary?.teams) ? teamSummary.teams : []).forEach(addTeam);
-  (Array.isArray(practiceAssignments) ? practiceAssignments : []).forEach((assignment) => {
-    const teamId = getAssignmentTeamId(assignment);
-    if (!teamDirectory.has(teamId)) {
-      addTeam({ ...assignment.teams, id: teamId });
-    }
-  });
-
-  const exportTeams = Array.from(teamDirectory.values());
-  const exportTeamIds = new Set(exportTeams.map((team) => String(team.id)));
-  const practiceRows = Array.isArray(practiceAssignments) ? practiceAssignments : [];
-  const gameRows = Array.isArray(gameAssignments) ? gameAssignments : [];
-  // An assignment with a broken time (no start or end) is not in the master files:
-  // `generateScheduleExports` requires both for an assignment. It is counted here and said beside
-  // the files (admin focus R7), never left out without a word. This is only a row whose time is
-  // broken: a practice a team is short of and a game that could not be placed are not assignments
-  // at all, and are listed as TIME TBD rows from the `schedule_tbd` table (Phase D, E). (A practice
-  // row with no team is not counted: it names no team to export it under, and is not a time
-  // question.)
-  const untimed = {
-    practices: practiceRows.filter(
-      (a) => a && getAssignmentTeamId(a) && !normalizePracticeForExport(a)
-    ).length,
-    games: gameRows.filter((a) => a && !normalizeGameForExport(a)).length,
-  };
-  const exportPractices = practiceRows
-    .map(normalizePracticeForExport)
-    .filter((assignment) => assignment && exportTeamIds.has(String(assignment.teamId)));
-  // The ids go with the games through the same filters, so the games a file holds and the games "Mark these games
-  // Published" names cannot differ: a game with no time, or of a team the files do not hold, is in neither.
-  const exportedGames = gameRows
-    .map((assignment) => ({ id: assignment?.id, game: normalizeGameForExport(assignment) }))
-    .filter(
-      ({ game }) =>
-        game &&
-        exportTeamIds.has(String(game.homeTeamId)) &&
-        exportTeamIds.has(String(game.awayTeamId))
-    );
-  const exportGames = exportedGames.map(({ game }) => game);
-  // A game with a time whose home or away team is in no directory cannot be written to the files: counted here and said
-  // beside them, never left out without a word (the games a file holds and the ids "Mark these games Published" names are
-  // the same filter, so they cannot differ).
-  const omitted = {
-    games: gameRows.filter((assignment) => {
-      const game = normalizeGameForExport(assignment);
-      return (
-        game &&
-        !(exportTeamIds.has(String(game.homeTeamId)) && exportTeamIds.has(String(game.awayTeamId)))
-      );
-    }).length,
-  };
-  const gameIds = exportedGames
-    .map(({ id }) => id)
-    .filter((id) => typeof id === 'string' && id !== '');
-
-  return {
-    teams: exportTeams,
-    practiceAssignments: exportPractices,
-    gameAssignments: exportGames,
-    gameIds,
-    untimed,
-    omitted,
-  };
-}
 
 /**
  * The sentence for the assignments the master files leave out, or null.
@@ -736,75 +520,54 @@ export default function OutputGenerationPanel({
 
     setTimeout(async () => {
       try {
-        // The TIME TBD list (practices a team is short of, games not placed), brought up to date and
-        // then read. First: a list that cannot be refreshed or read stops the files, because files made
-        // without it would leave those practices and games out without a word.
-        let tbd = { rows: /** @type {Array<Record<string, any>>} */ ([]), items: [] };
-        if (seasonSettingsId) {
-          try {
-            tbd = await refreshAndReadScheduleTbd(supabaseClient, seasonSettingsId, {
-              readOnly: seasonCompleted,
-            });
-          } catch (tbdErr) {
-            logger.error('TIME TBD refresh/read error:', tbdErr);
-            setGenerated(null);
-            setTbdRows(null);
-            clearPracticeChanges();
-            setStatus('error');
-            setMessage(
-              `Generation failed: the list of practices and games not scheduled yet could not be brought up to date and read (${tbdErr.message}), so files made now could leave some out. No files were made. Reload the page to try again.`
-            );
-            return;
-          }
+        // The master export is made in one place (`generateMasterExport`), so the import panel's baseline (G5) is
+        // the same rows as this page's files. Each way it stops is said here, in this page's words.
+        const made = await generateMasterExport(supabaseClient, {
+          organizationId: currentOrganization?.id ?? null,
+          seasonSettingsId,
+          seasonCompleted,
+          teams,
+          teamSummary,
+          practiceAssignments,
+          gameAssignments,
+          onTbdRead: (list) => setTbdPreview({ status: 'ready', count: list.items.length }),
+        });
+        if (made.status === 'tbd-failed') {
+          // A list that cannot be refreshed or read stops the files: files made without it would leave those
+          // practices and games out without a word.
+          const tbdErr = made.error;
+          logger.error('TIME TBD refresh/read error:', tbdErr);
+          setGenerated(null);
+          setTbdRows(null);
+          clearPracticeChanges();
+          setStatus('error');
+          setMessage(
+            `Generation failed: the list of practices and games not scheduled yet could not be brought up to date and read (${tbdErr.message}), so files made now could leave some out. No files were made. Reload the page to try again.`
+          );
+          return;
         }
-        setTbdPreview({ status: 'ready', count: tbd.items.length });
-        // The guard is the code path, not the attribute: a header-only file is not an export. Nothing
-        // placed and nothing on the TIME TBD list is nothing to make files from; a list with items is.
-        if (
-          (practiceAssignments?.length ?? 0) === 0 &&
-          (gameAssignments?.length ?? 0) === 0 &&
-          tbd.items.length === 0
-        ) {
+        if (made.status === 'nothing-scheduled') {
+          // The guard is the code path, not the attribute: a header-only file is not an export. Nothing
+          // placed and nothing on the TIME TBD list is nothing to make files from; a list with items is.
           setGenerated(null);
           setTbdRows(null);
           setStatus('idle');
           setMessage(NOTHING_SCHEDULED_TEXT);
           return;
         }
-        // The season's teams as the tables hold them, outside clubs included: the latest team run holds only the league's
-        // own teams, so a directory made from it alone drops every game an outside club plays. A read that fails stops
-        // the files (all or nothing, naming the table), as the TIME TBD read does.
-        let directory = [];
-        if (currentOrganization?.id && seasonSettingsId) {
-          const read = await readSeasonTeamDirectory(supabaseClient, {
-            organizationId: currentOrganization.id,
-            seasonSettingsId,
-          });
-          if (read.ok !== true) {
-            logger.error('Season team directory read error:', read.message);
-            setGenerated(null);
-            setTbdRows(null);
-            clearPracticeChanges();
-            setStatus('error');
-            setMessage(
-              `Generation failed: the season's teams could not be read (${read.table}: ${read.message}), so files made now could leave games out. No files were made. Reload the page to try again.`
-            );
-            return;
-          }
-          directory = read.teams;
+        if (made.status === 'directory-failed') {
+          // The season's teams could not be read: all or nothing, naming the table, as the TIME TBD read does.
+          logger.error('Season team directory read error:', made.message);
+          setGenerated(null);
+          setTbdRows(null);
+          clearPracticeChanges();
+          setStatus('error');
+          setMessage(
+            `Generation failed: the season's teams could not be read (${made.table}: ${made.message}), so files made now could leave games out. No files were made. Reload the page to try again.`
+          );
+          return;
         }
-        const exportPayload = buildExportPayload({
-          teams,
-          teamSummary,
-          practiceAssignments,
-          gameAssignments,
-          directory,
-        });
-        if (
-          exportPayload.practiceAssignments.length === 0 &&
-          exportPayload.gameAssignments.length === 0 &&
-          tbd.items.length === 0
-        ) {
+        if (made.status === 'nothing-writable') {
           // Assignments exist but none can be written (no start or end time, or no team on
           // the export): say which, rather than hand over a file of headers.
           setGenerated(null);
@@ -814,32 +577,21 @@ export default function OutputGenerationPanel({
           setMessage(
             [
               'Nothing to export: none of the applied practices or games can be written to the files.',
-              untimedAssignmentsNote(exportPayload.untimed),
-              omittedGamesNote(exportPayload.omitted),
+              untimedAssignmentsNote(made.payload.untimed),
+              omittedGamesNote(made.payload.omitted),
             ]
               .filter(Boolean)
               .join(' ')
           );
           return;
         }
-        const exports = generateScheduleExports({
-          teams: exportPayload.teams,
-          practiceAssignments: exportPayload.practiceAssignments,
-          gameAssignments: exportPayload.gameAssignments,
-          tbdItems: tbd.items,
-        });
+        const { exports, payload: exportPayload, tbd } = made;
         // The ids of the games the files hold travel with them: Upload marks those, as they were made.
         setGenerated({ ...exports, gameIds: exportPayload.gameIds });
         setTbdRows(tbd.rows);
         // Counted over the rows the CSV holds, filtered exactly as
         // `buildExportPayload` filters them, never over rows it dropped.
-        const exportTeamIds = new Set(exportPayload.teams.map((team) => String(team.id)));
-        notePracticeChanges(
-          practiceAssignments.filter((assignment) => {
-            const exported = normalizePracticeForExport(assignment);
-            return exported && exportTeamIds.has(String(exported.teamId));
-          })
-        );
+        notePracticeChanges(made.exportedPractices);
         // **A parity report describes one row set.** Leaving the previous
         // verdict on screen after a regenerate means a green "still matches"
         // describing a schedule that no longer exists.

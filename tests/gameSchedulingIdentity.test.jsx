@@ -517,3 +517,102 @@ describe('after a 409 GAME_IDENTITY the staged review is matched to the saved sc
     expect(SAVE.sent).toHaveLength(1);
   });
 });
+
+describe('the re-key waits for the CURRENT run’s games, not any new answer (F11-3 fix round 2, Codex P2)', () => {
+  /** The real save of the mock, as the database takes it. */
+  async function realSave(rows) {
+    const { data, error } = await mockSupabase.rpc('persist_game_schedule', {
+      run_data: {
+        organization_id: ORG,
+        season_settings_id: SEASON,
+        run_type: 'game',
+        status: 'completed',
+        results: {},
+        completed_at: '2026-06-01T12:00:00Z',
+      },
+      assignments: rows,
+    });
+    if (error) throw Object.assign(new Error(error.message), { code: error.code });
+    return data;
+  }
+
+  it('the old run answering before the latest-run lookup does not consume the re-key', async () => {
+    seed();
+    // The latest-run lookup is held from the refusal on; the old run's games read answers at once.
+    const realFrom = mockSupabase.from.bind(mockSupabase);
+    let holding = false;
+    let releaseLookup = () => {};
+    const lookupHeld = new Promise((resolve) => (releaseLookup = resolve));
+    vi.spyOn(mockSupabase, 'from').mockImplementation((table) => {
+      const builder = realFrom(table);
+      if (table !== 'scheduler_runs' || !holding) return builder;
+      const realSelect = builder.select.bind(builder);
+      builder.select = (...args) => {
+        const query = realSelect(...args);
+        query.abortSignal = () => ({
+          then: (resolve, reject) => lookupHeld.then(() => query.then(resolve, reject)),
+        });
+        return query;
+      };
+      return builder;
+    });
+
+    SAVE.sent = [];
+    let calls = 0;
+    SAVE.impl = async ({ assignments, runMetadata }) => {
+      const rows = prepareGamePersistenceSnapshot({ assignments, runMetadata }).payload
+        .assignmentRows;
+      SAVE.sent.push(rows);
+      calls += 1;
+      if (calls === 1) {
+        // Meanwhile another tab saved a new run: five games carried by id, game 1's pair placed again as a new game.
+        const carried = savedGames()
+          .filter((row) => row.id !== GAME(1))
+          .map(
+            ({ run_id: _run, published: _p, published_at: _pa, published_by: _pb, ...row }) => row
+          );
+        const [
+          { id: _gone, run_id: _r, published: _q, published_at: _qa, published_by: _qb, ...again },
+        ] = savedGames().filter((row) => row.id === GAME(1));
+        await realSave([...carried, again]);
+        holding = true;
+        throw Object.assign(new Error('game is of another schedule'), {
+          code: 'GAME_IDENTITY',
+          status: 409,
+        });
+      }
+      const runId = await realSave(rows);
+      return { runId };
+    };
+
+    await mount();
+    const run = await screen.findByRole('button', {
+      name: 'Auto-Generate: run auto-scheduler optimization',
+    });
+    await waitFor(() => expect(run).toBeEnabled());
+    fireEvent.click(run);
+    const apply = await screen.findByRole('button', { name: /apply schedule/i });
+    await waitFor(() => expect(apply).toBeEnabled());
+    fireEvent.click(apply);
+    await screen.findByText(/game is of another schedule/);
+    // The old run's games have answered by now; the lookup has not.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(screen.queryByText(/matched again to the saved schedule as it is now/)).toBeNull();
+    holding = false;
+    releaseLookup();
+
+    expect(
+      await screen.findByText(/matched again to the saved schedule as it is now/)
+    ).toBeInTheDocument();
+    const again = await screen.findByRole('button', { name: /apply schedule/i });
+    await waitFor(() => expect(again).toBeEnabled());
+    fireEvent.click(again);
+    await screen.findByText(/Game schedule applied through the persistence workflow\./);
+    const sentIds = SAVE.sent[1].map((row) => row.id);
+    // The carried games keep their ids (an update in place), and game 1's pair takes the new game's id.
+    for (const n of [2, 3, 4, 5, 6]) expect(sentIds).toContain(GAME(n));
+    expect(sentIds.filter(Boolean)).toHaveLength(6);
+    // Nothing was inserted: six in the current run, and game 1 left behind in the first.
+    expect(orgGames()).toHaveLength(7);
+  });
+});

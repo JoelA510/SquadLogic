@@ -421,6 +421,16 @@ describe("the held rule :: Published or scored, one predicate, in the database's
   });
 });
 
+/** A row of scoped_settings for the standings key (migration 20261124010000). */
+const scoped = (where, value) => ({
+  id: `scoped-${Object.values(where).join('-')}`,
+  program_id: null,
+  division_id: null,
+  ...where,
+  key: 'standings_count_outside_results',
+  value,
+});
+
 describe('standings :: the rows the view computes', () => {
   function league() {
     const db = world();
@@ -440,7 +450,9 @@ describe('standings :: the rows the view computes', () => {
     );
     expect(`${standing(db, t('e1'))} / ${standing(db, t('e2'))}`).toBe(inPgtap('no row / no row'));
     expect(standing(db, t('01'))).toBe(inPgtap('0 0-0-0 0:0 0 nc=1'));
-    db.organizations[0].feature_flags.standings_count_outside_results = true;
+    // 20261124010000: the organization's value is a scoped setting (supabase/tests/game_scores.sql sets it through the
+    // setter); the mock's standings read it through the same resolver.
+    db.scoped_settings = [scoped({ organization_id: ORG }, true)];
     expect(standing(db, t('01'))).toBe(inPgtap('1 1-0-0 2:0 3 nc=0'));
     expect(standing(db, t('e1'))).toBe('no row');
     expect(standing(db, t('03'))).toBe('1 1-0-0 3:1 3 nc=0');
@@ -450,10 +462,28 @@ describe('standings :: the rows the view computes', () => {
     ).toBe(inPgtap("'5 0'").slice(1, -1));
   });
 
-  it('only a boolean true turns the setting on (org_flag reads nothing else)', () => {
+  it('only a JSON true turns the setting on (the seam compares with true), and the retired flag is not read', () => {
     const db = league();
-    db.organizations[0].feature_flags.standings_count_outside_results = 'true';
+    db.scoped_settings = [scoped({ organization_id: ORG }, 'true')];
     expect(standing(db, t('01'))).toBe('0 0-0-0 0:0 0 nc=1');
+    db.scoped_settings = [];
+    db.organizations[0].feature_flags.standings_count_outside_results = true;
+    expect(standing(db, t('01'))).toBe('0 0-0-0 0:0 0 nc=1');
+  });
+
+  it("the division's own value beats the organization's (the pgTAP file's division case)", () => {
+    const db = league();
+    db.scoped_settings = [
+      scoped({ organization_id: ORG }, true),
+      scoped({ organization_id: ORG, division_id: DIV }, false),
+    ];
+    expect(standing(db, t('01'))).toBe(
+      inPgtap("'true 0 0-0-0 0:0 0 nc=1'")
+        .slice(1, -1)
+        .replace(/^true /, '')
+    );
+    db.scoped_settings = db.scoped_settings.slice(0, 1);
+    expect(standing(db, t('01'))).toBe('1 1-0-0 2:0 3 nc=0');
   });
 
   it("the columns are the view's, in its order", () => {

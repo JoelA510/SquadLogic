@@ -126,6 +126,8 @@ export const PRACTICE_IMPORT_REFERENCES = Object.freeze({
     ['players', 'division_id'],
     ['practice_slots', 'division_id'],
     ['schedule_tbd', 'division_id'],
+    // 20261124010000: a division's own scoped settings (a division someone set a value on is referenced, so kept).
+    ['scoped_settings', 'division_id'],
     ['teams', 'division_id'],
   ],
   scheduler_runs: [

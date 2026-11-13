@@ -29,7 +29,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(143);
+SELECT plan(145);
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
 -- err: SQLSTATE:DETAIL of the first error, or 'no error' (the statement's effect stays).
@@ -496,7 +496,9 @@ SELECT is(pg_temp.standing(pg_temp.t('e1')) || ' / ' || pg_temp.standing(pg_temp
 SELECT is(pg_temp.val($$SELECT public.standings_counts_outside('a1111111-1111-1111-1111-11111111abcd')::text$$), 'false', 'control: results against outside clubs are not counted unless the organization says so');
 SELECT is(pg_temp.standing(pg_temp.t('01')), '0 0-0-0 0:0 0 nc=1', 'by default an own team''s result against an outside club is not counted, and the row says one was left out');
 SET LOCAL "request.jwt.claims" TO '{}';
-UPDATE public.organizations SET feature_flags = feature_flags || '{"standings_count_outside_results": true}'::jsonb WHERE id = 'a1111111-1111-1111-1111-111111111111';
+-- 20261124010000: the organization's value is a scoped setting, set through its one setter (feature_flags is no longer read).
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+DO $$ BEGIN PERFORM public.admin_set_scoped_setting('standings_count_outside_results', 'organization', 'a1111111-1111-1111-1111-111111111111', 'true'); END $$;
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 SELECT is(pg_temp.val($$SELECT public.standings_counts_outside('a1111111-1111-1111-1111-11111111abcd')::text$$), 'true', 'the organization turns it on');
 SELECT is(pg_temp.standing(pg_temp.t('01')), '1 1-0-0 2:0 3 nc=0', 'and the result against the outside club counts for the own team');
@@ -504,8 +506,17 @@ SELECT is(pg_temp.standing(pg_temp.t('e1')), 'no row', 'the outside club still h
 SELECT is(pg_temp.standing(pg_temp.t('03')), '1 1-0-0 3:1 3 nc=0', 'control: a result between two own teams is the same either way');
 SELECT is(pg_temp.val($$SELECT sum(games_played) || ' ' || sum(results_not_counted) FROM public.view_league_standings WHERE division_id = 'a1111111-1111-1111-1111-11111111abcd'$$),
     '5 0', 'the fixture of two outside clubs counts for nobody (five sides played: e02 and e05 twice each, e0a once)');
+-- 20261124010000: the division's own value beats the organization's, through the view; unset, it inherits again.
+SELECT is(pg_temp.val($$SELECT public.admin_set_scoped_setting('standings_count_outside_results', 'division', 'a1111111-1111-1111-1111-11111111abcd', 'false') ->> 'changed'$$)
+          || ' ' || pg_temp.standing(pg_temp.t('01')), 'true 0 0-0-0 0:0 0 nc=1',
+    'a division set to "don''t count" under an organization that counts: the result is left out again');
+SELECT is(pg_temp.val($$SELECT public.admin_set_scoped_setting('standings_count_outside_results', 'division', 'a1111111-1111-1111-1111-11111111abcd', NULL) ->> 'changed'$$)
+          || ' ' || pg_temp.standing(pg_temp.t('01')), 'true 1 1-0-0 2:0 3 nc=0',
+    'unset, the division inherits the organization''s value and the result counts');
 SET LOCAL "request.jwt.claims" TO '{}';
-UPDATE public.organizations SET feature_flags = feature_flags - 'standings_count_outside_results' WHERE id = 'a1111111-1111-1111-1111-111111111111';
+-- 20261124010000: the organization's value is a scoped setting, set through its one setter (feature_flags is no longer read).
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+DO $$ BEGIN PERFORM public.admin_set_scoped_setting('standings_count_outside_results', 'organization', 'a1111111-1111-1111-1111-111111111111', NULL); END $$;
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 SELECT is(pg_temp.val($$SELECT count(*) || ' ' || count(*) FILTER (WHERE team_id IN (SELECT id FROM public.teams WHERE is_external)) FROM public.view_league_standings
     WHERE division_id = 'a1111111-1111-1111-1111-11111111abcd'$$),
@@ -562,7 +573,9 @@ SELECT is(pg_temp.val($$SELECT count(*) FROM public.view_league_standings WHERE 
 SELECT is(pg_temp.val($$SELECT public.standings_counts_outside('a1111111-1111-1111-1111-11111111abcd')::text$$), 'false', 'the setting reads as off');
 RESET ROLE;
 SET LOCAL "request.jwt.claims" TO '{}';
-UPDATE public.organizations SET feature_flags = feature_flags || '{"standings_count_outside_results": true}'::jsonb WHERE id = 'a1111111-1111-1111-1111-111111111111';
+-- 20261124010000: the organization's value is a scoped setting, set through its one setter (feature_flags is no longer read).
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+DO $$ BEGIN PERFORM public.admin_set_scoped_setting('standings_count_outside_results', 'organization', 'a1111111-1111-1111-1111-111111111111', 'true'); END $$;
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 SELECT is(pg_temp.val($$SELECT games_played || ' ' || points || ' nc=' || results_not_counted FROM public.view_league_standings WHERE team_id = pg_temp.t('01')$$),
@@ -591,7 +604,9 @@ SELECT is(pg_temp.msg(format($$SELECT public.apply_game_import_job(%L, true)$$, 
 SELECT is(pg_temp.msg(format($$SELECT public.rollback_game_import_job(%L)$$, gen_random_uuid())) !~ 'permission denied', true, 'nor is rollback_game_import_job');
 RESET ROLE;
 SET LOCAL "request.jwt.claims" TO '{}';
-UPDATE public.organizations SET feature_flags = feature_flags - 'standings_count_outside_results' WHERE id = 'a1111111-1111-1111-1111-111111111111';
+-- 20261124010000: the organization's value is a scoped setting, set through its one setter (feature_flags is no longer read).
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+DO $$ BEGIN PERFORM public.admin_set_scoped_setting('standings_count_outside_results', 'organization', 'a1111111-1111-1111-1111-111111111111', NULL); END $$;
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 
 -- ── 7. Delete team (D5) and the organization cascade (U5) ──────────────────

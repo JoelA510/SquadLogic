@@ -731,6 +731,11 @@ behind them (`mockSupabaseClient.js`, `mockSeasons.js`), the seeds and pgTAP tha
 
 ### F11-4: Settings scope (M; migration, or inside PR 12; rule 14; Review: (c))
 
+**Its own plan: `docs/changes/2026-11-13-settings-scope.md`** (approved 2026-11-13; two pull requests, F11-4a the
+database half with migration `20261124010000`, F11-4b the panel). Where that plan differs from the sketch under "The
+settings cascade" above (one table rather than a column on programs and divisions; the organization's value moved out
+of `feature_flags`; one Settings panel), it says why.
+
 Depends on: its own small plan, approved. Scope here: the resolver, the storage on programs and divisions, rollover, one
 setter, and the standings policy as its first user; PR 12 consumes it. Tests named by that plan; the ones this plan needs:
 a precedence test over all eight set/unset combinations of the three levels (explicit `false` overrides an inherited `true`);

@@ -400,7 +400,7 @@ Each names its test. Plants: at most three per pull request.
 
 Depends on: this plan agreed. One migration; nothing else pending.
 
-- [ ] A1 (L) Migration `20261124010000_settings_scope.sql` as designed; revert and smoke; catalogue snapshot; plants
+- [x] A1 (L) Migration `20261124010000_settings_scope.sql` as designed; revert and smoke; catalogue snapshot; plants
       re-aimed. **First** `supabase/tests/scoped_settings.sql`, red against `0687cae`: - precedence: the 16-row `VALUES` table through `scoped_setting_value` (all eight set/unset combinations of the
       three levels, both value patterns; an explicit `false` beats an inherited `true`, and the reverse; all unset
       gives the registry default); an unknown key raises 22023; - setter: each refusal (no user, wrong scope word, another organization's program, the default program, a
@@ -416,19 +416,19 @@ Depends on: this plan agreed. One migration; nothing else pending.
       the first two have a row, the last two have none (lesson 67).
       Rewritten: `game_scores.sql:496-501`, `:562-578` (the organization value through the setter, same expectations);
       `demo_sessions.sql` census (two RPCs added as allowed).
-- [ ] A2 (S) `admin_set_division_practice_settings` cases in `supabase/tests/division_settings_rpc.sql`: changes only
+- [x] A2 (S) `admin_set_division_practice_settings` cases in `supabase/tests/division_settings_rpc.sql`: changes only
       the two practice columns (the roster rules, set to non-null values first, are unchanged after), null keeps, `0`
       clears the length, the range refusals, a completed season, another organization's division, one audit row with
       only the practice keys.
-- [ ] A3 (S) Core `packages/core/src/scopedSettings.js` registered in the index. Tests
+- [x] A3 (S) Core `packages/core/src/scopedSettings.js` registered in the index. Tests
       `tests/scopedSettingsParity.test.js` (the pgTAP `VALUES` rows through `resolveScopedSetting`; the registry equal
       to the union of the migrations' `INSERT`s) and `tests/scopedSettings.test.js` (`source` for each level; a value of
       the wrong type at a level is ignored, not trusted).
-- [ ] A4 (M) Mock: `scoped_settings` and `scoped_setting_keys` tables, the two RPCs with the SQL's refusals, the
+- [x] A4 (M) Mock: `scoped_settings` and `scoped_setting_keys` tables, the two RPCs with the SQL's refusals, the
       rollover copy, and `computeScoredStandings` reading `resolveScopedSetting` instead of `feature_flags`
       (`mockGameScores.js:165-167`). Test `tests/mockScopedSettings.test.js`: the pgTAP's setter and rollover cases
       through the mock give the same results (lesson 77); `tests/mockGameScores.test.js` unchanged in its numbers.
-- [ ] A5 (S) Registry: the catalog entry removed, the key marked retired; `tests/standingsOutsideClubs.test.jsx`
+- [x] A5 (S) Registry: the catalog entry removed, the key marked retired; `tests/standingsOutsideClubs.test.jsx`
       updated (the key is the one `20261124010000` registers and the seam names; it is no longer in the catalog; a
       stored value still parses). Docs: `docs/security/rls-policies.md`, `docs/architecture/persistence-rpc-layer.md`,
       the `squadlogic-feature-guardians` skill (both copies, item 7), `CHANGELOG.md`, one lesson.
@@ -439,6 +439,31 @@ explicit false go red; the rollover's division block removed: the rollover case 
 build or from production; `game_scores.sql` needs more than its setting's seeding changed; the view's columns or their
 order change; a client role can write `scoped_settings` by any path; the rollover's count check fires on the harness
 league.
+
+**As built (2026-11-13; migration `20261124010000_settings_scope.sql`; the pull request has the detail).** A1 to A5
+are done. What differs from the text above, each a decision of the build:
+
+- **A2's cases are in `supabase/tests/scoped_settings.sql`** (section 6), not in `division_settings_rpc.sql`: the
+  function is this migration's, and its file's plan count and helpers are this one's. `division_settings_rpc.sql` is
+  unchanged.
+- **The core twin takes rows as stored** (`scopedLevelsFor`) and does not filter a value of the wrong type: the
+  resolver returns whatever the row holds, and the twin must give the same answer (the setter is the type check).
+- **The seam compares with JSON true** (`scoped_setting_value(...) = 'true'::jsonb`), as `org_flag` read only a boolean.
+- **The resolver skips the default program** even though no row can name it (the setter refuses it): one rule in one
+  place.
+- **The games import's rollback census** (`supabase/tests/game_import_apply_rollback.sql`) lists
+  `divisions<-scoped_settings` as allowed, with its reason: a division that import made and its rollback removes takes
+  any value an admin set on it since (S8's rule for programs, applied to divisions). Declared, not guarded: a guard
+  waits for the next replacement of `rollback_game_import_job`. The practice import's rollback reads every foreign key
+  from the catalogue and keeps such a division.
+- **The Standings page's sentence** no longer says "in Settings, under Features" (the switch is gone); it says the
+  setting is chosen for the league, a program or a division. F11-4b names the panel.
+- **The harness** gains a stage that plants four organizations (the flag true, false, absent and a string) before the
+  migration and requires each division to resolve as `org_flag` read it; and a revert check (an organization row
+  written back, an unset key removed, the division value counted as dropped). Two plants re-aimed at this migration:
+  `M59 the rollover takes no season lock` and `M71 the standings helper runs as its caller` (lesson 70).
+- **Smokes:** `docs/sql/20261122010000_smoke.sql` sets the organization's standings value through the setter (its
+  `feature_flags` write is no longer read).
 
 ### F11-4b: the panel, the audit wording, the import's practice RPC (no migration; Review (a))
 

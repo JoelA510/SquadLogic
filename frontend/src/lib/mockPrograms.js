@@ -25,6 +25,7 @@
  * Pure over `db` so a test can drive it directly; `mockSupabaseClient.js` wires it into `rpc()`,
  * calls `normalizePrograms` when it reads the database, and persists `db` afterwards.
  */
+import { dropProgramScopedSettings } from './mockScopedSettings.js';
 
 export const PROGRAM_RPCS = Object.freeze([
   'admin_upsert_program',
@@ -306,6 +307,8 @@ export function handleProgramRpc(db, name, params, ctx) {
       d.program_id = fallback.id;
     });
     db.programs = db.programs.filter((q) => !same(q.id, row.id));
+    // 20261124010000: the program's own scoped settings go with it (decision S8).
+    dropProgramScopedSettings(db, row.id);
     c.markDeleted(db, 'programs', [String(row.id)]);
     const movedIds = moved.map((d) => d.id);
     audit(db, c, row.organization_id, 'program.deleted', 'program', row.id, {
@@ -351,6 +354,8 @@ export function handleProgramRpc(db, name, params, ctx) {
     d.program_id = target.id;
   });
   db.programs = db.programs.filter((q) => !same(q.id, source.id));
+  // 20261124010000: the source's own scoped settings go with it; the target keeps its own (decision S8).
+  dropProgramScopedSettings(db, source.id);
   c.markDeleted(db, 'programs', [String(source.id)]);
   const movedIds = moved.map((d) => d.id);
   audit(db, c, source.organization_id, 'program.merged', 'program', target.id, {

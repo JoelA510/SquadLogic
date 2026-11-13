@@ -48,10 +48,15 @@ How to add, gate, and retire an organization-level feature flag safely.
 7. A setting the server enforces is read in SQL with `org_flag(org, key, default)`, its default
    the same as `FEATURE_DEFAULTS` (absent there is off), and the mock RPC reads the stored flags
    the same way (`update_org_feature_flags` stores them in the mock). Settings the server reads
-   today: `score_entry` (`update_game_score`, 55000 while off; 20261028010000) and
-   `standings_count_outside_results` (`standings_counts_outside`, read by `view_league_standings`;
-   20261122010000). Hiding a page
+   today: `score_entry` (`update_game_score`, 55000 while off; 20261028010000). Hiding a page
    with a flag is not authorization: `standings` hides a page over data every member reads.
+8. A setting an organization, a program or a division may each set (the most specific wins) is
+   not a flag: it is a scoped setting (20261124010000, `docs/changes/2026-11-13-settings-scope.md`).
+   It is one row of `scoped_setting_keys` in a migration and one entry of `SCOPED_SETTING_KEYS`
+   in `packages/core/src/scopedSettings.js` (`tests/scopedSettingsParity.test.js` holds them
+   equal), written only by `admin_set_scoped_setting` and read in SQL with
+   `scoped_setting_value(division, key)`. `standings_count_outside_results` moved there from the
+   flags; its `FEATURE_FLAGS` key stays, retired, so stored flags still parse.
 
 ## Practices
 

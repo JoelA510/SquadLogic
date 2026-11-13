@@ -202,7 +202,8 @@ BEGIN
     IF (SELECT games_played || ' ' || wins || ' ' || goals_for || ':' || goals_against || ' ' || points FROM public.view_league_standings WHERE team_id = v_t1) IS DISTINCT FROM '1 1 3:1 3' THEN
         RAISE EXCEPTION 'the winner of a scored game between two own teams does not have one win and three points';
     END IF;
-    UPDATE public.organizations SET feature_flags = feature_flags || '{"standings_count_outside_results": true}'::jsonb WHERE id = v_org;
+    -- 20261124010000: the organization's value is a scoped setting, set through its one setter (feature_flags is no longer read).
+    PERFORM public.admin_set_scoped_setting('standings_count_outside_results', 'organization', v_org, 'true');
     IF (SELECT games_played || ' ' || points || ' ' || results_not_counted FROM public.view_league_standings WHERE team_id = v_t3) IS DISTINCT FROM '1 3 0' THEN
         RAISE EXCEPTION 'with the organization''s setting on, the result against the outside club is still not counted';
     END IF;

@@ -9,8 +9,9 @@
  *   season's current run when a score is set (22023 `game_not_current`), a completed season (22023 `season_completed`); it writes, replaces or deletes the
  *   game's row of `game_scores` and audits `competition.score_updated` with the previous values, only on a change.
  * - {@link deriveLeagueStandings}: `view_league_standings` computed from `game_scores`: a row for an own team, none for
- *   an outside club, a result against an outside club counted only when the organization's
- *   `standings_count_outside_results` setting is a boolean true, and `results_not_counted` saying how many were left out.
+ *   an outside club, a result against an outside club counted only when the own team's division resolves the scoped
+ *   setting `standings_count_outside_results` to true (its own value, else its program's, else the organization's;
+ *   `mockScopedSettings.js`, 20261124010000), and `results_not_counted` saying how many were left out.
  * - {@link deriveCurrentGameRuns}: `current_game_runs`, per organization and season the latest completed game run.
  *
  * Whether a game is HELD is not decided here: `mockGamePublished.js`'s `isRowHeld` reads `db.game_scores`, and every
@@ -19,6 +20,9 @@
  * Since F11-3 the mock has no arm of its own here: an id that names no saved game is "Game not found" (a row of the
  * legacy `games` table included), and the standings are computed on every read, never stored.
  */
+
+import { STANDINGS_COUNT_OUTSIDE_KEY } from '@squadlogic/core/scopedSettings.js';
+import { scopedValueForDivision } from './mockScopedSettings.js';
 
 const same = (a, b) => String(a ?? '').toLowerCase() === String(b ?? '').toLowerCase();
 const fail = (code, message, details = null) => ({ data: null, error: { code, message, details } });
@@ -162,9 +166,9 @@ export function mockUpdateSavedGameScore(db, params, ctx) {
 export function computeScoredStandings(db) {
   const teams = db.teams || [];
   const teamOf = (id) => teams.find((team) => same(team.id, id));
+  // As standings_counts_outside: the own team's division resolves the scoped setting (20261124010000).
   const countsOutside = (team) =>
-    (db.organizations || []).find((org) => same(org.id, team.organization_id))?.feature_flags
-      ?.standings_count_outside_results === true;
+    scopedValueForDivision(db, team.division_id, STANDINGS_COUNT_OUTSIDE_KEY) === true;
   /** @type {Map<string, Record<string, any>>} */
   const rows = new Map();
   const rowFor = (team) => {

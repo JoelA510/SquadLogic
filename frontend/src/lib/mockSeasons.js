@@ -26,6 +26,7 @@
  */
 
 import { defaultProgramOf, normalizePrograms } from './mockPrograms.js';
+import { copyScopedSettingsForRollover } from './mockScopedSettings.js';
 
 export const SEASON_RPCS = Object.freeze([
   'admin_create_season_from',
@@ -449,6 +450,8 @@ function createSeasonFrom(db, p, c) {
     db.divisions.push(copy);
     divisions += 1;
   }
+  // 20261124010000: each program's and each division's scoped settings go with their copies.
+  const scopedSettings = copyScopedSettingsForRollover(db, source.id, season.id, c);
 
   audit(db, c, source.organization_id, 'season.created_from', 'season_settings', season.id, {
     source_season_id: source.id,
@@ -457,6 +460,7 @@ function createSeasonFrom(db, p, c) {
     divisions_copied: divisions,
     programs_copied: programs,
     window_shift_years: shift,
+    scoped_settings_copied: scopedSettings,
   });
   return {
     data: {
@@ -468,6 +472,7 @@ function createSeasonFrom(db, p, c) {
       source_season_id: source.id,
       divisions_copied: divisions,
       programs_copied: programs,
+      scoped_settings_copied: scopedSettings,
     },
     error: null,
   };

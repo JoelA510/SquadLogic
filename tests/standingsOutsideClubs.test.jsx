@@ -1,7 +1,9 @@
 /**
  * F11-2 task B4 (docs/changes/2026-11-06-games-table-source-of-truth.md, "Standings"): an own team's result against an
- * outside club is not counted in the standings unless the organization turns `standings_count_outside_results` on, and
- * the Standings page says how many results its numbers leave out (lesson 92: say what a number is a count of).
+ * outside club is not counted in the standings unless the scoped setting `standings_count_outside_results` says so for
+ * the team's division (its own value, else its program's, else the organization's: F11-4, migration 20261124010000,
+ * docs/changes/2026-11-13-settings-scope.md), and the Standings page says how many results its numbers leave out
+ * (lesson 92: say what a number is a count of).
  *
  * Driven through the real page and the real mock client, over scores entered with the mock's `update_game_score` on
  * saved games (the view is computed from `game_scores`, as the database computes it; supabase/tests/game_scores.sql is
@@ -20,6 +22,7 @@ import {
   FEATURE_FLAGS,
   FeatureFlagSchema,
 } from '../frontend/src/constants/featureFlags.js';
+import { STANDINGS_COUNT_OUTSIDE_KEY } from '../packages/core/src/scopedSettings.js';
 
 const ORG = 'org-outside';
 const SEASON = 'season-outside';
@@ -62,14 +65,15 @@ const game = (id, home, away) => ({
   week_index: 1,
 });
 
-/** The league, with the organization's setting as given; the scores are entered through the mock's RPC. */
-async function seedLeague(flags) {
+/**
+ * The league, with the scoped setting as given ({ organization, division }: true, false, or absent to inherit), set
+ * through the mock's `admin_set_scoped_setting`; the scores are entered through the mock's RPC.
+ */
+async function seedLeague(setting = {}) {
   sessionStorage.clear();
   delete window.__MOCK_DB__;
   seedMockDb({
-    organizations: [
-      { id: ORG, name: 'Synthetic FC', feature_flags: { score_entry: true, ...flags } },
-    ],
+    organizations: [{ id: ORG, name: 'Synthetic FC', feature_flags: { score_entry: true } }],
     organization_members: [{ organization_id: ORG, profile_id: ADMIN, role: 'admin' }],
     season_settings: [{ id: SEASON, organization_id: ORG, status: 'active' }],
     // The games are of the season's current run: a score is entered on no other.
@@ -98,6 +102,19 @@ async function seedLeague(flags) {
   });
   sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify({ user: { id: ADMIN } }));
   const { mockSupabase } = await import('../frontend/src/lib/mockSupabaseClient.js');
+  for (const [scope, scopeId] of [
+    ['organization', ORG],
+    ['division', 'div-u10'],
+  ]) {
+    if (typeof setting[scope] !== 'boolean') continue;
+    const { error } = await mockSupabase.rpc('admin_set_scoped_setting', {
+      p_key: 'standings_count_outside_results',
+      p_scope: scope,
+      p_scope_id: scopeId,
+      p_value: setting[scope],
+    });
+    expect(error, `the ${scope} value is set`).toBe(null);
+  }
   for (const [id, home, away] of [
     ['g-own', 3, 1],
     ['g-outside', 2, 0],
@@ -146,12 +163,28 @@ describe('LeagueStandings :: results against outside clubs', () => {
   });
 
   it('with the organization setting on counts it, says nothing was left out, and still ranks no outside club', async () => {
-    await seedLeague({ standings_count_outside_results: true });
+    await seedLeague({ organization: true });
     await renderPage();
     expect((await rowOf('Synthetic Rovers')).split(' ').slice(0, 6).join(' ')).toBe('2 2 0 0 5 1');
     expect((await rowOf('Synthetic Rovers')).split(' ').at(-1)).toBe('6');
     expect(screen.queryByTestId('standings-outside-not-counted')).not.toBeInTheDocument();
     expect(screen.queryByText('Outside Club (placeholder)')).not.toBeInTheDocument();
+  });
+
+  it('a division\'s own "don\'t count" beats the organization\'s "count"', async () => {
+    await seedLeague({ organization: true, division: false });
+    await renderPage();
+    expect((await rowOf('Synthetic Rovers')).split(' ').slice(0, 6).join(' ')).toBe('1 1 0 0 3 1');
+    expect(screen.getByTestId('standings-outside-not-counted')).toHaveTextContent(
+      '1 result against an outside club is not counted.'
+    );
+  });
+
+  it('and a division\'s own "count" beats the organization\'s default', async () => {
+    await seedLeague({ division: true });
+    await renderPage();
+    expect((await rowOf('Synthetic Rovers')).split(' ').slice(0, 6).join(' ')).toBe('2 2 0 0 5 1');
+    expect(screen.queryByTestId('standings-outside-not-counted')).not.toBeInTheDocument();
   });
 
   it('control: a result between two own teams is the same either way', async () => {
@@ -160,7 +193,7 @@ describe('LeagueStandings :: results against outside clubs', () => {
     const off = (await rowOf('Synthetic Wanderers')).split(' ').slice(0, 6).join(' ');
     cleanup();
     vi.resetModules();
-    await seedLeague({ standings_count_outside_results: true });
+    await seedLeague({ organization: true });
     await renderPage();
     expect((await rowOf('Synthetic Wanderers')).split(' ').slice(0, 6).join(' ')).toBe(off);
     expect(off).toBe('1 0 1 0 1 3');
@@ -188,43 +221,32 @@ describe('LeagueStandings :: results against outside clubs', () => {
   });
 });
 
-describe('the organization toggle :: standings_count_outside_results', () => {
+describe('the retired organization flag :: standings_count_outside_results', () => {
   const MIGRATION = readFileSync(
-    path.join(process.cwd(), 'supabase/migrations/20261122010000_game_scores.sql'),
+    path.join(process.cwd(), 'supabase/migrations/20261124010000_settings_scope.sql'),
     'utf8'
   );
 
-  it('is in the registry, off unless turned on, and the key is the one the database reads', () => {
-    expect(FEATURE_FLAGS.STANDINGS_COUNT_OUTSIDE_RESULTS).toBe('standings_count_outside_results');
+  it('the key is the one the scoped registry holds and the seam reads, no longer through org_flag', () => {
+    expect(FEATURE_FLAGS.STANDINGS_COUNT_OUTSIDE_RESULTS).toBe(STANDINGS_COUNT_OUTSIDE_KEY);
     expect(Object.hasOwn(FEATURE_DEFAULTS, FEATURE_FLAGS.STANDINGS_COUNT_OUTSIDE_RESULTS)).toBe(
       false
     );
     expect(MIGRATION).toContain(
-      `public.org_flag(d.organization_id, '${FEATURE_FLAGS.STANDINGS_COUNT_OUTSIDE_RESULTS}', false)`
+      `SELECT COALESCE((SELECT public.scoped_setting_value(d.id, '${STANDINGS_COUNT_OUTSIDE_KEY}') = 'true'::jsonb`
     );
+    expect(MIGRATION).toContain(`('${STANDINGS_COUNT_OUTSIDE_KEY}', 'boolean', NULL, 'false',`);
   });
 
-  it('the schema keeps it only as a boolean (the database reads nothing else as on)', () => {
+  it('a stored value still parses (the key stays in the registry, retired), so no organization loses its flags', () => {
     expect(
-      FeatureFlagSchema.parse({ standings_count_outside_results: true })
-        .standings_count_outside_results
-    ).toBe(true);
-    expect(
-      FeatureFlagSchema.parse({ standings_count_outside_results: false })
-        .standings_count_outside_results
-    ).toBe(false);
-    expect(
-      FeatureFlagSchema.safeParse({ standings_count_outside_results: 'true' }).data
-        ?.standings_count_outside_results
-    ).not.toBe('true');
+      FeatureFlagSchema.parse({ standings_count_outside_results: true, score_entry: true })
+    ).toEqual({ standings_count_outside_results: true, score_entry: true });
   });
 
-  it('the settings page offers it, tied to Standings', () => {
-    const entry = FEATURE_CATALOG.find(
-      (item) => item.key === FEATURE_FLAGS.STANDINGS_COUNT_OUTSIDE_RESULTS
-    );
-    expect(entry).toBeTruthy();
-    expect(entry.requires).toBe(FEATURE_FLAGS.STANDINGS);
-    expect(entry.description).toMatch(/outside clubs/);
+  it('the Features page no longer offers it: the setting is set by level, not as a flag', () => {
+    expect(
+      FEATURE_CATALOG.find((item) => item.key === FEATURE_FLAGS.STANDINGS_COUNT_OUTSIDE_RESULTS)
+    ).toBeUndefined();
   });
 });

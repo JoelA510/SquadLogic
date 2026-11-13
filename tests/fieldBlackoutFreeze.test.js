@@ -347,9 +347,13 @@ describe('blackout freeze :: who may write each table is a checked list', () => 
     // table. The rollback only READS the table (a guard), so its migration is not a writer.
     // Its fix round 3 adds the same pair again for the rollback class test (a blackout attached to a field the import
     // made, in the pgTAP file inside a ROLLBACK and in the mock's twin), neither a producer.
+    // The practice import (20261123010000) adds two more test writers, neither a producer: its smoke and its pgTAP file
+    // each attach a blackout to a field the import made (inside a ROLLBACK) to show its rollback keeps that field. The
+    // rollback only READS the table (through the catalogue's references and field_bookings).
     expect(writersOf('field_blackouts')).toEqual([
       'docs/sql/20260906000100_smoke.sql',
       'docs/sql/20261007000000_smoke.sql',
+      'docs/sql/20261123010000_smoke.sql',
       'frontend/src/lib/mockSupabaseClient.js',
       'scripts/dbharness/run.sh',
       'supabase/migrations/20260906000100_field_blackouts.sql',
@@ -358,6 +362,7 @@ describe('blackout freeze :: who may write each table is a checked list', () => 
       'supabase/tests/enact_blackout.sql',
       'supabase/tests/game_import_apply_rollback.sql',
       'supabase/tests/game_import_rollback_class.sql',
+      'supabase/tests/practice_import_apply_rollback.sql',
       'supabase/tests/rls_field_blackouts.sql',
       'tests/gameImportRollbackClass.test.js',
       'tests/mockGameImport.test.js',

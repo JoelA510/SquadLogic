@@ -30,7 +30,7 @@
  */
 
 import { carryTeamRunResults } from '@squadlogic/core/utils/teamRunResults.js';
-import { normaliseExternalLabel } from '@squadlogic/core/externalImport/mapping.js';
+import { practiceLabelKey } from '@squadlogic/core/practiceImport/slotKey.js';
 
 export const PRACTICE_IMPORT_RPCS = Object.freeze([
   'map_practice_import_job',
@@ -130,7 +130,7 @@ const fail = (code, message, details) => ({
   data: null,
   error: { code, message, details: details ?? null, hint: null },
 });
-const key = (s) => normaliseExternalLabel(String(s ?? ''));
+const key = (s) => practiceLabelKey(String(s ?? ''));
 const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
 // ---------------------------------------------------------------------------------------------- dates and times

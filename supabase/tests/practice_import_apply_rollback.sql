@@ -505,8 +505,8 @@ SELECT is(pg_temp.scenario($$UPDATE public.field_subunits SET label = 'Bee' WHER
 SELECT is(pg_temp.scenario($$INSERT INTO public.field_blackouts (organization_id, field_id, blackout_from, blackout_until, reason) SELECT organization_id, id, '2026-10-01', '2026-10-02', 'maintenance' FROM public.fields WHERE name = 'W Field'$$,
                            $$SELECT count(*)::text FROM public.field_blackouts fb JOIN public.fields f ON f.id = fb.field_id WHERE f.name = 'W Field'$$),
     'kept=fields,locations witness=1', 'fields, given a blackout since: kept (the cascade would have taken the blackout)');
-SELECT is(pg_temp.scenario($$UPDATE public.locations SET latitude = 45.5, longitude = -122.6 WHERE name = 'W Park'$$, $$SELECT latitude::text FROM public.locations WHERE name = 'W Park'$$),
-    'kept=locations witness=45.5000', 'locations, given coordinates since: kept');
+SELECT is(pg_temp.scenario($$UPDATE public.locations SET address = 'an address entered since' WHERE name = 'W Park'$$, $$SELECT address FROM public.locations WHERE name = 'W Park'$$),
+    'kept=locations witness=an address entered since', 'locations, given an address since: kept');
 SELECT is(pg_temp.scenario($$UPDATE public.teams SET notes = 'a coach called' WHERE name = 'W Shell'$$, $$SELECT notes FROM public.teams WHERE name = 'W Shell'$$),
     'kept=divisions,teams witness=a coach called', 'teams (a shell), edited: kept with its division');
 SELECT is(pg_temp.scenario($$UPDATE public.divisions SET practices_per_week = 2 WHERE name = 'W Div'$$, $$SELECT practices_per_week::text FROM public.divisions WHERE name = 'W Div'$$),

@@ -159,7 +159,7 @@ const SCENARIO_FOR = {
   practice_slots: 'practice_slots, edited',
   field_subunits: 'field_subunits, renamed',
   fields: 'fields, given a blackout since',
-  locations: 'locations, given coordinates since',
+  locations: 'locations, given an address since',
   teams: 'teams (a shell), edited',
   divisions: 'divisions, its settings ticked since',
 };

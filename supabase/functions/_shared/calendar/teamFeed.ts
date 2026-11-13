@@ -206,7 +206,7 @@ export async function composeTeamFeed(input: {
           games = (data ?? []) as GameRow[];
           if (games.length >= SAVED_GAMES_READ_CAP) {
             // Shown as read, and said: games past the cap may be missing.
-            log('calendar-feed: games read failed to stay under the row cap', {
+            log('calendar-feed: games read reached the row cap', {
               teamId,
               rows: games.length,
             });

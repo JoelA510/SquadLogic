@@ -148,3 +148,39 @@ describe('LeagueStandings :: only scores are sent (F11-3 review R7)', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 });
+
+describe('LeagueStandings :: Recent Games is a bounded read (F11-3 review R9)', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('asks the server for the current run’s started games, newest first, at most 50, with only what a card shows', async () => {
+    await save([assignment('comets', 'rockets', 'slot-1')]);
+    const supabase = await client();
+    const realFrom = supabase.from.bind(supabase);
+    const calls = [];
+    vi.spyOn(supabase, 'from').mockImplementation((table) => {
+      const builder = realFrom(table);
+      if (table !== 'game_assignments') return builder;
+      const wrap = (query) =>
+        new Proxy(query, {
+          get(target, key) {
+            const value = target[key];
+            if (typeof value !== 'function' || key === 'then') return value;
+            return (...args) => {
+              calls.push([key, ...args]);
+              return wrap(value.apply(target, args));
+            };
+          },
+        });
+      return wrap(builder);
+    });
+    render(<LeagueStandings />);
+    await waitFor(() => expect(cards()).toHaveLength(1));
+    const methods = calls.map(([method]) => method);
+    expect(methods).toContain('lte');
+    expect(calls.find(([m]) => m === 'lte')[1]).toBe('start');
+    expect(calls.find(([m]) => m === 'order')).toEqual(['order', 'start', { ascending: false }]);
+    expect(calls.find(([m]) => m === 'limit')).toEqual(['limit', 50]);
+    const select = calls.find(([m]) => m === 'select')[1];
+    expect(select).not.toMatch(/game_slots|fields|locations/);
+  });
+});

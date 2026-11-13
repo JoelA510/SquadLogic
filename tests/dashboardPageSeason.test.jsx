@@ -12,12 +12,15 @@ const SPRING = 'season-spring';
 const mocks = vi.hoisted(() => ({
   tables: /** @type {Record<string, any[]>} */ ({}),
   reads: /** @type {Array<{ table: string, eqs: Array<[string, unknown]> }>} */ ([]),
+  chains: /** @type {Array<{ table: string, calls: any[] }>} */ ([]),
 }));
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
     from: (table) => {
       const eqs = [];
+      const calls = [];
+      mocks.chains.push({ table, calls });
       const builder = new Proxy(
         {},
         {
@@ -32,7 +35,7 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
               };
             }
             if (method === 'eq') return (column, value) => (eqs.push([column, value]), builder);
-            return () => builder;
+            return (...args) => (calls.push([method, ...args]), builder);
           },
         }
       );
@@ -166,5 +169,41 @@ describe('DashboardPage (the admin home)', () => {
       ['season_settings_id', FALL],
     ]);
     expect(mocks.reads.some((read) => read.table === 'game_assignments')).toBe(true);
+  });
+
+  it('reads the season’s game count as a count and its upcoming games as five, from the server (review R9)', async () => {
+    mocks.tables = {
+      players: [],
+      divisions: [],
+      teams: [],
+      current_game_runs: [
+        { organization_id: 'org-1', season_settings_id: FALL, run_id: 'run-fall' },
+      ],
+      game_assignments: [],
+      practice_slots: [],
+      audit_log: [],
+    };
+    mocks.reads = [];
+    mocks.chains = [];
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>
+    );
+    await screen.findByText('Games scheduled');
+    await waitFor(() =>
+      expect(mocks.chains.filter((c) => c.table === 'game_assignments').length).toBe(2)
+    );
+    const [count, upcoming] = mocks.chains
+      .filter((c) => c.table === 'game_assignments')
+      .sort((a) => (a.calls.some(([m, , o]) => m === 'select' && o?.head) ? -1 : 1));
+    expect(count.calls.find(([m]) => m === 'select')[2]).toEqual({ count: 'exact', head: true });
+    expect(upcoming.calls.find(([m]) => m === 'gte')?.[1]).toBe('start');
+    expect(upcoming.calls.find(([m]) => m === 'order')).toEqual([
+      'order',
+      'start',
+      { ascending: true },
+    ]);
+    expect(upcoming.calls.find(([m]) => m === 'limit')).toEqual(['limit', 5]);
   });
 });

@@ -206,6 +206,9 @@ const withEvaluationPreview = async (importData, addLog) => {
   }
 };
 
+/** Thrown by the import load's guard once another organization is current (review R5); caught by the load alone. */
+const STALE_LOAD = Symbol('stale import load');
+
 export function ImportProvider({ children }) {
   const { currentOrganization, orgMember, currentSeasonSetting } = useOrganization();
   const [isImporting, setIsImporting] = useState(false);
@@ -254,8 +257,14 @@ export function ImportProvider({ children }) {
   }, []);
 
   const hydrateReadyImportJob = useCallback(
-    async (job) => {
-      const { buildDeferredImportDataFromJob } = await import('../utils/importDeferredActions.js');
+    /**
+     * @param {any} job
+     * @param {<T>(pending: Promise<T>) => Promise<T>} [live] - the caller's guard: throws once the load is stale
+     */
+    async (job, live = (pending) => pending) => {
+      const { buildDeferredImportDataFromJob } = await live(
+        import('../utils/importDeferredActions.js')
+      );
       const deferredImportData = buildDeferredImportDataFromJob(job);
       setActiveJobId(job.id);
       setActiveJob((prev) => ({ ...(prev || {}), ...job }));
@@ -267,7 +276,7 @@ export function ImportProvider({ children }) {
         // A reload while an evaluations import waits for its confirm: the preview is read again.
         const readyData =
           deferredImportData.persistence.ready.import_type === 'evaluations'
-            ? await withEvaluationPreview(deferredImportData, () => {})
+            ? await live(withEvaluationPreview(deferredImportData, () => {}))
             : deferredImportData;
         setImportDataForType(readyData.persistence.ready.import_type, readyData);
       }
@@ -350,14 +359,20 @@ export function ImportProvider({ children }) {
   }, []);
 
   // 1b. One import belongs to ONE organization. This provider is mounted once for the whole app, so a switch of
-  // organization forgets what it held about the last one's (the job in flight and each type's last import, with its
-  // `importJobId`) before the load below reads the new one's: otherwise the import screen would offer to apply, cancel
-  // or continue another organization's job (F11-3, E3; the schedule import panel does the same by its key).
+  // organization forgets what it held about the last one's (the job in flight, each type's last import with its
+  // `importJobId`, and the logs) before the load below reads the new one's: otherwise the import screen would offer to
+  // apply, cancel or continue another organization's job (F11-3, E3; the schedule import panel does the same by its
+  // key). **Null is not an organization** (review R2): the organization arrives from null on every page load and can
+  // blink to null and back; only one organization replaced by ANOTHER is a switch.
   const scopeOrgId = currentOrganization?.id ?? null;
-  const scopeOrgRef = useRef(scopeOrgId);
+  const currentOrgRef = useRef(scopeOrgId);
+  currentOrgRef.current = scopeOrgId;
+  const lastOrgRef = useRef(scopeOrgId);
   useEffect(() => {
-    if (scopeOrgRef.current === scopeOrgId) return;
-    scopeOrgRef.current = scopeOrgId;
+    if (scopeOrgId === null) return;
+    const last = lastOrgRef.current;
+    lastOrgRef.current = scopeOrgId;
+    if (last === null || last === scopeOrgId) return;
     setActiveJobId(null);
     setActiveJob(null);
     setIsImporting(false);
@@ -370,19 +385,27 @@ export function ImportProvider({ children }) {
     setImportedFields(null);
     setImportedFieldAvailability(null);
     setImportedData(null);
+    setImportLogs([]);
+    setTelemetryLogs([]);
   }, [scopeOrgId]);
 
   // 2. Load initial state & Setup Realtime Subscriptions
   useEffect(() => {
-    // A load still answering for an organization that is no longer the current one writes nothing.
+    // A load still answering for an organization that is no longer the current one writes nothing (review R5): every
+    // await of the load goes through `live`, which throws STALE_LOAD once another organization is current.
     const loadingFor = currentOrganization?.id ?? null;
-    const stillCurrent = () => scopeOrgRef.current === loadingFor;
+    /** @type {<T>(pending: Promise<T>) => Promise<T>} */
+    const live = async (pending) => {
+      const value = await pending;
+      if (currentOrgRef.current !== loadingFor) throw STALE_LOAD;
+      return value;
+    };
     const loadFromSupabase = async () => {
       try {
         let readyImportType = null;
         const {
           data: { user },
-        } = await supabase.auth.getUser();
+        } = await live(supabase.auth.getUser());
         if (!user || !currentOrganization?.id) return;
 
         logger.log('[ImportContext] Loading imports for user:', user.id);
@@ -392,11 +415,10 @@ export function ImportProvider({ children }) {
         const canManageImports = isAdminRole(role);
 
         if (canManageImports) {
-          const { data: staleCleanup, error: staleCleanupError } = await supabase.rpc(
-            'fail_stale_import_jobs',
-            {
+          const { data: staleCleanup, error: staleCleanupError } = await live(
+            supabase.rpc('fail_stale_import_jobs', {
               p_organization_id: currentOrganization.id,
-            }
+            })
           );
           if (staleCleanupError) {
             logger.warn('[ImportContext] Failed to clean stale import jobs:', staleCleanupError);
@@ -409,22 +431,23 @@ export function ImportProvider({ children }) {
 
         if (roleKnown && canManageImports) {
           // Check for active/recent jobs for re-hydration
-          const { data: activeJobs } = await supabase
-            .from('import_jobs')
-            .select('*')
-            .eq('organization_id', currentOrganization.id)
-            .in('status', ['processing', 'importing', 'ready_to_apply'])
-            // A games import waits for its confirm in its own panel (ScheduleImportPanel): this screen has no
-            // apply for it, and its job must not take the screen over after a reload.
-            .neq('job_type', 'games')
-            .order('created_at', { ascending: false })
-            .limit(1);
+          const { data: activeJobs } = await live(
+            supabase
+              .from('import_jobs')
+              .select('*')
+              .eq('organization_id', currentOrganization.id)
+              .in('status', ['processing', 'importing', 'ready_to_apply'])
+              // A games import waits for its confirm in its own panel (ScheduleImportPanel): this screen has no
+              // apply for it, and its job must not take the screen over after a reload.
+              .neq('job_type', 'games')
+              .order('created_at', { ascending: false })
+              .limit(1)
+          );
 
-          if (!stillCurrent()) return;
           if (activeJobs && activeJobs.length > 0) {
             const job = activeJobs[0];
             if (job.status === 'ready_to_apply') {
-              await hydrateReadyImportJob(job);
+              await hydrateReadyImportJob(job, live);
               readyImportType = job.warning_summary?.deferred_apply?.import_type;
             } else {
               setActiveJobId(job.id);
@@ -436,15 +459,16 @@ export function ImportProvider({ children }) {
           }
         }
 
-        const { data, error } = await supabase
-          .from('imports')
-          .select('*')
-          .eq('user_id', user.id)
-          .eq('organization_id', currentOrganization.id)
-          .order('created_at', { ascending: false });
+        const { data, error } = await live(
+          supabase
+            .from('imports')
+            .select('*')
+            .eq('user_id', user.id)
+            .eq('organization_id', currentOrganization.id)
+            .order('created_at', { ascending: false })
+        );
 
         if (error) throw error;
-        if (!stillCurrent()) return;
 
         if (data && !readyImportType) {
           const latestPlayers = data.find((i) => i.import_type === 'players');
@@ -459,6 +483,8 @@ export function ImportProvider({ children }) {
           if (latestPlayers) setImportedData(latestPlayers.data);
         }
       } catch (e) {
+        // A load overtaken by a switch of organization is expected and writes nothing; anything else is said.
+        if (e === STALE_LOAD) return;
         logger.error('Failed to load imports from Supabase:', e);
       }
     };

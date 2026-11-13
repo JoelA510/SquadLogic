@@ -206,35 +206,13 @@ function addedGameWarnings(candidate, others, { isExternal, fieldName, slotDivis
 function uniqueWarnings(warnings) {
   const seen = new Set();
   return warnings.filter((warning) => {
-    const key = clashKey(warning);
+    const d = warning.details ?? {};
+    const pair = [...(d.gameIds ?? [])].map(String).sort().join('+');
+    const key = `${warning.type}|${d.teamId ?? d.fieldId ?? ''}|${pair}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
-}
-
-/** A clash's key: its type, its team or field, and the unordered pair of games. */
-function clashKey(warning) {
-  const d = warning?.details ?? {};
-  const pair = [...(d.gameIds ?? [])].map(String).sort().join('+');
-  return `${warning?.type}|${d.teamId ?? d.fieldId ?? ''}|${pair}`;
-}
-
-/**
- * The staged added games' flags (already each clash once) the banner does not already show (C12): a flag the last
- * Apply saved is shown from what it saved, and the same clash staged again is not said twice. Only warnings that name places (an
- * added game's) are compared; the generator's and an import's are never dropped here.
- *
- * @template {{ type: string, details?: Record<string, any> }} W
- * @param {ReadonlyArray<Record<string, any>>} shown
- * @param {ReadonlyArray<W>} added
- * @returns {W[]}
- */
-export function addedWarningsNotShown(shown, added) {
-  const keys = new Set(
-    shown.filter((warning) => Array.isArray(warning?.details?.places)).map(clashKey)
-  );
-  return added.filter((warning) => !keys.has(clashKey(warning)));
 }
 
 /** A slot's end on the wall, `HH:MM`, from its column or else its instant. */

@@ -1635,13 +1635,13 @@ describe('Codex re-review of #731, round 6: what a generated Apply saved is neve
     await screen.findByText(/Manual game move staged/);
   }
 
-  /** Holds the saved schedule's reads while `gate.open` is false, until `gate.release()`. */
-  function holdSavedReads() {
+  /** Holds the saved schedule's reads (of `tables`) while `gate.open` is false, until `gate.release()`. */
+  function holdSavedReads(tables = ['game_assignments', 'current_game_runs']) {
     const realFrom = mockSupabase.from.bind(mockSupabase);
     const gate = { open: true, release: () => {} };
     vi.spyOn(mockSupabase, 'from').mockImplementation((table) => {
       const builder = realFrom(table);
-      if (gate.open || (table !== 'game_assignments' && table !== 'current_game_runs')) {
+      if (gate.open || !tables.includes(String(table))) {
         return builder;
       }
       const select = builder.select;
@@ -1705,8 +1705,10 @@ describe('Codex re-review of #731, round 6: what a generated Apply saved is neve
     expect(panelConflicts()).toEqual(shown);
   });
 
-  it('Apply is off, with the reason, while the saved schedule is read again after an Apply, and on once it is read', async () => {
-    const gate = holdSavedReads();
+  it('right after an Apply, while the saved schedule is read: a Move to and a drop stage nothing, said; once read, a move stages from the saved rows and the added game is saved once', async () => {
+    // Only the latest run is held: the games of the run on screen (the OLD run, what the save left in it) are read
+    // again at once, as they can be in production, and they are not the saved schedule.
+    const gate = holdSavedReads(['scheduler_runs']);
     await mount();
     await stage({
       home: 'team-2',
@@ -1716,55 +1718,92 @@ describe('Codex re-review of #731, round 6: what a generated Apply saved is neve
     gate.open = false;
     await apply();
     await screen.findByText(/Game schedule applied through the persistence workflow\./);
-    // The saved schedule is being read again: a move staged now cannot be applied yet, and the page says why.
-    await moveTo(G2, 'f-north:gs-3');
-    const button = screen.getByRole('button', { name: /apply schedule/i });
-    expect(button).toBeDisabled();
-    expect(button).toHaveAccessibleDescription(
-      'Apply waits while the saved schedule is read again.'
+    expect(screen.getByTestId('edits-wait-for-read')).toHaveTextContent(
+      'Changes wait while the saved schedule is read.'
     );
-    fireEvent.click(button);
+    // A Move to: refused in words, nothing staged.
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Manual Override' }));
+    await screen.findByTestId('game-schedule-grid');
+    const card = within(screen.getByTestId(`game-card-${G2}`));
+    const select = card.getByRole('combobox');
+    fireEvent.focus(select);
+    fireEvent.change(select, { target: { value: 'f-north:gs-3' } });
+    fireEvent.click(card.getByRole('button', { name: 'Move' }));
+    expect(
+      screen.getByText('Nothing was moved. Changes wait while the saved schedule is read.')
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /apply schedule/i })).toBeNull();
+    // A drop: the same.
+    act(() => {
+      DND.props.onDragEnd({ active: { id: G2 }, over: { id: 'f-north:gs-3' } });
+    });
+    expect(
+      screen.getByText('Nothing was moved. Changes wait while the saved schedule is read.')
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /apply schedule/i })).toBeNull();
     expect(SAVE.calls).toHaveLength(1);
-    // The read lands: Apply is on, the reason gone.
+    // The read lands: the reason goes, and a move stages from the saved rows (the added game has its saved id now).
     gate.open = true;
     gate.release();
-    await waitFor(() => expect(button).toBeEnabled());
-    expect(screen.queryByText('Apply waits while the saved schedule is read again.')).toBeNull();
+    await waitFor(() => expect(screen.queryByTestId('edits-wait-for-read')).toBeNull());
+    // The cards are the saved rows (the added game under its saved id), and the page's effects have run, as they have
+    // by the time a person can act.
+    await waitFor(() => expect(screen.queryAllByTestId(/^game-card-added-/)).toHaveLength(0));
+    await act(async () => {});
+    const select2 = within(screen.getByTestId(`game-card-${G2}`)).getByRole('combobox');
+    fireEvent.focus(select2);
+    fireEvent.change(select2, { target: { value: 'f-north:gs-3' } });
+    fireEvent.click(
+      within(screen.getByTestId(`game-card-${G2}`)).getByRole('button', { name: 'Move' })
+    );
+    await screen.findByText(/Manual game move staged/);
+    await apply();
+    await waitFor(() => expect(SAVE.calls).toHaveLength(2));
+    await screen.findByText(/Game schedule applied through the persistence workflow\./);
+    // Every game the second save sent that is the added one carries its saved id: none is new.
+    const sent = SAVE.calls[1].assignments.filter(
+      (row) => row.homeTeamId === 'team-2' && row.awayTeamId === 'team-4'
+    );
+    expect(sent).toHaveLength(1);
+    expect(sent[0].id).toEqual(expect.any(String));
+    // The database holds the added game once, by its unique key (pair, slot, week).
+    const keyOf = (g) =>
+      `${g.home_team_id}|${g.away_team_id}|${g.slot_id ?? g.game_slot_id}|${g.week_index}`;
+    const addedKey = keyOf(
+      orgGames().find((g) => g.home_team_id === 'team-2' && g.away_team_id === 'team-4')
+    );
+    expect(orgGames().filter((g) => keyOf(g) === addedKey)).toHaveLength(1);
   });
 
-  it('a flag the last Apply saved and the same clash staged again before the read lands: the banner says it once', async () => {
-    await twoMoreSlots();
+  it('a refused save the page reads the schedule again for: Apply is off, with the reason, until it is read', async () => {
+    let first = true;
+    SAVE.impl = async () => {
+      if (!first) throw new Error('not expected');
+      first = false;
+      throw Object.assign(new Error('A game in this review is not the saved game it names.'), {
+        code: 'GAME_IDENTITY',
+      });
+    };
     const gate = holdSavedReads();
     await mount();
-    await generate();
     await stage({
-      home: 'team-1',
-      away: 'team-3',
-      where: { field: 'f-south', date: '2026-10-03', start: '09:30', end: '10:30' },
+      home: 'team-2',
+      away: 'team-4',
+      where: { field: 'f-north', date: '2026-10-24', start: '09:00', end: '10:00' },
     });
     gate.open = false;
     await apply();
-    await screen.findByText(/Game schedule applied through the persistence workflow\./);
-    // Before the saved schedule is read again, the added game (still the staged one) is moved where it still clashes.
-    fireEvent.click(screen.getByRole('button', { name: 'Enter Manual Override' }));
-    await screen.findByTestId('game-schedule-grid');
-    const [cardEl] = screen
-      .getAllByTestId(/^game-card-/)
-      .filter((el) => /^game-card-added-/.test(el.getAttribute('data-testid') ?? ''));
-    if (!cardEl) throw new Error('no card for the added game');
-    const card = within(cardEl);
-    const select = card.getByRole('combobox');
-    fireEvent.focus(select);
-    fireEvent.change(select, { target: { value: 'f-south:gs-2' } });
-    fireEvent.click(card.getByRole('button', { name: 'Move' }));
-    await screen.findByText(/Manual game move staged/);
-    expect(
-      screen
-        .getAllByTestId('conflict-item-team-double-booked')
-        .filter((item) => /Synthetic Comets already plays/.test(item.textContent ?? ''))
-    ).toHaveLength(1);
+    await screen.findByText(/A game in this review is not the saved game it names\./);
+    const button = screen.getByRole('button', { name: /apply schedule/i });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAccessibleDescription('Apply waits while the saved schedule is read.');
+    fireEvent.click(button);
+    expect(SAVE.calls).toHaveLength(1);
     gate.open = true;
     gate.release();
+    await waitFor(() =>
+      expect(screen.queryByText('Apply waits while the saved schedule is read.')).toBeNull()
+    );
   });
 });
 

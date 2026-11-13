@@ -95,7 +95,6 @@ import {
 } from '../utils/gamePublishedText.js';
 import {
   addedGameWarningsToSave,
-  addedWarningsNotShown,
   describeNewSlot,
   planAddedGame,
   resolveAddedSlots,
@@ -532,6 +531,9 @@ function summarizeGameResult({ assignments, byes, unscheduled }) {
     teamsWithByes: byes.length,
   };
 }
+
+/** Why no edit can be staged right now: the saved schedule is being read (C12 follow-up). */
+const EDITS_WAIT_REASON = 'Changes wait while the saved schedule is read.';
 
 function buildDisplayAssignment({ assignment, index, runId, teamById, slotById, fieldById }) {
   const slotId = getAssignmentSlotId(assignment);
@@ -1040,11 +1042,22 @@ export default function GameSchedulingPage() {
   useEffect(() => {
     savedGamesRef.current = game?.assignments;
   }, [game?.assignments]);
-  // The saved rows the screen last held when a change was made. While `game.assignments` is still that array
-  // the read that follows has not landed, and the ids and flags on screen are not known to be the database's.
+  // The saved rows the screen last held when a change was made. While `game.assignments` is still that array the read
+  // that follows has not landed, and the ids and flags on screen are not known to be the database's. Nor while the
+  // re-read is still loading: it is two reads (the latest run, then the games of the run on screen), and a save that
+  // made a new run can have the games of the OLD run (what the save left in it) answer first, before the run read names
+  // the new one (C12 follow-up; `rekeyReview`'s marker below allows for the same order).
   const [staleAgainst, setStaleAgainst] = useState(/** @type {unknown} */ (null));
-  const savedIsStale = staleAgainst !== null && staleAgainst === game?.assignments;
+  const savedIsStale =
+    staleAgainst !== null && (staleAgainst === game?.assignments || Boolean(loading.game));
   const markSavedStale = useCallback(() => setStaleAgainst(savedGamesRef.current ?? null), []);
+  // Once read, the mark is cleared: a later change of run (another organization, season or save) is not this read.
+  useEffect(() => {
+    if (staleAgainst !== null && !savedIsStale) setStaleAgainst(null);
+  }, [savedIsStale, staleAgainst]);
+  useEffect(() => {
+    setStaleAgainst(null);
+  }, [currentOrganization?.id, currentSeasonSetting?.id]);
   // The list follows the saved rows, except while they are known to be the rows from before a change (an Apply, a
   // rollback): a re-render then (a slot read landing, the season clock) would put the list back to the schedule before
   // the save until the saved schedule is read again (review of #731).
@@ -1079,7 +1092,9 @@ export default function GameSchedulingPage() {
     : loading.game || savedIsStale
       ? 'reading'
       : 'ready';
-  // Apply waits for the saved schedule while it is read (after an Apply): the next save carries its flags forward (C12).
+  // Every edit waits for the saved schedule while it is read (after an Apply, and on the first load): a change staged
+  // from the rows before it would be staged from the schedule before the save, and the next save carries its flags
+  // forward from it (C12).
   const applyWaitsForRead = savedReadState === 'reading';
   /** Why the Published controls are off right now, or null. Said once, in the bar, and pointed at by each switch. */
   let publishedReason = null;
@@ -1345,6 +1360,7 @@ export default function GameSchedulingPage() {
   );
   const schedulerDisabled =
     addedGamesStaged ||
+    applyWaitsForRead ||
     loading.game ||
     !canManageSchedule ||
     schedulerStatus === 'running' ||
@@ -1910,7 +1926,7 @@ export default function GameSchedulingPage() {
         }`
       );
       // The games on screen are the staged ones; the saved schedule (its ids and flags) is read again, and the
-      // Published controls wait for it.
+      // Published controls and every edit wait for it.
       markSavedStale();
       refetchSaved?.();
     } catch (err) {
@@ -2016,6 +2032,12 @@ export default function GameSchedulingPage() {
     (gameId, targetCellId, { focusMoved = false } = {}) => {
       if (!canEditSchedule) return;
       if (!targetCellId) return;
+      if (applyWaitsForRead) {
+        // Staged from the rows before the save, a move would carry them into the next one (C12 follow-up).
+        setApplyError(null);
+        setStatusMessage(`Nothing was moved. ${EDITS_WAIT_REASON}`);
+        return;
+      }
 
       const { fieldId: targetFieldId, slotId: targetSlotId } = parseCellId(targetCellId);
       if (!targetFieldId || !targetSlotId) return;
@@ -2098,7 +2120,7 @@ export default function GameSchedulingPage() {
           : 'Manual game move staged. Apply the schedule to persist it.'
       );
     },
-    [canEditSchedule, fields, slotByCellSlotId]
+    [applyWaitsForRead, canEditSchedule, fields, slotByCellSlotId]
   );
 
   const handleDragEnd = useCallback(
@@ -2382,6 +2404,11 @@ export default function GameSchedulingPage() {
                   {addGameReason}
                 </p>
               )}
+              {savedIsStale && (
+                <p className="text-xs text-text-muted mt-1" data-testid="edits-wait-for-read">
+                  {EDITS_WAIT_REASON}
+                </p>
+              )}
             </div>
             <Button
               variant={canEditSchedule ? 'primary' : 'secondary'}
@@ -2411,11 +2438,7 @@ export default function GameSchedulingPage() {
         warnings={[
           ...(reviewSnapshot?.warnings ?? game?.warnings ?? []),
           ...blackoutWarnings,
-          // The staged added games' flags, less those already shown from what the last Apply saved (C12).
-          ...addedWarningsNotShown(
-            reviewSnapshot?.warnings ?? game?.warnings ?? [],
-            addedGameWarnings
-          ),
+          ...addedGameWarnings,
         ]}
       />
 
@@ -2486,7 +2509,7 @@ export default function GameSchedulingPage() {
                     carries forward come from it (C12). */}
                 {canApplySchedule && isReviewing && applyWaitsForRead && (
                   <p id="game-apply-waits-for-read" className="mt-1 text-text-muted">
-                    Apply waits while the saved schedule is read again.
+                    Apply waits while the saved schedule is read.
                   </p>
                 )}
               </div>

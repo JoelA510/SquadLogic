@@ -252,7 +252,10 @@ SELECT is(pg_temp.n(r, 'flags,coach-conflict,teams') || '/' || pg_temp.n(r, 'fla
 SELECT is(pg_temp.n(r, 'flags,team-on-both-halves,teams') || '/' || pg_temp.n(r, 'flags,team-on-both-halves,rows'), '1/2', 'team-on-both-halves: one team, two rows') FROM t_res WHERE k = 'dry';
 SELECT is(pg_temp.n(r, 'flags,reservation') || ' ' || pg_temp.n(r, 'flags,length') || ' ' || pg_temp.n(r, 'flags,hold-over-open-slot'), 'NULL NULL NULL',
     'no reservation, no wrong length and no hold over a slot in the fixture (the controls)') FROM t_res WHERE k = 'dry';
-SELECT is((SELECT count(*) FROM jsonb_array_elements(r -> 'time_tbd' -> 'teams') e WHERE (e ->> 'in_file')::boolean)::text, '29',
+SELECT is((SELECT count(*) FROM jsonb_array_elements(r -> 'time_tbd' -> 'teams') e WHERE (e ->> 'in_file')::boolean)::text,
+    -- The TIME TBD sync counts only the practices that end after today (sync_schedule_tbd_practices), and the fixture's
+    -- season ends 2026-11-20: from the next day every team of the file is short of its whole count.
+    CASE WHEN current_date <= '2026-11-20' THEN '29' ELSE '132' END,
     'TIME TBD: the 29 one-practice teams of the file (the row refused for its overlapping slot is an open one: core keeps the slot a team is in)') FROM t_res WHERE k = 'dry';
 SELECT is(pg_temp.n(r, 'coverage,coach_judged_teams') || '/' || pg_temp.n(r, 'coverage,file_teams'), '132/132', 'coverage says how many teams coach overlap was judged for') FROM t_res WHERE k = 'dry';
 
@@ -276,7 +279,7 @@ SELECT is(pg_temp.val($$SELECT metadata ->> 'inserted' FROM public.audit_log WHE
     'audited import.completed with the counts');
 SELECT is(pg_temp.before_rows(), :'before_rows', 'every row that existed before is byte-equal after the apply');
 SELECT is(pg_temp.val($$SELECT count(*) || '/' || sum(missing_count) FROM public.schedule_tbd s JOIN public.teams t ON t.id = s.team_id
-                         WHERE s.kind = 'practice' AND t.name ~ '^U\d\d[BG]-'$$), '29/29',
+                         WHERE s.kind = 'practice' AND t.name ~ '^U\d\d[BG]-'$$), CASE WHEN current_date <= '2026-11-20' THEN '29/29' ELSE '132/264' END,
     'the TIME TBD list holds the 29 short teams of the file, each short by one');
 SET LOCAL ROLE authenticated;
 SELECT is(pg_temp.n(public.apply_practice_import_job((SELECT id FROM t_job WHERE k = 'J1'), false), 'replayed'), 'true', 'a second apply of the job replays its result and writes nothing');

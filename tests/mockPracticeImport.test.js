@@ -360,6 +360,27 @@ describe('the fixture through the mock equals the pgTAP file', () => {
   });
 });
 
+describe("the TIME TBD numbers after the fixture's season has ended (the sync reads the date)", () => {
+  it("every team of the file is short of its whole count, as the pgTAP file's other branch says", () => {
+    const db = seedDb();
+    stageJob(db, 'job-1');
+    const late = { ...ctx, now: () => '2026-12-01T12:00:00.000Z' };
+    const r = rpc(
+      db,
+      'apply_practice_import_job',
+      { p_import_job_id: 'job-1', p_dry_run: true },
+      late
+    ).data;
+    const inFile = r.time_tbd.teams.filter((t) => t.in_file);
+    expect(inFile.length).toBe(132);
+    expect(inFile.reduce((n, t) => n + t.missing_count, 0)).toBe(264);
+    expect(PGTAP).toContain("CASE WHEN current_date <= '2026-11-20' THEN '29' ELSE '132' END");
+    expect(PGTAP).toContain(
+      "CASE WHEN current_date <= '2026-11-20' THEN '29/29' ELSE '132/264' END"
+    );
+  });
+});
+
 describe('a probable move is held back until it is ticked, and pairs as core pairs the two lists', () => {
   const db = seedDb();
   stageJob(db, 'job-1');

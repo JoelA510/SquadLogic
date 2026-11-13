@@ -109,6 +109,36 @@ const READ_HEADER_KEYS = new Set([
 export const practiceImportReadsHeader = (header) =>
   READ_HEADER_KEYS.has(practiceLabelKey(String(header ?? '')));
 
+/** The canonical column of each read label key (a column's own name, then the aliases). */
+/** @type {Map<string, string>} */
+const COLUMN_BY_KEY = new Map(
+  /** @type {Array<[string, string]>} */ ([
+    ...Object.entries(PRACTICE_IMPORT_HEADER_ALIASES),
+    ...Object.values(PRACTICE_IMPORT_COLUMNS).map((name) => [practiceLabelKey(name), name]),
+  ])
+);
+
+/**
+ * The column of plan 4.11.2 a header names (its own name or an alias, any case and spacing), or `undefined` for a
+ * header the parse does not read.
+ *
+ * @param {unknown} header
+ * @returns {string | undefined}
+ */
+export const practiceImportColumnOf = (header) =>
+  COLUMN_BY_KEY.get(practiceLabelKey(String(header ?? '')));
+
+/**
+ * The words of `duplicate-column`, written once in core: the parse says them, and the browser says them before a job
+ * is made when two headers clean to one column (the Edge mirror holds a copy, held to this by its vector table).
+ *
+ * @param {string} column  the canonical column given twice
+ * @returns {string}
+ */
+export function describePracticeDuplicateColumn(column) {
+  return `The file has the column "${column}" more than once (or two names for it). Remove one and import again.`;
+}
+
 /**
  * The weekday words the SQL day parser reads (`import_text_to_day_of_week`,
  * `20260503070000:52-75`), so one vocabulary serves the fields CSV and this file.
@@ -290,11 +320,7 @@ export function parsePracticeRows({ headers, rows, season, dates }) {
       continue;
     }
     if (header.has(canonical)) {
-      return fileRefusal(
-        R.DUPLICATE_COLUMN,
-        `The file has the column "${canonical}" more than once (or two names for it). Remove one and import again.`,
-        canonical
-      );
+      return fileRefusal(R.DUPLICATE_COLUMN, describePracticeDuplicateColumn(canonical), canonical);
     }
     header.set(canonical, written);
   }

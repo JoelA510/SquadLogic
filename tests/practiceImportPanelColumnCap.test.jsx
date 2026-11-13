@@ -65,7 +65,9 @@ it('the panel’s own parse refuses 201 headers it would send, in words, on step
   render(<ScheduleImportPanel kind="practices" />);
   upload(201);
   const alert = await screen.findByRole('alert', {}, { timeout: 5000 });
-  expect(alert.textContent).toMatch(/The file has 201 columns; one import reads at most 200/);
+  expect(alert.textContent).toMatch(
+    /The file has 201 columns the import reads; one import takes at most 200\. A column it reads is given more than once/
+  );
   expect(screen.getByTestId('schedule-import-step').textContent).toMatch(/1 of 4/);
   expect(start).not.toHaveBeenCalled();
 });

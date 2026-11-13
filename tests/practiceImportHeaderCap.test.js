@@ -7,20 +7,23 @@
  * 200 columns as the file wrote it. That refusal also caught a wide export whose extra columns the import never reads.
  * The contract is now #734's:
  *
- * - **The browser sends only the columns the import reads, found by name** (`splitPracticeImportHeaders`, which cleans
- *   a header as the stage does). A Team at column 230 of 250 is read; a file of 201 columns imports.
+ * - **The browser sends only the columns the import reads, found by name** (`preparePracticeImportFile`, which cleans
+ *   the header row once, as the stage does, and keys each row by the cleaned names). A Team at column 230 of 250 is read; a file of 201 columns imports.
  * - **More than 200 headers SENT** cannot happen through the client today (the import reads thirteen names and three
  *   aliases); the client refuses it in words before a job is made, and every layer behind it refuses it too: the
  *   request shape (a 400, which the mock answers as the Edge does), the stage in core and the Edge mirror, counted as
  *   sent with a blank header included, and the parse. Each is tested alone here; the parse's own 200/201 test is in
  *   `tests/practiceImportParse.test.js`, the Edge parity over the named vectors is `tests/practiceImportEdgeParity.test.js`.
  */
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { startPracticeImport } from '../frontend/src/utils/practiceImportClient.js';
 import { handlePracticeImportFunction } from '../frontend/src/lib/mockPracticeImport.js';
 import {
   PRACTICE_IMPORT_STAGE_LIMITS,
-  splitPracticeImportHeaders,
+  preparePracticeImportFile,
   stagePracticeFile,
 } from '../packages/core/src/practiceImport/staging.js';
 import { PRACTICE_IMPORT_LIMITS } from '../packages/core/src/practiceImport/reasonCodes.js';
@@ -127,30 +130,108 @@ describe('one name for the cap', () => {
   });
 });
 
-describe('which headers the browser sends: the ones the import reads, by name', () => {
-  it('finds a column wherever it stands, cleans a header as the stage does, and drops blanks unnamed', () => {
-    const headers = [...wide(250, 'Team', 230), '', '  ', '<b>Notes</b>', 'Venue', ' HALF '];
+describe('which headers the browser sends: the ones the import reads, by name, cleaned once', () => {
+  const prepare = (headers, rows = [wideRow(headers)]) =>
+    preparePracticeImportFile({ headers, rows, clean: sanitizeImportText });
+
+  it('finds a column wherever it stands, sends it under its CLEANED name, and drops blanks unnamed', () => {
+    const headers = [...wide(250, 'Team', 230), '', '  ', '<b>Notes</b>'];
     headers[0] = ' division  '; // another spacing and case of a column it reads
     headers[1] = '<b>Day</b>'; // markup the stage strips before it reads the name
-    const { read, dropped } = splitPracticeImportHeaders(headers, sanitizeImportText);
-    expect(read).toHaveLength(HEADERS.length + 2);
-    expect(read).toContain('Team');
-    expect(read).toContain(' division  ');
-    expect(read).toContain('<b>Day</b>');
+    headers[headers.indexOf('Location')] = 'Venue'; // the aliases are read as well
+    headers[headers.indexOf('Subunit')] = ' HALF ';
+    const rows = [{ ...wideRow(headers), ' division  ': 'U10 Boys', '<b>Day</b>': 'Tue' }];
+    const out = prepare(headers, rows);
+    expect(out.refusal).toBeNull();
+    expect(out.headers).toHaveLength(HEADERS.length);
+    // the names sent are the cleaned ones, the stage's own reading of them, never the raw text
+    expect(out.headers).toContain('Team');
+    expect(out.headers).toContain('division');
+    expect(out.headers).toContain('Day');
+    expect(out.headers).not.toContain('<b>Day</b>');
     // the aliases are read as well (Venue for Location, Half for Subunit)
-    expect(read).toContain('Venue');
-    expect(read).toContain(' HALF ');
-    expect(dropped).toHaveLength(238 + 1);
-    expect(dropped).toContain('Extra 249');
-    expect(dropped).toContain('Notes');
-    expect(dropped).not.toContain('');
+    expect(out.headers).toContain('Venue');
+    expect(out.headers).toContain('HALF');
+    // each row is keyed by those names, its cells as the file wrote them, and nothing else
+    expect(Object.keys(out.rows[0]).sort()).toEqual([...out.headers].sort());
+    expect(out.rows[0].Day).toBe('Tue');
+    expect(out.rows[0].division).toBe('U10 Boys');
+    expect(out.rows[0].Team).toBe('U10B-01');
+    expect(out.dropped).toHaveLength(238 + 1);
+    expect(out.dropped).toContain('Extra 249');
+    expect(out.dropped).toContain('Notes');
+    expect(out.dropped).not.toContain('');
   });
 
-  it('refuses input that is not a header row, or no cleaner', () => {
-    // @ts-expect-error a string is not a header row
-    expect(() => splitPracticeImportHeaders('Team', sanitizeImportText)).toThrow(TypeError);
-    // @ts-expect-error the cleaner is required
-    expect(() => splitPracticeImportHeaders(HEADERS)).toThrow(TypeError);
+  it('two headers that clean to one column are refused as duplicate-column, in the parse’s words', () => {
+    for (const pair of [
+      ['Team', '<i>Team</i>'],
+      ['Team', ' team '],
+      ['Location', 'Venue'],
+    ]) {
+      const out = prepare([...HEADERS.filter((h) => !pair.includes(h)), ...pair]);
+      expect(out.refusal, pair.join(' + ')).toMatchObject({ code: 'duplicate-column' });
+      expect(out.refusal.message).toMatch(/more than once \(or two names for it\)/);
+      expect(out.rows).toEqual([]);
+    }
+  });
+
+  it('more than 200 headers it reads is refused, in words about the repeat (not the file’s width)', () => {
+    const out = prepare(
+      Array.from({ length: 201 }, (_, i) => `Team${' '.repeat(i)}`),
+      []
+    );
+    expect(out.refusal).toMatchObject({ code: 'too-many-columns' });
+    expect(out.refusal.message).toBe(
+      'The file has 201 columns the import reads; one import takes at most 200. A column it reads is given more than once: remove the repeats and choose the file again.'
+    );
+  });
+
+  it('refuses input that is not a header row, rows, or a cleaner', () => {
+    expect(() =>
+      // @ts-expect-error a string is not a header row
+      preparePracticeImportFile({ headers: 'Team', rows: [], clean: sanitizeImportText })
+    ).toThrow(TypeError);
+    expect(() =>
+      // @ts-expect-error an object is not rows
+      preparePracticeImportFile({ headers: HEADERS, rows: {}, clean: sanitizeImportText })
+    ).toThrow(TypeError);
+    expect(() =>
+      // @ts-expect-error the cleaner is required
+      preparePracticeImportFile({ headers: HEADERS, rows: [] })
+    ).toThrow(TypeError);
+  });
+
+  it('the stage reads what the browser sends exactly as it read the file: every vector of the parity table', () => {
+    const table = JSON.parse(
+      readFileSync(
+        path.join(
+          path.dirname(fileURLToPath(import.meta.url)),
+          '../supabase/functions/_shared/tests/fixtures/practice-import.vectors.json'
+        ),
+        'utf8'
+      )
+    );
+    let compared = 0;
+    for (const v of table.vectors) {
+      if (!Array.isArray(v.rows) || v.expected.refusal) continue;
+      const sent = prepare(v.headers, v.rows);
+      expect(sent.refusal, v.name).toBeNull();
+      for (const [name, stage] of Object.entries({
+        core: (h, r) => stagePracticeFile({ ...v, headers: h, rows: r, clean: sanitizeImportText }),
+        edge: (h, r) => edge.stagePracticeFile({ ...v, headers: h, rows: r, clean: edgeSanitize }),
+      })) {
+        const out = JSON.parse(JSON.stringify(stage(sent.headers, sent.rows)));
+        expect(out.refusal, `${name}: ${v.name}`).toBeNull();
+        expect(out.staged, `${name}: ${v.name}`).toEqual(v.expected.staged);
+        expect([...sent.dropped, ...out.summary.dropped_columns], v.name).toEqual(
+          v.expected.summary.dropped_columns
+        );
+      }
+      compared += 1;
+    }
+    // CONTROL: the table's accepted files were compared, not none of them
+    expect(compared).toBeGreaterThan(10);
   });
 });
 
@@ -207,13 +288,43 @@ describe('the client: a wide file imports, read by name, and never cut', () => {
     expect(summary.dropped_columns).toEqual(['Notes', 'Other']);
   });
 
+  it('Team and <i>Team</i> are refused as duplicate-column before a job is made or the function is called', async () => {
+    const client = recordingClient();
+    const headers = [...HEADERS, '<i>Team</i>'];
+    await expect(start(client, headers, [wideRow(headers)])).rejects.toMatchObject({
+      code: 'duplicate-column',
+      message: expect.stringMatching(/"Team" more than once/),
+    });
+    expect(client.rpc).not.toHaveBeenCalled();
+    expect(client.functions.invoke).not.toHaveBeenCalled();
+  });
+
+  it('a header it reads whose raw text is over 500 characters is sent by its cleaned name, never as raw text', async () => {
+    const client = recordingClient();
+    const long = `<span title="${'x'.repeat(600)}">Team</span>`;
+    const padded = `Division${' '.repeat(600)}`;
+    expect(long.length).toBeGreaterThan(500);
+    const headers = [long, padded, ...HEADERS.filter((h) => h !== 'Team' && h !== 'Division')];
+    const rows = [{ ...row, [long]: 'U10B-01', [padded]: 'U10 Boys' }];
+    await start(client, headers, rows);
+    const body = sentBody(client);
+    // every header sent fits the request shape's 500 characters (Zod's `.max`), and the cells went with them
+    expect(body.headers.every((h) => h.length <= 500)).toBe(true);
+    expect(body.headers).toContain('Team');
+    expect(body.headers).toContain('Division');
+    expect(body.rows[0].Team).toBe('U10B-01');
+    expect(body.rows[0].Division).toBe('U10 Boys');
+  });
+
   it('more than 200 columns to SEND is refused in words, with no create_import_job and no Edge call', async () => {
     // Only a column given many times over reaches it: 201 spellings of one name the import reads.
     const client = recordingClient();
     const headers = Array.from({ length: 201 }, (_, i) => `Team${' '.repeat(i + 1)}`);
     await expect(start(client, headers, [])).rejects.toMatchObject({
       code: 'too-many-columns',
-      message: expect.stringMatching(/^The file has 201 columns; one import reads at most 200/),
+      message: expect.stringMatching(
+        /^The file has 201 columns the import reads; one import takes at most 200\. A column it reads is given more than once/
+      ),
     });
     expect(client.rpc).not.toHaveBeenCalled();
     expect(client.functions.invoke).not.toHaveBeenCalled();

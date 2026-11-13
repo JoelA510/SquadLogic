@@ -2012,8 +2012,13 @@ requirements of the PR 10 review and by this PR:
     columns the import reads, found by name, so a wide file imports whole, and more than 200 headers sent is refused
     behind it, `too-many-columns` in core and the mirror and a 400 of the Edge request shape. Whether the practice
     import should read by name as well, rather than refuse a file of more than 200 columns, was open: **resolved
-    2026-11-13**: it reads by name on #734's contract, `splitPracticeImportHeaders`; a wide practice file imports and
-    only more than 200 headers SENT is refused); every probable-move team has its own tick, the first 25 listed and "Show all N teams" for
+    2026-11-13**, #739: it reads by name on #734's contract, `preparePracticeImportFile`, with the header row cleaned once
+    in the browser and the rows keyed by the cleaned names; a wide practice file imports and only more than 200 headers
+    SENT is refused. Follow-ups #739's review left: the games path picks columns by their cleaned name but keeps the rows
+    keyed by the raw header, so its early parse, its repeated-header check and its request can disagree with its stage
+    on a header with markup or raw text over 500 characters (`ScheduleImportPanel.jsx` games `parseFile` and
+    `headerReader`, `gameImportClient.js` `startGameImport`); and one header helper shared by both imports, rather than
+    `splitScheduleImportHeaders` and `preparePracticeImportFile`); every probable-move team has its own tick, the first 25 listed and "Show all N teams" for
     the rest (C6); a team the import creates is named on the TIME TBD list by the dry run's or the apply's own
     `arriving` rows (C8); every test of PR 11 that reads the date pins it (the world's `pinWorldClock`, the E2E's
     `page.clock.setFixedTime`; the TIME TBD rebuild counts only practices that end after today, so the E2E broke after

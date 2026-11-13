@@ -569,6 +569,39 @@ describe('Codex C5 and C6 on #732', () => {
     expect(JSON.stringify(staged)).not.toContain('unread');
   });
 
+  it('review of #739: a header with markup (<b>Day</b>) is read by its cleaned name, as the stage reads it', async () => {
+    const headers = FILE_HEADERS.map((h) => (h === 'Day' ? '<b>Day</b>' : h));
+    const csv = Papa.unparse({
+      fields: headers,
+      data: FILE_ROWS.map((r) => FILE_HEADERS.map((h) => r[h] ?? '')),
+    });
+    render(<ScheduleImportPanel kind="practices" />);
+    await toMapping(csv);
+    const staged = (await table('staging_import_rows')).filter(
+      (r) => r.import_type === 'practice_schedule'
+    );
+    expect(staged).toHaveLength(FILE_ROWS.length);
+    const first = staged.find((r) => Number(r.source_row_number) === 1);
+    expect(first.normalized_payload).toMatchObject({ day: 'tue', team: 'U10B-01' });
+  });
+
+  it('review of #739: a header with markup given twice (<b>Team</b>) is refused on upload, and no job is made', async () => {
+    const rpc = vi.spyOn(mockSupabase, 'rpc');
+    const headers = [...FILE_HEADERS.map((h) => (h === 'Team' ? '<b>Team</b>' : h)), '<b>Team</b>'];
+    const csv = Papa.unparse({
+      fields: headers,
+      data: FILE_ROWS.map((r) => [...FILE_HEADERS.map((h) => r[h] ?? ''), 'U99B-99']),
+    });
+    render(<ScheduleImportPanel kind="practices" />);
+    upload(csv, 'repeat.csv');
+    await waitFor(() =>
+      expect(screen.getByTestId('schedule-import-error').textContent).toMatch(/more than once/)
+    );
+    expect(step()).toMatch(/1 of 4/);
+    expect(rpc.mock.calls.filter(([name]) => name === 'create_import_job')).toEqual([]);
+    expect(await table('staging_import_rows')).toEqual([]);
+  });
+
   it('C5, the follow-up of #734: a 201-column file with no column it reads past 200 imports', async () => {
     const headers = [...FILE_HEADERS, ...filler(201 - FILE_HEADERS.length)];
     expect(headers).toHaveLength(201);

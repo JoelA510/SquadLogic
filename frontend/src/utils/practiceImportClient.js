@@ -22,14 +22,13 @@
  * Every refusal is thrown as an `Error` with the database's or the function's own words and a `code` where it gave one.
  */
 
-import { describeTooManyColumns } from '@squadlogic/core/scheduleImport/reasonCodes.js';
 import {
   PRACTICE_IMPORT_PREVIEW_STALE,
   practiceImportConfirmCounts,
 } from '@squadlogic/core/practiceImport/previewCounts.js';
 import {
   PRACTICE_IMPORT_STAGE_LIMITS,
-  splitPracticeImportHeaders,
+  preparePracticeImportFile,
   stagedPracticeRowToParsed,
 } from '@squadlogic/core/practiceImport/staging.js';
 
@@ -134,19 +133,17 @@ export async function startPracticeImport(
       'too-many-rows'
     );
   }
-  // Only the columns the import reads leave the browser, found by NAME as the stage finds them (a coach, an email or a
-  // note in the file has no reason to travel). Nothing is cut by position, so a column the import reads (a Team) is
-  // read wherever it stands, and a wide file is never refused for its width (Codex on #732; the games import's #734).
-  // The dropped columns are named from here.
-  const { read, dropped } = splitPracticeImportHeaders(headers, sanitizeImportText);
-  // More columns to send than one request takes cannot happen today (the import reads thirteen names and three
-  // aliases; only a column given many times over could): refused here, in words, before a job is made, never cut.
-  if (read.length > PRACTICE_IMPORT_STAGE_LIMITS.MAX_COLUMNS) {
-    throw refusal(
-      describeTooManyColumns(read.length, PRACTICE_IMPORT_STAGE_LIMITS.MAX_COLUMNS),
-      'too-many-columns'
-    );
+  // Only the columns the import reads leave the browser, found by NAME as the stage finds them and sent under that
+  // cleaned name, each row keyed by it (a coach, an email or a note in the file has no reason to travel). The stage's
+  // cleaner runs once, here, so the browser and the stage read one header row: nothing is cut by position, a wide file
+  // is never refused for its width, and two headers that clean to one column, or more headers it reads than one request
+  // takes (a column given many times over), are refused here, in words, before a job is made. The dropped columns are
+  // named from here.
+  const prepared = preparePracticeImportFile({ headers, rows, clean: sanitizeImportText });
+  if (prepared.refusal) {
+    throw refusal(prepared.refusal.message, prepared.refusal.code, prepared.refusal);
   }
+  const { dropped } = prepared;
   const created = await client.rpc('create_import_job', {
     p_organization_id: organizationId,
     p_import_type: TYPE,
@@ -159,15 +156,14 @@ export async function startPracticeImport(
     throw new Error('The import could not be started: the job came back without an id.');
   }
 
-  const sentRows = rows.map((row) => Object.fromEntries(read.map((h) => [h, row?.[h] ?? ''])));
   const { data, error } = await client.functions.invoke('import-validation', {
     body: {
       import_type: TYPE,
       action: 'stage',
       organization_id: organizationId,
       import_job_id: jobId,
-      headers: read,
-      rows: sentRows,
+      headers: prepared.headers,
+      rows: prepared.rows,
       dates: {
         valid_from: dates?.validFrom || null,
         valid_until: dates?.validUntil || null,

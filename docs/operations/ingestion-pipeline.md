@@ -203,17 +203,20 @@ saved setting. A file is staged only into a job still `importing`.
 practice header row being cut at 200 columns by refusing a file of more than 200 columns as the file wrote it (core's
 `parsePracticeRows`, the Edge mirror's copy and `startPracticeImport`), which also refused a wide export whose extra
 columns the import never reads. It now has the games import's contract (#734): (1) the browser sends only the columns
-the import reads, found by name as the stage finds them (`splitPracticeImportHeaders`, `packages/core/src/practiceImport/staging.js`:
-the header cleaned by `sanitizeImportText`, then `practiceImportReadsHeader`, its own name or an alias; a blank header
-is neither sent nor named), and names every other column itself on the upload step ("Columns not read and not stored"),
+the import reads, found by name as the stage finds them and sent under that cleaned name, each row keyed by it
+(`preparePracticeImportFile`, `packages/core/src/practiceImport/staging.js`: the header row cleaned once by
+`sanitizeImportText`, then `practiceImportColumnOf`, its own name or an alias; a blank header is neither sent nor
+named; two headers that clean to one column are refused as `duplicate-column` before a job is made, in the parse's
+words; the panel's repeated-header check reads the cleaned name too), and names every other column itself on the upload step ("Columns not read and not stored"),
 so a file of any width imports and a Team at column 230 is read; the panel's early parse reads the same headers. (2)
 More than 200 headers to send needs a column the import reads given over 200 times; the panel's parse and the client
-refuse it in words (`too-many-columns`) before `create_import_job`. (3) Behind the browser, `import-validation`'s
+refuse it in words (`too-many-columns`, "columns the import reads … given more than once") before
+`create_import_job`. (3) Behind the browser, `import-validation`'s
 request shape (`PracticeImportPayload.headers`, at most `PRACTICE_IMPORT_LIMITS.MAX_COLUMNS`, 200) answers more with a
 400 `Invalid payload`, as the mock does. (4) The stage (counting the headers as sent, a blank one included) and the
 parse, in core and the Edge mirror, refuse more than 200 with `too-many-columns`: a backstop held equal by the vector
-table (a Team at header 200 read; 201 refused; 199 and two blank refused). The words are `describeTooManyColumns`, the
-games import's, and the cap has one name, `MAX_COLUMNS` (the practice `MAX_HEADERS` is gone), equal to the games one.
+table (a Team at header 200 read; 201 refused; 199 and two blank refused), and what the browser sends stages exactly as
+the raw file does for every accepted vector. The stage's words are `describeTooManyColumns`, the games import's, and the cap has one name, `MAX_COLUMNS` (the practice `MAX_HEADERS` is gone), equal to the games one.
 
 **Retention.** Staged practice schedule rows are not on a retention job: they hold venue, field, half, division and team labels, weekdays, times, dates and capacities, and the allowlist keeps no name of a person, no coach, no email and no contact (`tests/gameImportPipelineLists.test.js` holds the exemption with its reason).
 

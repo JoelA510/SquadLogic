@@ -185,7 +185,7 @@ export const PRACTICE_IMPORT_LIMITS = Object.freeze({
    * The headers one request may SEND, the games import's cap (#734): the Edge request shape refuses more with a 400,
    * and the stage and the parse refuse more with `too-many-columns`, never cut (a column the import reads past a cap
    * would be dropped while its values stayed in the rows: a Team, and a placement read as an open slot; PR 11 review
-   * of #732). The browser sends only the columns the import reads, found by name (`splitPracticeImportHeaders`), so a
+   * of #732). The browser sends only the columns the import reads, found by name (`preparePracticeImportFile`), so a
    * wide file is never refused for its width.
    */
   MAX_COLUMNS: SCHEDULE_IMPORT_LIMITS.MAX_COLUMNS,

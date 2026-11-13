@@ -65,6 +65,7 @@ Deno.test('the table reaches every outcome (a table that reached half would comp
     'duplicate-row',
     'game-id-reused',
     'file:too-many-rows',
+    'file:too-many-columns',
     'file:missing-column',
     'file:no-season-clock',
     'file:missing-week',

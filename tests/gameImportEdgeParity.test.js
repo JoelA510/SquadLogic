@@ -25,6 +25,7 @@ import {
   SCHEDULE_IMPORT_CONFIRM_MAX_KEYS,
   SCHEDULE_IMPORT_LIMITS,
   SCHEDULE_IMPORT_STAGED_FLAGS,
+  describeTooManyColumns,
   diffScheduleImportConfirmCounts,
   isScheduleImportConfirmCounts,
   parseScheduleRows,
@@ -85,6 +86,7 @@ describe('the vector table is core’s', () => {
             'missing-column',
             'duplicate-column',
             'too-many-rows',
+            'too-many-columns',
             'no-season-clock',
             'imported-without-time',
           ].includes(code)
@@ -92,6 +94,7 @@ describe('the vector table is core’s', () => {
       'ok',
       'tbd',
       'file:too-many-rows',
+      'file:too-many-columns',
       'file:missing-column',
       'file:no-season-clock',
       'file:missing-week',
@@ -241,7 +244,13 @@ describe('the Edge mirror stages what core stages', () => {
     expect(edge.GAME_IMPORT_LIMITS.MAX_CELL_LENGTH).toBe(
       SCHEDULE_IMPORT_CHUNK_LIMITS.MAX_CELL_LENGTH
     );
-    expect(edge.GAME_IMPORT_LIMITS.MAX_HEADERS).toBe(SCHEDULE_IMPORT_CHUNK_LIMITS.MAX_HEADERS);
+    expect(edge.GAME_IMPORT_LIMITS.MAX_COLUMNS).toBe(SCHEDULE_IMPORT_LIMITS.MAX_COLUMNS);
+    // The words of `too-many-columns` are core's, word for word (the 201-header vectors hold the same in the stage).
+    for (const [count, max] of [
+      [201, 200],
+      [1, 0],
+    ])
+      expect(edge.describeTooManyColumns(count, max)).toBe(describeTooManyColumns(count, max));
     expect([...edge.GAME_IMPORT_STAGED_FLAGS]).toEqual([...SCHEDULE_IMPORT_STAGED_FLAGS]);
     expect(edge.GAME_IMPORT_CONFIRM_MAX_KEYS).toBe(SCHEDULE_IMPORT_CONFIRM_MAX_KEYS);
     for (const label of ['  Blue\u00a0 Jays ', 'BLUE\tJAYS', '', null, undefined, 'İstanbul'])

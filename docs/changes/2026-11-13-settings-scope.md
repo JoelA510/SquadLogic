@@ -3,7 +3,7 @@
 Kind: FEATURE with a persistence change (a settings store, a resolver, a setter, a rollover copy).
 Drawn up: 2026-11-13 against `origin/main` `0687cae` (PR 11 merged). Owner: the repository owner.
 Status: **APPROVED 2026-11-13** by the coordinator under the owner's delegation (see "Decisions record (2026-11-13)");
-F11-4a in progress. AGENTS.md rule 14 applies (persistence and the domain model). This is the "own small plan" that
+F11-4a merged (#733); F11-4b built. AGENTS.md rule 14 applies (persistence and the domain model). This is the "own small plan" that
 the F11 plan (`docs/changes/2026-11-06-games-table-source-of-truth.md`, "F11" below) requires before F11-4 starts
 (F11:732-737, decision D7 (a), F11:822-824). "Expansion" below is `docs/changes/2026-11-03-schedule-expansion.md`.
 
@@ -507,14 +507,14 @@ are done. What differs from the text above, each a decision of the build:
 
 Depends on: F11-4a merged, its migration applied and verified.
 
-- [ ] B1 (M) `ScopedSettingsSection.jsx` as designed. Test `tests/scopedSettingsSection.test.jsx` through the mock: the
+- [x] B1 (M) `ScopedSettingsSection.jsx` as designed. Test `tests/scopedSettingsSection.test.jsx` through the mock: the
       three levels shown with "Applies now" and its source; choosing "Don't count" on a division under a program set to
       "Count" saves, reads back and shows "Not counted, set here"; a refusal is shown in words in the alert region; a
       completed season is read-only; the default program is not listed; every select has an accessible name (`axe` in
       the test, both themes).
-- [ ] B2 (S) Audit wording: a scoped row's null side reads "Inherited". Test: a case in the existing
+- [x] B2 (S) Audit wording: a scoped row's null side reads "Inherited". Test: a case in the existing
       `SettingsAuditLog` test file (the file is named when written).
-- [ ] B3 (S) The practice import calls `admin_set_division_practice_settings`; the read-then-write and its
+- [x] B3 (S) The practice import calls `admin_set_division_practice_settings`; the read-then-write and its
       `division_rules_changed` refusal go. Test: PR 11's import tests, with the case "another admin changed the roster
       rules after the preview" now saving the practice settings and leaving the roster rules as the other admin set
       them.
@@ -522,6 +522,40 @@ Depends on: F11-4a merged, its migration applied and verified.
 Plants: the select's label removed (the accessibility case); "Applies now" computed without the program level (the
 inherited-from-program case); the import still sends the roster rules (B3's case). Stop and report if any page's
 markup outside the new panel changes, or if a refusal can only be shown as a code.
+
+**As built (2026-11-13; no migration; the pull request has the detail).** B1 to B3 are done. What differs from the
+text above, each a decision of the build:
+
+- **"No program" is listed, not omitted,** as a row with no control and the words "Not settable: “No program” holds no
+  settings. Its divisions follow the organization.", with its divisions under it (the coordinator's brief for F11-4b:
+  show the default program as not settable and say why). B1's "the default program is not listed" became "is listed
+  with no control and its reason".
+- **The select's accessible name is its row header and the table's caption** (`aria-labelledby="<row> <caption>"`,
+  "Division: U8 Count results against outside clubs"), so two tables (PR 12's key) never give two selects one name.
+- **Where it lives:** Settings, General, Season & Calendar, below Programs, loaded lazily (its own chunk). Admins only
+  (`isAdminRole`, the audit page's test, which matches `is_org_admin`); a completed season's program and division
+  selects are disabled and described by the reason; the organization's stays editable. A save keeps the select enabled
+  (focus stays put) and ignores a second change while one is in flight.
+- **Refusals in words:** by the SQL's detail code (`season_completed`, `default_program`, `setting_value_invalid`,
+  `unknown_setting`, `scope_invalid`), 42501 as "only an organization admin ...", anything else as the database's
+  message with record ids removed; the rows are read again after a refusal too.
+- **The frozen count** is said after an organization save: "2 divisions in completed seasons keep their old value." (one:
+  "1 division in a completed season keeps its old value."; none: nothing). A frozen division row reads "..., kept from
+  the organization’s earlier value when it changed".
+- **The accessibility test** runs axe-core in jsdom with both `data-theme` values (colour contrast off: jsdom draws no
+  colour). `axe-core` became a direct development dependency (same 4.14.0 the lockfile already had through
+  `@axe-core/playwright`).
+- **B2's test** is a new file, `tests/settingsAuditLog.test.jsx` (no SettingsAuditLog test file existed). The page still
+  shows the key (`Property: standings_count_outside_results`), not its label, the scope's name or the frozen count; the
+  design above names only "Inherited", so nothing else was changed (recorded in the audit skill).
+- **The Standings sentence** now reads "Whether they count is a league setting, set for the organization, a program or a
+  division in Settings, General, Season & Calendar, under “Settings by program and division”.", pinned by
+  `tests/standingsOutsideClubs.test.jsx`; the panel's test pins the heading it names.
+- **B3:** `applyPracticeDivisionSettings` calls `admin_set_division_practice_settings` (the division, practices a week,
+  the practice length) and nothing else; the league read no longer selects the roster rules, and
+  `ROSTER_RULES` and the `roster` patch field are gone. The expansion plan's PR 11 follow-up is marked resolved.
+- **Not done here (S8):** the program delete and merge dialogs do not yet say that a program's values go with it; neither
+  task list names it, and the stop condition forbids markup changes outside the panel. A follow-up.
 
 ## Owner decisions
 

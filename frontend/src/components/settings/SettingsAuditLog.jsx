@@ -87,10 +87,12 @@ const SettingsAuditLog = () => {
   /**
    * Formats values for display in the 'Changes' column.
    * @param {any} val - The value to format.
+   * @param {boolean} [scoped] - A scoped setting's row (`admin_set_scoped_setting`, 20261124010000), where a null side
+   *   is no value at that level: the level inherits.
    * @returns {string} Formatted string representation.
    */
-  const formatValue = (val) => {
-    if (val === null || val === undefined) return 'None';
+  const formatValue = (val, scoped = false) => {
+    if (val === null || val === undefined) return scoped ? 'Inherited' : 'None';
     if (typeof val === 'object') return JSON.stringify(val);
     if (typeof val === 'boolean') return val ? 'Enabled' : 'Disabled';
     return String(val);
@@ -106,6 +108,7 @@ const SettingsAuditLog = () => {
     if (!metadata) return <span className="text-text-muted">No details</span>;
 
     const { old: oldVal, new: newVal, field } = metadata;
+    const scoped = metadata.setting === 'scoped_setting';
 
     // If we have a standard field diff (common in our settings/flags updates)
     if (field && (oldVal !== undefined || newVal !== undefined)) {
@@ -116,11 +119,11 @@ const SettingsAuditLog = () => {
           </div>
           <div className="flex items-center gap-2 text-xs">
             <span className="px-1.5 py-0.5 rounded bg-red-500/10 text-status-error-text line-through border border-red-500/10">
-              {formatValue(oldVal)}
+              {formatValue(oldVal, scoped)}
             </span>
             <ArrowRight size={12} className="text-text-muted shrink-0" />
             <span className="px-1.5 py-0.5 rounded bg-green-500/10 text-status-success-text border border-green-500/10 font-medium">
-              {formatValue(newVal)}
+              {formatValue(newVal, scoped)}
             </span>
           </div>
         </div>

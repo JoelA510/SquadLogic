@@ -159,10 +159,11 @@ describe('LeagueStandings :: results against outside clubs', () => {
     expect(screen.getByTestId('standings-outside-not-counted')).toHaveTextContent(
       '1 result against an outside club is not counted.'
     );
-    // It points to no control that does not exist yet (the Features switch is retired; the panel is F11-4b's).
+    // It points to the panel that sets it (F11-4b; the Features switch is retired), by the names the screens show.
     expect(screen.getByTestId('standings-outside-not-counted')).toHaveTextContent(
-      'Whether they count is a league setting; the settings screen for it is coming.'
+      'Whether they count is a league setting, set for the organization, a program or a division in Settings, General, Season & Calendar, under “Settings by program and division”.'
     );
+    expect(screen.getByTestId('standings-outside-not-counted')).not.toHaveTextContent(/coming/);
     expect(screen.getByTestId('standings-outside-not-counted')).not.toHaveTextContent(/Features/);
     expect(screen.queryByText('Outside Club (placeholder)')).not.toBeInTheDocument();
   });

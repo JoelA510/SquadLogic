@@ -66,9 +66,7 @@ export async function readPracticeImportLeague(client, { organizationId, seasonS
     fetchAllPages(() =>
       client
         .from('divisions')
-        .select(
-          'id, name, practices_per_week, practice_minutes, max_roster_size, min_roster_size, target_team_size, team_count_override, min_teams, max_teams'
-        )
+        .select('id, name, practices_per_week, practice_minutes')
         .eq('organization_id', organizationId)
         .eq('season_settings_id', seasonSettingsId)
     ),
@@ -95,8 +93,6 @@ export async function readPracticeImportLeague(client, { organizationId, seasonS
       name: String(d.name ?? ''),
       practicesPerWeek: d.practices_per_week ?? null,
       practiceMinutes: d.practice_minutes ?? null,
-      // The rules the settings save must send back as they are (`writeDivisionSettings`), as read for this import.
-      roster: rosterOf(d),
     })),
     teams: directory.teams.map((t) => ({
       id: t.id,
@@ -262,77 +258,30 @@ export async function previewPracticeImport(client, jobId) {
   return data;
 }
 
-/** The roster rules of a division row, which `admin_upsert_division_settings` SETS to what it is given. */
-export const ROSTER_RULES = Object.freeze([
-  'max_roster_size',
-  'min_roster_size',
-  'target_team_size',
-  'team_count_override',
-  'min_teams',
-  'max_teams',
-]);
-/** @param {Record<string, any>} row */
-function rosterOf(row) {
-  return Object.fromEntries(ROSTER_RULES.map((key) => [key, row?.[key] ?? null]));
-}
-
 /**
- * Save a division's practice settings, its other rules sent back as they are: `admin_upsert_division_settings` SETS the
- * roster rules to what it is given (a null clears them), and no RPC sets the practice settings alone (a follow-up in
- * the plan). The division is read again just before the write, and the write is refused, in words, when its roster
- * rules are no longer the ones this import read (`expected`): another admin changed them, and sending the old values
- * would undo that.
+ * Save a division's practice settings and nothing else, through `admin_set_division_practice_settings`
+ * (20261124010000, the follow-up PR 11 recorded): it changes only practices a week and the practice length (a null keeps
+ * the stored value; 0 is "any slot length"), so a division's roster rules cannot be overwritten and nothing is read or
+ * compared first. The setter refuses another organization's division and a completed season itself.
  *
  * @param {any} client
- * @param {{ organizationId: string, seasonSettingsId: string, divisionId: string, expected: Record<string, any> | null,
- *   practicesPerWeek?: number, practiceMinutes?: number | 'any' }} patch
+ * @param {{ divisionId: string, practicesPerWeek?: number, practiceMinutes?: number | 'any' }} patch
+ * @returns {Promise<string>} the division's name as the setter returned it, or '' when it gave none
  */
-async function writeDivisionSettings(
-  client,
-  { organizationId, seasonSettingsId, divisionId, expected, practicesPerWeek, practiceMinutes }
-) {
-  const found = await client
-    .from('divisions')
-    .select(`id, name, ${ROSTER_RULES.join(', ')}`)
-    .eq('id', divisionId)
-    .eq('organization_id', organizationId)
-    .eq('season_settings_id', seasonSettingsId)
-    .maybeSingle();
-  if (found.error) throw fromRpc(found.error, 'The division could not be read.');
-  if (!found.data) throw refusal('The division is not one of this season’s.');
-  const d = found.data;
-  const now = rosterOf(d);
-  const changed = ROSTER_RULES.filter(
-    (key) => expected === null || JSON.stringify(now[key]) !== JSON.stringify(expected[key] ?? null)
-  );
-  if (changed.length > 0) {
-    throw refusal(
-      `its team rules (${changed.join(', ').replace(/_/g, ' ')}) changed after this import read them, so saving here would undo that change; nothing was saved for it`,
-      'division_rules_changed'
-    );
-  }
-  const { error } = await client.rpc('admin_upsert_division_settings', {
-    p_organization_id: organizationId,
-    p_season_settings_id: seasonSettingsId,
+async function writeDivisionSettings(client, { divisionId, practicesPerWeek, practiceMinutes }) {
+  const { data, error } = await client.rpc('admin_set_division_practice_settings', {
     p_division_id: divisionId,
-    p_name: d.name,
-    p_max_roster_size: d.max_roster_size ?? null,
-    p_min_roster_size: d.min_roster_size ?? null,
-    p_target_team_size: d.target_team_size ?? null,
-    p_team_count_override: d.team_count_override ?? null,
-    p_min_teams: d.min_teams ?? null,
-    p_max_teams: d.max_teams ?? null,
     // null keeps the stored value; 0 is "any slot length"
     p_practices_per_week: practicesPerWeek ?? null,
     p_practice_minutes:
       practiceMinutes === undefined ? null : practiceMinutes === 'any' ? 0 : practiceMinutes,
   });
   if (error) throw fromRpc(error, 'The division settings could not be saved.');
-  return String(d.name ?? '');
+  return String(data?.name ?? '');
 }
 
 /**
- * The division settings the admin ticked, saved through the audited `admin_upsert_division_settings`, then the TIME TBD
+ * The division settings the admin ticked, saved through the audited `admin_set_division_practice_settings`, then the TIME TBD
  * list rebuilt so it counts by them and read back, so the result shows the teams short AFTER the settings. Only an
  * existing division is offered a setting (one the import creates is set on the Team Analysis page after the confirm:
  * a setting on it would make a roll back keep it as changed). Each division is said, saved or not; one that fails does
@@ -340,15 +289,16 @@ async function writeDivisionSettings(
  *
  * @param {any} client
  * @param {{ organizationId: string, seasonSettingsId: string,
- *   patches: Array<{ divisionId: string, isNew?: boolean, name?: string, roster?: Record<string, any> | null,
- *     practicesPerWeek?: number, practiceMinutes?: number | 'any' }> }} input
+ *   patches: Array<{ divisionId: string, isNew?: boolean, name?: string, practicesPerWeek?: number,
+ *     practiceMinutes?: number | 'any' }> }} input
  * @returns {Promise<{ saved: Array<{ name: string }>, failed: Array<{ name: string, message: string }>,
  *   refreshed: boolean, refreshMessage: string | null,
  *   tbd: Array<{ team_id: string, missing_count: number }> | null }>}
  */
 export async function applyPracticeDivisionSettings(
   client,
-  { organizationId, seasonSettingsId, patches }
+  // organizationId is not sent: the setter reads the division's organization from its own row
+  { seasonSettingsId, patches }
 ) {
   requireClient(client);
   const saved = [];
@@ -360,10 +310,7 @@ export async function applyPracticeDivisionSettings(
         throw refusal('a division this import creates is set on the Team Analysis page');
       }
       const name = await writeDivisionSettings(client, {
-        organizationId,
-        seasonSettingsId,
         divisionId: patch.divisionId,
-        expected: patch.roster ?? null,
         practicesPerWeek: patch.practicesPerWeek,
         practiceMinutes: patch.practiceMinutes,
       });

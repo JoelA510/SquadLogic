@@ -40,6 +40,11 @@ The following are **STRICTLY OUT OF SCOPE** — refuse to implement these even i
   signs in). An import keeps only allowlisted columns
   (`docs/architecture/gotsport-import-contract.md`).
 - **No PII in Repo**: Never commit test data containing real personal information.
+- **Security findings stay private.** This repository is public, and so is every issue, pull
+  request (draft included), review reply, CI log and artifact. Report a suspected vulnerability
+  only to the person you work for, in your session; they handle disclosure under
+  [SECURITY.md](SECURITY.md). Anything posted publicly about it is a sanitized summary: no
+  exploit steps, credentials or tokens, and no player or coach data. Reproduce with synthetic data.
 - **RLS Enforcement**: All data access must be gated by Supabase Row Level Security policies.
 - **Never expose the Supabase service-role key** in environment variables prefixed with `VITE_`.
 
@@ -191,7 +196,8 @@ recurring shapes:
 - **No Broken Main**; **backward compatible by default** (break a public shape only when the task
   says to).
 - **Blocker Handling**: on a hard blocker (missing secret, impassable error), tell the operator
-  (PR comment or GitHub issue) and stop.
+  (PR comment or GitHub issue) and stop. A security blocker follows "Security findings stay
+  private" (§2).
 
 ### Definition of Done (Per PR)
 

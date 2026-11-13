@@ -1769,13 +1769,13 @@ Depends on: PR 5 merged and deployed (the shared lists and the team-shell step) 
 23, 24, 25 and 26. Owner cost: none open (those decisions are answered); one migration to deploy before PR 11 opens; CI minutes for pgTAP and the
 harness plants (no local stack is asked of the owner).
 
-- [ ] K1 (L) Migration: `practice_schedule` through the lists of 4.11.8; `map_practice_import_job` (a sibling of PR 5's,
+- [x] K1 (L) Migration: `practice_schedule` through the lists of 4.11.8; `map_practice_import_job` (a sibling of PR 5's,
       not a generalisation: rule 2); `ensure_practice_slot` (internal); `apply_practice_import_job(job, dry_run)`;
       `rollback_practice_import_job(job)`. **No change to `persist_practice_schedule`, its gate, or any column of
       `practice_assignments`.** `docs/sql/<v>_revert.sql` (drops the functions and the CHECK entries; imported practices
       stay, losing their records, so roll an import back first) and `_smoke.sql`; `supabase/catalog-snapshot.json`
       regenerated; the harness plants re-aimed (lesson 70).
-- [ ] K2 (L) **Before the migration, report two things.** (1) EVERY code path that creates practice slots, with file
+- [x] K2 (L) **Before the migration, report two things.** (1) EVERY code path that creates practice slots, with file
       and line, and for each whether it can bring a held time back as open capacity (decisions 28 and 29). The
       preliminary static review is **not complete**: `finalize_field_import_job` (latest definition in
       `20261101010000_one_active_season.sql`, around line 1464) inserts `practice_slots` rows from field-import rows
@@ -1793,9 +1793,9 @@ harness plants (no local stack is asked of the owner).
       text as the writer's; rollback refuses after a change, an exception or a completed season and succeeds before; a
       no-user job, a cross-organization job and a completed season are refused; shells land in a team run (PR 5's two
       checks of 4.5); `practice_slot_conflicts` refusals are listed.
-- [ ] K3 (S) The mock finalizer mirrors apply, dry run and rollback. Test `tests/mockPracticeImport.test.js`: the fixture
+- [x] K3 (S) The mock finalizer mirrors apply, dry run and rollback. Test `tests/mockPracticeImport.test.js`: the fixture
       through the mock equals the pgTAP's expected counts.
-- [ ] K4 (S) Docs: `docs/operations/ingestion-pipeline.md` (a practice schedule section; section 2.3's "15 minutes"
+- [x] K4 (S) Docs: `docs/operations/ingestion-pipeline.md` (a practice schedule section; section 2.3's "15 minutes"
       corrected to the turnover of 0), `docs/architecture/practice-scheduling.md` (a dated paragraph),
       `docs/architecture/gotsport-import-contract.md` ("Practice schedule import: kept fields").
 
@@ -1805,6 +1805,36 @@ report if: `practice_new_auto_row_refusals` cannot judge a `manual` row (smalles
 1, two `manual` rows); `refresh_schedule_tbd_practices` cannot be called from the apply (smallest input: one season,
 one team short); the sentinel dry run cannot return the flag list; any existing practice pgTAP file moves; a second
 migration is needed.
+
+**As built (2026-11-13, statically written from the branch; the gates and their numbers are in the pull request).** Migration
+`20261123010000_practice_import.sql`; revert and smoke under `docs/sql/`; pgTAP `supabase/tests/practice_import_apply_rollback.sql`
+over the shipped fixture (`_practice_import_fixture.sql`, generated from core by `tests/helpers/practiceImportPgtapFixture.js`);
+the mock `frontend/src/lib/mockPracticeImport.js` and `tests/mockPracticeImport.test.js`; the staged row is core's
+`toStagedPracticeRow` (`packages/core/src/practiceImport/staging.js`). K2's two reports:
+
+1. **Every code path that creates practice slots** (latest definitions, read 2026-11-13): `finalize_field_import_job`
+   (`20261101010000:1464`, an insert from a fields-CSV row that carries an explicit day, start, end and capacity; it also
+   updates a slot it finds by key, from the same row); `start_demo_session` (`20261114010000:313`, the demo league's seed);
+   and now `ensure_practice_slot` (this migration, from a practice-file row with an explicit day and times).
+   `admin_set_practice_slot_division` and `rollback_field_import_job` update slots and create none; Field Management's RPCs
+   (`admin_create_field`, `admin_update_field`, ...) and the field availability import create none; no Edge function or
+   client code inserts one. **No path creates a slot from field availability**, so none can bring a held time back as open
+   capacity (decisions 28 and 29).
+2. **The input for an unticked probable-move row.** The database enforces the default: the apply lists the saved rows the
+   file does not hold (`leaving`) and the file's new rows (`arriving`), and an arriving row of a team that also has one
+   leaving is a probable move and is **not inserted unless its row key is in the job's stored mapping**
+   (`map_practice_import_job`, `options.add_moved_rows`, the ticked rows). A client that sends nothing gets the safe
+   default (unticked). Its slot is still made (supply). **Dates (review round, 2026-11-13):** a saved practice is
+   `leaving` only when its range, cut to its slot's validity, meets the file's first-to-last date for that team (a team
+   the file does not place has nothing leaving), and a new row is a probable move only when it meets the dates of one
+   of its team's leaving rows. So a spring file for teams the solver placed in the fall inserts normally, and a move
+   within the same dates is held back. Core's `pairProbableMoves` pairs at team level and sees no dates: PR 11's panel
+   shows the database's `probable_move` and `added`, and does not pair again (`tests/mockPracticeImport.test.js` holds
+   the two equal on the fixture's move, where the dates meet).
+3. **Review round (2026-11-13), the rest.** The apply judges the job after its locks (a second caller replays a
+   completed job), applies only a `ready_to_apply` job (the mapping can be stored while it imports, as the games
+   mapping can), refuses a row whose found slot differs in End, Capacity or Valid Until (`slot-differs`, the slot never
+   changed), and the parse refuses a blank Location, Field or (on a placement) Division as that row's reason.
 
 ### PR 11: Practice import III, validation, the Practices tab, E2E (L; Edge and UI; rule 14; Review: (c); added 2026-11-06)
 
@@ -2722,18 +2752,19 @@ owner's answers of 2026-11-09 and of 2026-11-09 evening and 2026-11-10 follow th
 section 7). **Updated 2026-11-13:** F11-2 is merged (#725, `dcb54ff`) and its migration `20261122010000` is deployed
 (verified by the coordinator on 2026-11-12; it closed follow-ups 3 (two of its three lines) and 5 of PR 6's review).
 **Updated 2026-11-13 (later):** F11-3 is merged (#726, `5151f6c`; its task C3 was the blocker for turning score entry
-on: **once F11-3's client is deployed, `score_entry` may be turned on**), and so is PR 6b's refactor G5a (#728,
-`70f443a`). **In review:** PR 6b's G5 (the import recorded as the publication baseline; no migration; see "As built"
-under PR 6b in section 7). **Not merged:** PR 8 (in review, 2026-11-13; see "As built" under PR 8 in section 7), 10, 11 and 12, F11-4 and F11-5. PR 14 stays held.
+on: **once F11-3's client is deployed, `score_entry` may be turned on**), and so are PR 6b's refactor G5a (#728,
+`70f443a`) and its G5 (#729, `be268be`; the import recorded as the publication baseline; no migration; see "As built"
+under PR 6b in section 7). **In review:** PR 10 (the practice import's database half, migration `20261123010000`; see
+"As built" under PR 10 in section 7); PR 11 waits for it to be merged and deployed. **Not merged:** PR 8 (in review, 2026-11-13; see "As built" under PR 8 in section 7), 10, 11 and
+12, F11-4 and F11-5. PR 14 stays held.
 
 - **Order and the dependency rule.** Section 7 ("Dependencies and order") has the dependency table and the one priority
   rule: at most two PRs in flight; a free slot takes the first PR, in the order PR 1; PR 4; PR 2; PR 5; PR 3; PR 9;
   PR 6; PR 10; PR 7; PR 13; PR 8; PR 11; PR 12, whose dependencies are merged and deployed. There are no waves. PR 14 is
-  held (decision 28). Left, with the F11 plan's pull requests in their places (2026-11-13): PR 6b's G5 (in review;
-  baseline at import, deferred from PR 6 on 2026-11-10; it is on no dependency path),
+  held (decision 28). Left, with the F11 plan's pull requests in their places (2026-11-13, later): PR 10 (in review),
   and the follow-ups of PR 6's review still open, listed under PR 6 in section 7 (the preview-stale check inside the
   RPC at the next replacement; a SQL sweep for abandoned games jobs), none with a pull request number yet,
-  PR 10, PR 8, PR 11, F11-4, PR 12. F11-5 and PR 14 are the coordinating agent's call when their turn comes (section 10, the 2026-11-10
+  PR 8, PR 11 (after PR 10 is merged and its migration deployed), F11-4, PR 12. F11-5 and PR 14 are the coordinating agent's call when their turn comes (section 10, the 2026-11-10
   answers, entry 5). Later, with no PR number: the B5.10 discovery pass and its plan-change (registration state and
   optional-data features), which the owner agreed to on 2026-11-09 (section 10, the 2026-11-09 answers, entry 2). Outside
   this plan: Dependabot #716 to #718, to be batched into one dependency pull request.

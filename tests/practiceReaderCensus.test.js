@@ -120,6 +120,16 @@ const REGISTRY = {
       "(20261121010000), as rollback_field_import_job's check is: a shell with a practice row stays",
   },
   'sql:persist_practice_schedule': { class: 'writer', why: 'X10: the practice writer (v3)' },
+  'sql:apply_practice_import_job': {
+    class: 'writer',
+    why:
+      'PR 10: the practice import, an additive writer of its own (20261123010000): inserts manual rows, never ' +
+      'updates or deletes a saved one, and reads the season rows to list those "in the schedule, not in this file"',
+  },
+  'sql:rollback_practice_import_job': {
+    class: 'writer',
+    why: 'PR 10: deletes the rows the practice import inserted, refused while one was changed since or has an exception',
+  },
   'sql:practice_new_auto_row_refusals': {
     class: 'writer',
     why: "Phase D PR B: the writer's gate; reads the rows to judge a new auto row against capacity, weekday and count",

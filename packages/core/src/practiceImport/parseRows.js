@@ -519,6 +519,19 @@ function parseRow({ row, index, cell, bounds }) {
     until: untilRow !== null ? 'row' : bounds.confirmUntil !== null ? 'confirm' : 'season',
   };
 
+  // 2026-11-13 (PR 10 review): a blank ground or a placement's blank Division is the row's own reason here, with the
+  // words the mapping step uses, so the staged row is refused alone (the SQL's shape check refuses the WHOLE apply on a
+  // staged row with a blank label, and stays as the backstop).
+  if (kind === 'placement' && practiceLabelKey(out.divisionLabel) === '') {
+    return refuse(R.UNKNOWN_DIVISION, 'The Division is blank.');
+  }
+  if (practiceLabelKey(out.locationLabel) === '') {
+    return refuse(R.UNKNOWN_LOCATION, 'The Location is blank.');
+  }
+  if (practiceLabelKey(out.fieldLabel) === '') {
+    return refuse(R.UNKNOWN_FIELD, 'The Field is blank.');
+  }
+
   // A Division on a row with no team is not a reservation; say so rather than drop it.
   if (kind !== 'placement' && out.divisionLabel !== '') {
     out.flags.push({

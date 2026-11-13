@@ -280,6 +280,11 @@ R70="$REPO/docs/sql/20261121010000_revert.sql"
 # (supabase/tests/game_scores.sql) is CI's.
 M71="$REPO/supabase/migrations/20261122010000_game_scores.sql"
 R71="$REPO/docs/sql/20261122010000_revert.sql"
+# 20261123010000: the practice schedule import (PR 10). It replaces create_import_job, mark_import_job_ready_to_apply,
+# cancel_ready_import_job and import_allowed_keys whole (the one change of knowing practice_schedule), so every plant that
+# aimed at one of those bodies in $M70 or $M71 is re-aimed here (lesson 70). Its smoke holds the plants of its own,
+# below; the pgTAP file (supabase/tests/practice_import_apply_rollback.sql) is CI's.
+M80="$REPO/supabase/migrations/20261123010000_practice_import.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -3672,7 +3677,7 @@ plant "R23 the revert leaves the lock helper in place" "$R23" \
 
 # Wave 2: the import.started audit keeps no file name. The smoke RAISEs on a
 # row that still stores one; the revert's md5 claim on a body that drifted.
-plant "M26 create_import_job still audits the file name" "$M70" \
+plant "M26 create_import_job still audits the file name" "$M80" \
   "jsonb_build_object('import_type',v_import_type,'job_type',v_job_type,'status','importing')" \
   "jsonb_build_object('import_type',v_import_type,'job_type',v_job_type,'file_name',v_file_name,'status','importing')" \
   "smoke 20261018050000"
@@ -4578,7 +4583,7 @@ plant "M43 the sanitizer takes date_of_birth again" "$M56" \
   "                 'buddy_request', 'date_of_birth' THEN" \
   "smoke 20261026010000"
 
-plant "M43 the allowlist keeps dob" "$M70" \
+plant "M43 the allowlist keeps dob" "$M80" \
   "            'gotsport_id', 'registration_id', 'player_id', 'natural_age'," \
   "            'gotsport_id', 'registration_id', 'player_id', 'natural_age', 'dob'," \
   "smoke 20261026010000"
@@ -5778,6 +5783,77 @@ plant "R71 the revert does not refuse while a score is recorded" "$R71" \
   "    IF v_scores > 0 THEN" \
   "    IF false THEN" \
   "revert 20261122010000"
+
+# 20261123010000: the practice schedule import. The plan's three plants (PR 10) and three of this file's own:
+#   - the dry run's sentinel is removed, so a preview writes (and completes the job);
+#   - ON CONFLICT ... DO NOTHING is removed, so a re-import meets the unique key and fails;
+#   - the flag step hands the gate only the file's auto rows, so the manual rows go unflagged;
+#   - the rollback no longer refuses after a practice it wrote has changed;
+#   - an arriving row of a probable move is added without its tick;
+#   - the rollback reads no reference, so a field an admin gave a blackout since is deleted with the blackout;
+#   and two the review round asked for: the job's status not judged after the locks (a completed job applied again), and a
+#   slot found by its key not compared with the row (a practice could outlive its slot).
+plant "M80 the dry run's sentinel is removed (a preview writes)" "$M80" \
+  "        IF v_dry THEN
+            RAISE EXCEPTION 'practice import dry run: every write is undone' USING ERRCODE = 'SLD01';
+        END IF;" \
+  "        IF false THEN
+            RAISE EXCEPTION 'practice import dry run: every write is undone' USING ERRCODE = 'SLD01';
+        END IF;" \
+  "smoke 20261123010000"
+
+plant "M80 ON CONFLICT DO NOTHING is removed (a re-import fails)" "$M80" \
+  "            ON CONFLICT (team_id, practice_slot_id, effective_date_range)
+                WHERE practice_slot_id IS NOT NULL AND effective_date_range IS NOT NULL
+            DO NOTHING
+            RETURNING id, team_id, practice_slot_id, effective_date_range" \
+  "            RETURNING id, team_id, practice_slot_id, effective_date_range" \
+  "smoke 20261123010000"
+
+plant "M80 the flag step hands the gate auto rows only" "$M80" \
+  "          FROM _pi_asg a WHERE COALESCE(a.existing_id, a.new_id) IS NOT NULL;" \
+  "          FROM _pi_asg a JOIN public.practice_assignments pz ON pz.id = COALESCE(a.existing_id, a.new_id) WHERE pz.source = 'auto';" \
+  "smoke 20261123010000"
+
+plant "M80 the rollback no longer refuses after a change" "$M80" \
+  "    IF cardinality(v_changed) > 0 THEN" \
+  "    IF false THEN" \
+  "smoke 20261123010000"
+
+plant "M80 a probable move is added without its tick" "$M80" \
+  "SET probable_move = true, held_back = NOT (a.row_key = ANY (v_add))" \
+  "SET probable_move = true, held_back = false" \
+  "smoke 20261123010000"
+
+plant "M80 the job's status is not judged after the locks (review round)" "$M80" \
+  "    -- A finished job answers with the result it stored (a retry after a lost response writes nothing).
+    IF v_job.status IN ('completed', 'completed_with_warnings') THEN
+        IF v_job.warning_summary ? 'practice_import' THEN
+            RETURN (v_job.warning_summary -> 'practice_import') || jsonb_build_object('replayed', true);
+        END IF;
+        RAISE EXCEPTION 'Import job % is already %', p_import_job_id, v_job.status USING ERRCODE = '22023';
+    END IF;
+    IF v_job.status IN ('failed', 'needs_fix') THEN
+        RAISE EXCEPTION '% import job % cannot be applied: a new file is a new job', initcap(v_job.status), p_import_job_id
+            USING ERRCODE = '22023', DETAIL = 'import_not_ready_to_apply';
+    END IF;
+    -- Only a job whose staging finished (mark_import_job_ready_to_apply) is applied: one still importing may be missing rows.
+    IF v_job.status <> 'ready_to_apply' THEN
+        RAISE EXCEPTION 'Import job % is %, not ready_to_apply: stage the whole file first', p_import_job_id, v_job.status
+            USING ERRCODE = '22023', DETAIL = 'import_not_ready_to_apply';
+    END IF;" \
+  "" \
+  "smoke 20261123010000"
+
+plant "M80 a found slot is not compared with the row (review round)" "$M80" \
+  "         WHERE ps.id = g.slot_id AND NOT g.created" \
+  "         WHERE ps.id = g.slot_id AND false" \
+  "smoke 20261123010000"
+
+plant "M80 the rollback reads no reference" "$M80" \
+  "                   AND NOT (x.id = ANY (v_refd))" \
+  "                   AND true" \
+  "smoke 20261123010000"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye

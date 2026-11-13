@@ -55,6 +55,10 @@ This document elaborates the roadmap's practice scheduling phase into concrete i
    - The `practice_assignments` table is the authoritative source for assignments. `teams.practice_slot_id` should be considered for deprecation or used as a non-authoritative pointer to avoid inconsistency with mid-season slot changes.
    - Store a `scheduler_runs` entry with `run_type = 'practice'` capturing parameters used, conflicts encountered, and manual follow-ups required.
 
+## A practice schedule imported (2026-11-13; PR 10 of `docs/changes/2026-11-03-schedule-expansion.md`)
+
+`apply_practice_import_job` (migration `20261123010000`) is an **additive writer of its own**, beside `persist_practice_schedule`, which it does not change. It inserts each team's practice as `source = 'manual'`, `assigned_via = 'manual'`, with no `scheduler_runs` row (the readiness panel and the dashboard read the latest solver run), and only when the (team, slot, range) is not saved already; it never updates or deletes a saved practice, so the writer's lock-by-default holds for everything it touches. It takes the writer's season lock, so a save and an import cannot interleave. The rules the solver keeps are reported on the imported rows, never enforced on them (the gate `practice_new_auto_row_refusals`, read-only, plus a coach overlap, a team on both halves and a hold over a slot). Teams short of their division's count are on the TIME TBD list, and the next run fills them: `planTeamsForRun` gives such a team `max(target - held, 0)` units and keeps every other team locked (`tests/mockPracticeImport.test.js` runs it over the fixture's import). Rows an import made are `manual`, so a later save keeps them for a team absent from its payload (`retained_manual`); one that names the team needs `unlock` and a reason to move them, like any saved row. The import changes `practice_schedule_fingerprint`, so a plan read before it is refused as stale and reloads.
+
 ## Daylight (8.9 PR 6)
 
 The live practice scheduler is the `auto-scheduler` Edge Function. After its

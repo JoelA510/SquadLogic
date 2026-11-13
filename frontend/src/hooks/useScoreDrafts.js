@@ -11,20 +11,26 @@ import { isHalfEntered, isNotAScore, typeScore } from '../utils/scoreEntry.js';
  * - A half score or a box that is not a score is held and never sent (`utils/scoreEntry.js`).
  * - `save(game, entry)` sends; it resolves when the database took the score and throws when it refused. On an answer
  *   the draft goes (the page's `onSaved` puts the saved score on the game; `onRefused` says why, and the boxes show the
- *   saved score again).
+ *   saved score again). `onSaved` may return a promise: the game's lock is held until it settles, and if it rejects,
+ *   `onSavedFailed` is told (the score was taken; what followed failed).
  *
  * @param {{ save: (game: any, entry: { score_home: number | null, score_away: number | null }) => Promise<void>,
- *   onSaved: (game: any, entry: { score_home: number | null, score_away: number | null }) => void,
- *   onRefused: (err: any) => void }} handlers
+ *   onSaved: (game: any, entry: { score_home: number | null, score_away: number | null }) => void | Promise<void>,
+ *   onRefused: (err: any) => void, onSavedFailed?: (game: any, err: any) => void }} handlers
  */
-export function useScoreDrafts({ save, onSaved, onRefused }) {
+export function useScoreDrafts({
+  save,
+  onSaved,
+  onRefused,
+  onSavedFailed = (_game, err) => onRefused(err),
+}) {
   const [drafts, setDrafts] = useState(/** @type {Record<string, any>} */ ({}));
   const [saving, setSaving] = useState(/** @type {Set<string>} */ (new Set()));
   // Read synchronously by `type`: two boxes typed in one render must see each other, and a save started must be seen.
   const draftsRef = useRef(drafts);
   const savingRef = useRef(saving);
-  const handlers = useRef({ save, onSaved, onRefused });
-  handlers.current = { save, onSaved, onRefused };
+  const handlers = useRef({ save, onSaved, onRefused, onSavedFailed });
+  handlers.current = { save, onSaved, onRefused, onSavedFailed };
 
   const setDraft = useCallback((id, entry) => {
     const next = { ...draftsRef.current };
@@ -54,11 +60,17 @@ export function useScoreDrafts({ save, onSaved, onRefused }) {
       const whole = { score_home: entry.score_home, score_away: entry.score_away };
       setDraft(id, entry);
       setSavingOf(id, true);
+      let saved = false;
       try {
         await handlers.current.save(game, whole);
-        handlers.current.onSaved(game, whole);
+        saved = true;
+        // Awaited: the game stays locked until what the page does with a saved score (the Standings page reads the
+        // table again) has finished, so a correction cannot race it (fix round 3, Codex P2).
+        await handlers.current.onSaved(game, whole);
       } catch (err) {
-        handlers.current.onRefused(err);
+        // A refusal of the save, or a failure of what follows a save that WAS taken: the page says which.
+        if (saved) handlers.current.onSavedFailed(game, err);
+        else handlers.current.onRefused(err);
       } finally {
         setDraft(id, null);
         setSavingOf(id, false);

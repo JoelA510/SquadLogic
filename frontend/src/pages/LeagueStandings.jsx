@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabaseClient.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { PERMISSIONS, hasPermission } from '../constants/permissions.js';
@@ -47,6 +47,26 @@ export default function LeagueStandings() {
     hasPermission(orgMember?.role, PERMISSIONS.MANAGE_SCHEDULE) &&
     isEnabled(FEATURE_FLAGS.SCORE_ENTRY);
 
+  // Every read of the standings is numbered, and only the newest one's answer is shown (fix round 3): the first
+  // load and the refresh after each saved score can overlap and answer in any order, and an older answer must never
+  // replace a newer one. A refresh that fails throws, so the save says it.
+  const standingsReadRef = useRef(0);
+  const readStandings = useCallback(async (organizationId, season) => {
+    standingsReadRef.current += 1;
+    const mine = standingsReadRef.current;
+    const answer = await fetchStandings(organizationId, season);
+    return { ...answer, current: mine === standingsReadRef.current };
+  }, []);
+  const refreshStandings = async () => {
+    const {
+      data,
+      error: readError,
+      current,
+    } = await readStandings(currentOrganization.id, seasonId);
+    if (readError) throw readError;
+    if (current && data) setStandings(data);
+  };
+
   // A score is both numbers or none (the database refuses one without the other): what is typed is held, one game at a
   // time, by the hook the Scores page uses (hooks/useScoreDrafts.js), and the two numbers are sent together.
   const {
@@ -66,14 +86,19 @@ export default function LeagueStandings() {
     onSaved: async (game, entry) => {
       setScoreNotSaved(null);
       setGames((prev) => prev.map((g) => (g.id === game.id ? { ...g, ...entry } : g)));
-      // Refresh Standings View since data changed
-      const { data: standingsData } = await fetchStandings(currentOrganization.id, seasonId);
-      if (standingsData) setStandings(standingsData);
+      // The table is read again; the hook holds the game until this answers (fix round 3).
+      await refreshStandings();
     },
     onRefused: (err) => {
       logger.error(err);
       // The boxes go back to the saved score, and why is said on the page, in the Scores page's words.
       setScoreNotSaved(scoreRefusalText(err));
+    },
+    onSavedFailed: (_game, err) => {
+      logger.error(err);
+      setScoreNotSaved(
+        'The score was saved, but the standings could not be read again: reload the page to see them.'
+      );
     },
   });
 
@@ -84,13 +109,14 @@ export default function LeagueStandings() {
       setError(null);
       try {
         // Load Standings View
-        const { data: standingsData, error: standingsErr } = await fetchStandings(
-          currentOrganization.id,
-          seasonId
-        );
+        const {
+          data: standingsData,
+          error: standingsErr,
+          current,
+        } = await readStandings(currentOrganization.id, seasonId);
 
         if (standingsErr) throw standingsErr;
-        setStandings(standingsData || []);
+        if (current) setStandings(standingsData || []);
 
         // The season's saved games whose start has passed, newest first (F11-3: the saved schedule and its
         // scores, the rows the standings above are computed from).
@@ -114,7 +140,7 @@ export default function LeagueStandings() {
       }
     }
     loadData();
-  }, [currentOrganization?.id, seasonId, resetDrafts]);
+  }, [currentOrganization?.id, seasonId, resetDrafts, readStandings]);
 
   // Group standings by division (co-ed display model folds U10B/U10G → U10)
   const displayDivision = (name) =>

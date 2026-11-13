@@ -99,6 +99,9 @@ async function confirm() {
   fireEvent.click(screen.getByRole('button', { name: 'Confirm and import' }));
   await waitFor(() => expect(step()).toMatch(/4 of 4/));
 }
+/** Whether the panel shows its result step (the recording runs only there). */
+const stepIsResult = () =>
+  /4 of 4/.test(screen.queryByTestId('schedule-import-step')?.textContent ?? '');
 /** The result's word on the baseline, once the recording has finished. */
 async function baselineNotice() {
   const notice = await screen.findByTestId('schedule-import-baseline', {}, { timeout: 5000 });
@@ -231,24 +234,40 @@ describe('(1) the baseline recorded at import is the Exports page’s baseline f
 });
 
 describe('(2) the option is ticked by default exactly when the games arrive Published, and can be changed', () => {
-  it('ticked with "Games arrive Published", unticked without it, and editable either way', async () => {
+  it('ticked with "Games arrive Published", unticked without it, while the admin has not set it', async () => {
     render(<ScheduleImportPanel />);
     await toConfirm();
     expect(checkbox(/Games arrive Published/).checked).toBe(true);
     expect(checkbox(RECORD).checked).toBe(true);
 
-    // The STORED mapping changes (the preview is made again): the default follows it.
+    // The STORED mapping changes (the preview is made again): the default follows it, both ways.
     fireEvent.click(checkbox(/Games arrive Published/));
     await waitFor(() => expect(checkbox(/Games arrive Published/).checked).toBe(false));
     expect(checkbox(RECORD).checked).toBe(false);
-    fireEvent.click(checkbox(RECORD));
-    expect(checkbox(RECORD).checked).toBe(true);
-
     fireEvent.click(checkbox(/Games arrive Published/));
     await waitFor(() => expect(checkbox(/Games arrive Published/).checked).toBe(true));
     expect(checkbox(RECORD).checked).toBe(true);
+  });
+
+  it('once the admin unticks it, a later stored mapping leaves it unticked, and nothing is recorded', async () => {
+    const rpc = vi.spyOn(mockSupabase, 'rpc');
+    render(<ScheduleImportPanel />);
+    await toConfirm();
     fireEvent.click(checkbox(RECORD));
     expect(checkbox(RECORD).checked).toBe(false);
+    // Published off and on again: two stored mappings, and neither resets the admin's choice
+    fireEvent.click(checkbox(/Games arrive Published/));
+    await waitFor(() => expect(checkbox(/Games arrive Published/).checked).toBe(false));
+    expect(checkbox(RECORD).checked).toBe(false);
+    fireEvent.click(checkbox(/Games arrive Published/));
+    await waitFor(() => expect(checkbox(/Games arrive Published/).checked).toBe(true));
+    expect(checkbox(RECORD).checked).toBe(false);
+    fireEvent.click(screen.getByLabelText('Create the 5 records listed above'));
+    await confirm();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(rpc.mock.calls.some(([name]) => name === 'admin_publish_schedule_baseline')).toBe(false);
+    expect(await table('publication_baselines')).toHaveLength(0);
+    expect(screen.queryByTestId('schedule-import-baseline')).toBeNull();
   });
 
   it('ticked by hand for games that do not arrive Published: the baseline is recorded', async () => {
@@ -303,7 +322,52 @@ describe('(4) a recording that fails is said, and the import still shows as appl
     expect(step()).toMatch(/the import is applied/);
     expect(screen.getByRole('button', { name: 'Roll back this import' })).toBeEnabled();
     expect(await table('game_assignments')).toHaveLength(9);
+    // a clear miss: the write was refused and the check found no baseline, so "not recorded" is said, with the retry
     expect(await table('publication_baselines')).toHaveLength(0);
+    expect(within(notice).getByRole('button', { name: 'Record the baseline again' })).toBeEnabled();
+  });
+
+  it('C2: the write committed and its answer was lost: the check finds it, and it is said as recorded', async () => {
+    const real = mockSupabase.rpc.bind(mockSupabase);
+    vi.spyOn(mockSupabase, 'rpc').mockImplementation(async (name, params) => {
+      if (name !== 'admin_publish_schedule_baseline') return real(name, params);
+      await real(name, params); // the database did it...
+      return { data: null, error: { message: 'Failed to fetch' } }; // ...and the answer never arrived
+    });
+    render(<ScheduleImportPanel />);
+    await toConfirm();
+    await confirm();
+    const notice = await baselineNotice();
+    expect(notice.textContent).toMatch(/as published baseline v1, for "Changes since publication"/);
+    expect(within(notice).queryByRole('button', { name: 'Record the baseline again' })).toBeNull();
+    expect(await table('publication_baselines')).toHaveLength(1);
+  });
+
+  it('C2: the answer was lost and the check cannot be made: the outcome is unknown, never "none", with where to look', async () => {
+    const real = mockSupabase.rpc.bind(mockSupabase);
+    vi.spyOn(mockSupabase, 'rpc').mockImplementation((name, params) =>
+      name === 'admin_publish_schedule_baseline'
+        ? Promise.resolve({ data: null, error: { message: 'Failed to fetch' } })
+        : real(name, params)
+    );
+    render(<ScheduleImportPanel />);
+    await toConfirm();
+    const from = mockSupabase.from.bind(mockSupabase);
+    vi.spyOn(mockSupabase, 'from').mockImplementation((name) => {
+      if (name === 'publication_baselines') throw new Error('baselines unreadable');
+      return from(name);
+    });
+    await confirm();
+    const notice = await baselineNotice();
+    expect(notice.getAttribute('role')).toBe('alert');
+    expect(notice.textContent).toMatch(
+      /it is not known whether its publication baseline was recorded: the recording got no clear answer \(Failed to fetch\) and the check for its baseline failed \(baselines unreadable\)/
+    );
+    expect(notice.textContent).toMatch(
+      /"Changes since publication" on the Exports page lists every baseline/
+    );
+    expect(notice.textContent).not.toMatch(/no publication baseline was recorded/);
+    expect(within(notice).getByRole('button', { name: 'Record the baseline again' })).toBeEnabled();
   });
 
   it('the saved schedule cannot be read for the rows: said, naming what, and nothing is recorded', async () => {
@@ -324,6 +388,117 @@ describe('(4) a recording that fails is said, and the import still shows as appl
   });
 });
 
+describe('C1: the whole recording is bounded, and a recording that timed out can be made again', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('the write gets no answer within a minute: unknown, said; "Record the baseline again" checks, then records', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
+    const real = mockSupabase.rpc.bind(mockSupabase);
+    let writes = 0;
+    vi.spyOn(mockSupabase, 'rpc').mockImplementation((name, params) => {
+      if (name !== 'admin_publish_schedule_baseline') return real(name, params);
+      writes += 1;
+      // the first write hangs (it never reached the database); the second is the database's
+      return writes === 1 ? new Promise(() => {}) : real(name, params);
+    });
+    render(<ScheduleImportPanel />);
+    await toConfirm();
+    await confirm();
+    await waitFor(() => expect(writes).toBe(1));
+    expect(screen.getByTestId('schedule-import-busy')).toBeInTheDocument();
+    vi.advanceTimersByTime(60000);
+    const notice = await baselineNotice();
+    expect(notice.textContent).toMatch(
+      /not known whether its publication baseline was recorded: the recording sent its baseline and no answer came within a minute/
+    );
+    expect(screen.getByRole('button', { name: 'Roll back this import' })).toBeEnabled();
+
+    fireEvent.click(within(notice).getByRole('button', { name: 'Record the baseline again' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('schedule-import-baseline').textContent).toMatch(
+        /as published baseline v1, for/
+      )
+    );
+    expect(writes).toBe(2);
+    expect(await table('publication_baselines')).toHaveLength(1);
+  });
+
+  it('the write committed but its answer never came: the retry finds it first and writes nothing', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
+    const real = mockSupabase.rpc.bind(mockSupabase);
+    let writes = 0;
+    vi.spyOn(mockSupabase, 'rpc').mockImplementation(async (name, params) => {
+      if (name !== 'admin_publish_schedule_baseline') return real(name, params);
+      writes += 1;
+      await real(name, params);
+      return new Promise(() => {}); // the database did it; the answer is lost on the way back
+    });
+    render(<ScheduleImportPanel />);
+    await toConfirm();
+    await confirm();
+    await waitFor(() => expect(writes).toBe(1));
+    vi.advanceTimersByTime(60000);
+    const notice = await baselineNotice();
+    expect(notice.textContent).toMatch(/not known whether its publication baseline was recorded/);
+    fireEvent.click(within(notice).getByRole('button', { name: 'Record the baseline again' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('schedule-import-baseline').textContent).toMatch(
+        /as published baseline v1, for/
+      )
+    );
+    // found by its snapshot id: no second write was sent
+    expect(writes).toBe(1);
+    expect(await table('publication_baselines')).toHaveLength(1);
+  });
+
+  it('the reads stall past a minute (a slow league): not recorded, no write after the screen said so, and the retry records', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
+    const real = mockSupabase.rpc.bind(mockSupabase);
+    /** @type {() => void} */
+    let release = () => {};
+    let held = false;
+    const publish = vi.fn();
+    vi.spyOn(mockSupabase, 'rpc').mockImplementation((name, params) => {
+      if (name === 'admin_publish_schedule_baseline') publish();
+      // the TIME TBD list's first read after the apply is slow: it answers only when released
+      if (
+        name === 'get_schedule_tbd' &&
+        !held &&
+        publish.mock.calls.length === 0 &&
+        stepIsResult()
+      ) {
+        held = true;
+        return new Promise((resolve) => {
+          release = () => resolve(real(name, params));
+        });
+      }
+      return real(name, params);
+    });
+    render(<ScheduleImportPanel />);
+    await toConfirm();
+    await confirm();
+    await waitFor(() => expect(held).toBe(true));
+    vi.advanceTimersByTime(60000);
+    const notice = await baselineNotice();
+    expect(notice.textContent).toMatch(
+      /no publication baseline was recorded: the saved schedule was still being read or made into rows after a minute \(nothing was written\)/
+    );
+    // the slow read answers after all: the recording that was given up writes nothing
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(publish).not.toHaveBeenCalled();
+    expect(await table('publication_baselines')).toHaveLength(0);
+
+    fireEvent.click(within(notice).getByRole('button', { name: 'Record the baseline again' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('schedule-import-baseline').textContent).toMatch(
+        /as published baseline v1, for/
+      )
+    );
+    expect(await table('publication_baselines')).toHaveLength(1);
+  });
+});
+
 describe('(5) a roll back does not silently leave a baseline that describes games that are gone', () => {
   const ROLLED_NOTE =
     /Published baseline v1, recorded from this import, still describes the imported schedule/;
@@ -333,10 +508,42 @@ describe('(5) a roll back does not silently leave a baseline that describes game
     await toConfirm();
     await confirm();
     await baselineNotice();
+    // From here, every read of the baselines table, with the filters it is given.
+    const reads = /** @type {Array<Array<[string, any]>>} */ ([]);
+    const from = mockSupabase.from.bind(mockSupabase);
+    vi.spyOn(mockSupabase, 'from').mockImplementation((name) => {
+      const builder = from(name);
+      if (name !== 'publication_baselines') return builder;
+      const filters = /** @type {Array<[string, any]>} */ ([]);
+      reads.push(filters);
+      const wrap = (b) =>
+        new Proxy(b, {
+          get(target, key) {
+            const value = Reflect.get(target, key);
+            if (key === 'eq') {
+              return (column, v) => {
+                filters.push([column, v]);
+                return wrap(value.call(target, column, v));
+              };
+            }
+            return typeof value === 'function' && key === 'select'
+              ? (...args) => wrap(value.apply(target, args))
+              : typeof value === 'function'
+                ? value.bind(target)
+                : value;
+          },
+        });
+      return wrap(builder);
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Roll back this import' }));
     await screen.findByTestId('schedule-import-rolled-back');
     const note = await screen.findByTestId('schedule-import-baseline-rolled-back');
     expect(note.textContent).toMatch(ROLLED_NOTE);
+    // the look-up read ONE row, by the import's snapshot id, and not the whole list
+    expect(reads).toHaveLength(1);
+    expect(reads[0].map(([column]) => column)).toEqual(['organization_id', 'snapshot_id']);
+    expect(String(reads[0][1][1])).toMatch(/^schedule-import-/);
+    vi.mocked(mockSupabase.from).mockRestore();
     expect(note.textContent).toMatch(/choose another baseline there/);
     // nothing was recorded again: the one baseline is the import's
     const baselines = await table('publication_baselines');

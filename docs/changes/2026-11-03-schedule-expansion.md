@@ -1654,6 +1654,26 @@ Depends on: PR 6 merged. On no other pull request's dependency path; placed afte
         included; every such game was "unreadable" and the comparison never a verdict. `buildChangesSincePublication`
         now reads a row with no partner whose opponent is exactly one outside club of its division as that game
         (lesson 110).
+      **Review round (2026-11-13; Codex C1 and C2, one `/code-review high`), all taken:** the whole recording (the
+      reads, the TIME TBD and directory reads, the rows, the write and the check after it) is bounded by one minute and
+      always ends in an outcome; a recording given up before its write never writes. A write whose answer is refused or
+      lost is followed by a read of the import's baseline by its snapshot id: found, it is said as recorded; the read
+      failing, the outcome is said to be not known, with where to look ("Changes since publication" lists every
+      baseline), never as "none"; only a clear miss says nothing was recorded. A failed or unknown recording offers
+      "Record the baseline again", which asks for the snapshot first and writes only when it is absent. A chunk that
+      cannot load is not kept (React.lazy keeps a rejected load for good, so the panel takes a new lazy part per
+      attempt). Once the admin sets the box, a later stored mapping does not reset it. The recorder uses the app's
+      client for every read and the write (`useDashboardData` and `usePublicationBaselines` read through it, as the
+      Exports page's panel is handed it), so a baseline is never made from two clients. The roll back's look-up reads
+      the one row by its snapshot id (`readBaselineBySnapshotId`, beside the hook); the recorder still mounts the list
+      hook, because `publishBaseline` is only reachable through it without moving its body out of the hook. The
+      sources a recording waits for, and their words, are the Exports page's (`MASTER_EXPORT_SOURCES`,
+      `unreadableSources`, `describeSources` in `utils/masterExport.js`). The outside-club reading does not pair a row
+      whose label also names one of the league's own teams in that division.
+      **Known limit, left:** an outside club is matched by the club name and division the baseline row prints, so a
+      club or division renamed after the baseline, or a game between divisions against a club, leaves that row
+      unreadable, as every one-row game was before this PR. The real fix carries the opponent's id in the export,
+      which changes the export's columns and is out of scope.
 
 ### PR 7: reports (M; no migration; Review: (a))
 

@@ -626,6 +626,19 @@ describe('a game against an outside club is one row of the baseline, and is read
     // a club of that name in ANOTHER division is not this game's opponent
     expect(clubView([...TEAMS, { ...CLUB, division: 'U12' }]).counts.baselineUnreadable).toBe(3);
   });
+  it('CONTROL: a label that names both an own team and an outside club of the division is not guessed', () => {
+    // An own team of the club's name in U10 beside the club: the three single rows could be either, so they stay
+    // unreadable, as every one-row game was before the outside-club reading.
+    const own = { id: 't-own-gulls', name: 'Gulls FC', divisionId: 'd-10', division: 'U10' };
+    const result = clubView([...TEAMS, own, CLUB]);
+    expect(result.counts.baselineUnreadable).toBe(3);
+    expect(result.sound).toBe(false);
+    // the same own team in ANOTHER division does not stand in the way
+    expect(
+      clubView([...TEAMS, { ...own, divisionId: 'd-12', division: 'U12' }, CLUB]).counts
+        .baselineUnreadable
+    ).toBe(0);
+  });
 });
 
 describe('what cannot be read is counted and named', () => {

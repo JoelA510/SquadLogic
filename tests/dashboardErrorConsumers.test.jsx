@@ -423,7 +423,7 @@ describe('the import’s baseline recorder (G5, ImportBaseline.jsx) says a faile
       await import('../frontend/src/components/import/ImportBaseline.jsx');
     dash.value = dashboardData(error);
     const onDone = vi.fn();
-    render(<ImportBaselineRecorder jobId="job-1" client={null} onDone={onDone} />);
+    render(<ImportBaselineRecorder jobId="job-1" onDone={onDone} />);
     await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
     return onDone.mock.calls[0][0];
   };
@@ -432,7 +432,7 @@ describe('the import’s baseline recorder (G5, ImportBaseline.jsx) says a faile
     const outcome = await recordWith(MESSAGE);
     expect(outcome.status).toBe('failed');
     expect(outcome.message).toMatch(
-      `the saved schedule could not be read: teams (${MESSAGE}), so rows made now could leave games out`
+      `no publication baseline was recorded: the teams could not be read (${MESSAGE}), so rows made now could leave games out`
     );
   });
 
@@ -447,7 +447,7 @@ describe('the import’s baseline recorder (G5, ImportBaseline.jsx) says a faile
         loading: { team: true, practice: false, game: false },
       };
       const onDone = vi.fn();
-      render(<ImportBaselineRecorder jobId="job-1" client={null} onDone={onDone} />);
+      render(<ImportBaselineRecorder jobId="job-1" onDone={onDone} />);
       await act(async () => {
         vi.advanceTimersByTime(59000);
       });
@@ -457,7 +457,7 @@ describe('the import’s baseline recorder (G5, ImportBaseline.jsx) says a faile
       });
       expect(onDone).toHaveBeenCalledTimes(1);
       expect(onDone.mock.calls[0][0].message).toMatch(
-        /no publication baseline was recorded: the saved schedule was still being read after a minute/
+        /no publication baseline was recorded: the saved schedule was still being read or made into rows after a minute/
       );
     } finally {
       vi.useRealTimers();

@@ -56,17 +56,8 @@ import {
 // G5: recording an import as the publication baseline reads the whole saved schedule and makes the master export, so
 // it is its own chunk, loaded only when an import records or is rolled back. A chunk that cannot be loaded (a new
 // deploy, a dropped connection) is said through the same callback as any other failure, never left to throw in render.
-/** @param {string} name @param {(error: any) => (props: any) => null} onFailure */
-const lazyBaseline = (name, onFailure) =>
-  lazy(() =>
-    import('./ImportBaseline.jsx').then(
-      (m) => ({ default: m[name] }),
-      (error) => {
-        logger.error('The baseline module could not be loaded:', error);
-        return { default: onFailure(error) };
-      }
-    )
-  );
+// React.lazy keeps what its loader settled to for good, so a failed load is not kept: the next recording or look-up
+// (`baselinePart(...)()` at its start) makes a new lazy component, which loads the chunk again.
 /** A component that reports `outcome` once, through the prop `report` names. */
 const reportOnce = (report, outcome) =>
   function ChunkFailed(props) {
@@ -74,13 +65,33 @@ const reportOnce = (report, outcome) =>
     useEffect(() => callback(outcome), [callback]);
     return null;
   };
-const ImportBaselineRecorder = lazyBaseline('ImportBaselineRecorder', (error) =>
+/**
+ * @param {string} name - the export of `ImportBaseline.jsx`
+ * @param {(error: any) => (props: any) => null} onFailure - what stands in for it when the chunk does not load
+ * @returns {() => React.LazyExoticComponent<React.ComponentType<any>>} the lazy component to use for a new recording or look-up
+ */
+function baselinePart(name, onFailure) {
+  const make = () =>
+    lazy(() =>
+      import('./ImportBaseline.jsx').then(
+        (m) => ({ default: m[name] }),
+        (error) => {
+          logger.error('The baseline module could not be loaded:', error);
+          current = make();
+          return { default: onFailure(error) };
+        }
+      )
+    );
+  let current = make();
+  return () => current;
+}
+const nextRecorder = baselinePart('ImportBaselineRecorder', (error) =>
   reportOnce('onDone', {
     status: 'failed',
-    message: `The import is applied, but no publication baseline was recorded: this page could not load what records it (${String(error?.message ?? error)}). Reload the page; uploading the files on the Exports page records a baseline.`,
+    message: `The import is applied, but no publication baseline was recorded: this page could not load what records it (${String(error?.message ?? error)}). "Record the baseline again" tries once more.`,
   })
 );
-const ImportBaselineLookup = lazyBaseline('ImportBaselineLookup', (error) =>
+const nextLookup = baselinePart('ImportBaselineLookup', (error) =>
   reportOnce('onResult', { status: 'unchecked', message: String(error?.message ?? error) })
 );
 
@@ -313,9 +324,11 @@ function ScheduleImportWorkflow({
   // G5: record the schedule the import leaves as the publication baseline. Its default is the STORED mapping's
   // "Games arrive Published", set again each time a mapping is stored; the admin can change it.
   const [recordBaseline, setRecordBaseline] = useState(false);
+  // Once the admin has set the box, a later stored mapping leaves it as they set it.
+  const [recordChosen, setRecordChosen] = useState(false);
   // What became of that recording, and for WHICH job (the next import's result is its own).
   const [baseline, setBaseline] = useState(
-    /** @type {{ jobId: string, status: 'recording' | 'recorded' | 'failed', message?: string } | null} */ (
+    /** @type {{ jobId: string, attempt: number, status: 'recording' | 'recorded' | 'failed' | 'unknown', message?: string } | null} */ (
       null
     )
   );
@@ -417,6 +430,7 @@ function ScheduleImportWorkflow({
     setResult(null);
     setRolledBack(null);
     setRecordBaseline(false);
+    setRecordChosen(false);
     setBaseline(null);
     setRolledBaseline(null);
   }, []);
@@ -570,8 +584,9 @@ function ScheduleImportWorkflow({
     if (!alive.current) return;
     // From here the job holds THIS mapping. A preview of the one before it is no longer the import's.
     setSent({ published: published === true, creations });
-    // The baseline's default follows the mapping now stored: ticked when its games arrive Published (decision 15).
-    setRecordBaseline(published === true);
+    // The baseline's default follows the mapping now stored, ticked when its games arrive Published (decision 15),
+    // until the admin sets the box themselves.
+    if (!recordChosen) setRecordBaseline(published === true);
     setPreview(null);
     try {
       const made = await K.preview(client, jobId);
@@ -599,9 +614,16 @@ function ScheduleImportWorkflow({
     setStep('result');
     refreshLast();
     if (recordBaseline && jobId && baseline?.jobId !== jobId) {
-      setBaseline({ jobId, status: 'recording' });
+      setBaseline({ jobId, attempt: 1, status: 'recording' });
       setBusy('Recording the publication baseline');
     }
+  };
+  // A recording that failed, or whose outcome is not known, can be made again: it asks for the import's baseline
+  // first and writes only if there is none (the snapshot id is unique, so a second write is refused anyway).
+  const recordAgain = () => {
+    if (!baseline || baseline.jobId !== jobId) return;
+    setBaseline({ jobId, attempt: baseline.attempt + 1, status: 'recording' });
+    setBusy('Recording the publication baseline');
   };
   const onBaselineDone = useCallback((outcome) => {
     setBaseline((prev) => (prev ? { ...prev, ...outcome } : prev));
@@ -818,6 +840,16 @@ function ScheduleImportWorkflow({
     }
     return `Nothing will be written: ${parts.join(', ')}; every other game of the file is already as the file has it. Go back to the names to decide the ones that are not imported, or allow changes to a Published game first.`;
   })();
+
+  // The lazy part for THIS recording or look-up, fixed while it runs; a new one is taken for the next (a failed chunk
+  // load is not kept, `baselinePart`).
+  const recordingKey =
+    baseline?.status === 'recording' ? `${baseline.jobId}:${baseline.attempt}` : null;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- a new lazy part per recording, by its key
+  const ImportBaselineRecorder = useMemo(() => nextRecorder(), [recordingKey]);
+  const lookupKey = rolledBaseline && rolledBaseline.found === null ? rolledBaseline.jobId : null;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- a new lazy part per look-up, by its key
+  const ImportBaselineLookup = useMemo(() => nextLookup(), [lookupKey]);
 
   // After a roll back, the baseline its import recorded, said: it still describes the games the roll back removed.
   const found = rolledBaseline?.found ?? null;
@@ -1342,7 +1374,10 @@ function ScheduleImportWorkflow({
                 className="mt-1"
                 checked={recordBaseline}
                 disabled={busy !== null}
-                onChange={(event) => setRecordBaseline(event.target.checked)}
+                onChange={(event) => {
+                  setRecordChosen(true);
+                  setRecordBaseline(event.target.checked);
+                }}
               />
               <span>
                 Record this schedule as the baseline for Changes since publication
@@ -1423,26 +1458,43 @@ function ScheduleImportWorkflow({
           {baseline?.jobId === jobId && baseline.status === 'recording' && (
             <Suspense fallback={null}>
               <ImportBaselineRecorder
-                key={baseline.jobId}
+                key={recordingKey}
                 jobId={baseline.jobId}
                 fileName={fileName}
-                client={client}
+                checkFirst={baseline.attempt > 1}
                 onDone={onBaselineDone}
               />
             </Suspense>
           )}
-          {!rolledBackHere &&
-            baseline?.jobId === jobId &&
-            (baseline.status === 'recorded' || baseline.status === 'failed') && (
-              <div className="mt-2">
-                <Notice
-                  tone={baseline.status === 'recorded' ? 'success' : 'error'}
-                  testId="schedule-import-baseline"
-                >
-                  {baseline.message}
-                </Notice>
-              </div>
-            )}
+          {!rolledBackHere && baseline?.jobId === jobId && baseline.status !== 'recording' && (
+            <div className="mt-2">
+              <Notice
+                tone={
+                  baseline.status === 'recorded'
+                    ? 'success'
+                    : baseline.status === 'unknown'
+                      ? 'warning'
+                      : 'error'
+                }
+                role={baseline.status === 'unknown' ? 'alert' : undefined}
+                testId="schedule-import-baseline"
+              >
+                <p>{baseline.message}</p>
+                {baseline.status !== 'recorded' && (
+                  <div className="mt-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={busy !== null}
+                      onClick={recordAgain}
+                    >
+                      Record the baseline again
+                    </Button>
+                  </div>
+                )}
+              </Notice>
+            </div>
+          )}
           <dl
             data-testid="schedule-import-result-counts"
             className="mt-3 rounded-lg border border-border-subtle divide-y divide-border-subtle max-w-xl"

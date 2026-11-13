@@ -93,6 +93,30 @@ function toBaselineSummary(row) {
 const SUMMARY_COLUMNS =
   'id, baseline_version, snapshot_id, label, channel, published_at, published_by, notes, row_count, digest, recorded_at';
 
+/**
+ * The one baseline recorded under `snapshotId` in the organization, as a list row (no payload), or null when there is
+ * none. A read that fails throws: "not found" is only ever said of a read that answered.
+ *
+ * A plain function, not the hook: the games import (task G5) asks after the baseline an import recorded, by the
+ * snapshot id that names the job (`publication_baselines_snapshot_unique`), and needs neither the whole list nor a
+ * read of it when it mounts.
+ *
+ * @param {string} organizationId
+ * @param {string} snapshotId
+ * @returns {Promise<ReturnType<typeof toBaselineSummary> | null>}
+ */
+export async function readBaselineBySnapshotId(organizationId, snapshotId) {
+  if (!organizationId) throw new Error('No active organization');
+  const { data, error } = await supabase
+    .from('publication_baselines')
+    .select(SUMMARY_COLUMNS)
+    .eq('organization_id', organizationId)
+    .eq('snapshot_id', snapshotId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? toBaselineSummary(data) : null;
+}
+
 export function usePublicationBaselines() {
   const [baselines, setBaselines] = useState(/** @type {any[]} */ ([]));
   const [loading, setLoading] = useState(true);

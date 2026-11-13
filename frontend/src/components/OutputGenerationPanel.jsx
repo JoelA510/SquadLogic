@@ -21,7 +21,13 @@ import {
   teamsWithUncorroboratedCoachIdentity,
 } from '@squadlogic/core/people/coachList.js';
 import { teamCoaches } from '../utils/teamCoaches.js';
-import { generateMasterExport } from '../utils/masterExport.js';
+import {
+  MASTER_EXPORT_SOURCES,
+  anyLoading,
+  describeSources,
+  generateMasterExport,
+  unreadableSources,
+} from '../utils/masterExport.js';
 import {
   refreshAndReadScheduleTbd,
   scheduleTbdCounts,
@@ -251,30 +257,6 @@ const NO_SOURCE_ERRORS = Object.freeze({ team: null, practice: null, game: null 
 /** Nothing is still in flight. The default for `sourceLoading`. */
 const NO_SOURCE_LOADING = Object.freeze({ team: false, practice: false, game: false });
 
-/** How each failed source is named to an operator. */
-const SOURCE_LABELS = Object.freeze({
-  team: 'the teams',
-  practice: 'the practice assignments',
-  game: 'the game assignments',
-});
-
-/** The sources in `keys` whose rows cannot be trusted yet, in the order given. */
-function unreadableSources(sourceErrors, sourceLoading, keys) {
-  return keys.filter((key) => Boolean(sourceErrors?.[key]) || Boolean(sourceLoading?.[key]));
-}
-
-/** Whether any named source is unreadable because it has not arrived yet. */
-function anyLoading(sourceLoading, keys) {
-  return keys.some((key) => Boolean(sourceLoading?.[key]));
-}
-
-/** "the teams", "the teams and the game assignments", … */
-function describeSources(keys) {
-  const labels = keys.map((key) => SOURCE_LABELS[key]);
-  if (labels.length < 2) return labels.join('');
-  return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
-}
-
 /**
  * What an export with no schedule behind it says. The master and per-team files hold one row
  * per practice or game and nothing for a team that has none, so a league that has applied no
@@ -419,7 +401,7 @@ export default function OutputGenerationPanel({
 
   // The CSV export flattens teams, practices and games into one file; the
   // email drafts read teams and practices only.
-  const CSV_SOURCES = ['team', 'practice', 'game'];
+  const CSV_SOURCES = MASTER_EXPORT_SOURCES;
   const EMAIL_SOURCES = ['team', 'practice'];
   const csvBlockedBy = unreadableSources(sourceErrors, sourceLoading, CSV_SOURCES);
   const emailsBlockedBy = unreadableSources(sourceErrors, sourceLoading, EMAIL_SOURCES);

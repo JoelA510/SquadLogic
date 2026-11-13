@@ -298,15 +298,22 @@ export function buildChangesSincePublication({
     if (week !== null) weekOfSlot.set(idText(slot.id), week);
   }
 
-  // An outside club, by the name and division a row prints (`pairRows`): one exactly, or none.
+  // An outside club, by the name and division a row prints (`pairRows`): one exactly, and only when no team of the
+  // league's own has that name in that division (a row whose opponent could be either is not guessed: it stays
+  // unreadable, as every one-row game was before).
+  const clubKey = (division, name) => `${text(division)}\u0000${text(name)}`;
   const outsideClubs = new Map();
+  const ownTeams = new Set();
   for (const team of teams) {
-    if (team?.isExternal !== true) continue;
-    const key = `${text(team.division)}\u0000${text(team.name)}`;
-    outsideClubs.set(key, [...(outsideClubs.get(key) ?? []), text(team.id)]);
+    const key = clubKey(team?.division, team?.name);
+    if (team?.isExternal === true)
+      outsideClubs.set(key, [...(outsideClubs.get(key) ?? []), text(team.id)]);
+    else ownTeams.add(key);
   }
   const outsideClubOf = (row) => {
-    const ids = outsideClubs.get(`${text(row.Division)}\u0000${text(row.Opponent)}`) ?? [];
+    const key = clubKey(row.Division, row.Opponent);
+    if (ownTeams.has(key)) return null;
+    const ids = outsideClubs.get(key) ?? [];
     return ids.length === 1 ? ids[0] : null;
   };
 

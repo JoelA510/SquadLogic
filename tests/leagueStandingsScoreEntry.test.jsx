@@ -129,3 +129,22 @@ describe('LeagueStandings :: Recent Games are the saved schedule', () => {
     expect(SEASON).toBeTruthy();
   });
 });
+
+describe('LeagueStandings :: only scores are sent (F11-3 review R7)', () => {
+  it('the boxes take whole numbers from 0; a negative one is held and said, and nothing is sent', async () => {
+    await save([assignment('comets', 'rockets', 'slot-1')]);
+    render(<LeagueStandings />);
+    await waitFor(() => expect(cards()).toHaveLength(1));
+    const home = screen.getByLabelText('Home Score');
+    expect(home).toHaveAttribute('min', '0');
+    expect(home).toHaveAttribute('step', '1');
+    expect(home).toHaveAttribute('inputmode', 'numeric');
+    fireEvent.change(home, { target: { value: '-1' } });
+    fireEvent.change(screen.getByLabelText('Away Score'), { target: { value: '2' } });
+    expect(await screen.findByTestId('score-not-a-score')).toHaveTextContent(
+      'A score is a whole number, 0 or more.'
+    );
+    expect(await scores()).toEqual([]);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+});

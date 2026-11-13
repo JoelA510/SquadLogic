@@ -249,3 +249,78 @@ describe('ScoresPage: results that are not in the saved schedule are counted, no
     );
   });
 });
+
+describe('ScoresPage: one save of a game at a time, and only scores are sent (F11-3 review R4, R7)', () => {
+  /** Holds every update_game_score until released, in any order. */
+  async function holdSaves() {
+    const supabase = await client();
+    const realRpc = supabase.rpc.bind(supabase);
+    const pending = [];
+    vi.spyOn(supabase, 'rpc').mockImplementation((name, params) => {
+      if (name !== 'update_game_score') return realRpc(name, params);
+      return new Promise((resolve) =>
+        pending.push({ params, go: () => resolve(realRpc(name, params)) })
+      );
+    });
+    return pending;
+  }
+
+  it('while a game’s save is in flight its scores cannot be edited, and the answer applies when it comes', async () => {
+    const run = await save([assignment('comets', 'rockets', 'slot-1')]);
+    const id = await gameId(run, 'comets', 'rockets');
+    renderPage();
+    await screen.findByText(TEAM_NAMES.rockets);
+    const pending = await holdSaves();
+    await type(TEAM_NAMES.rockets, 3, '3');
+    await type(TEAM_NAMES.rockets, 4, '1');
+    await waitFor(() => expect(pending).toHaveLength(1));
+    // In flight: the row says so and takes no edit, so nothing typed now can be lost when the answer comes.
+    expect(cell(TEAM_NAMES.rockets, 6)).toHaveTextContent('Saving');
+    fireEvent.doubleClick(cell(TEAM_NAMES.rockets, 3));
+    expect(screen.queryByRole('spinbutton')).toBeNull();
+    await act(async () => pending[0].go());
+    await waitFor(() => expect(cell(TEAM_NAMES.rockets, 6)).toHaveTextContent('Final'));
+    expect(await scores()).toEqual([[id, 3, 1]]);
+  });
+
+  it('two games’ saves answered in reverse order each keep their own score', async () => {
+    const run = await save([
+      assignment('comets', 'rockets', 'slot-1'),
+      assignment('meteors', 'planets', 'slot-2'),
+    ]);
+    const first = await gameId(run, 'comets', 'rockets');
+    const second = await gameId(run, 'meteors', 'planets');
+    renderPage();
+    await screen.findByText(TEAM_NAMES.rockets);
+    const pending = await holdSaves();
+    await type(TEAM_NAMES.rockets, 3, '1');
+    await type(TEAM_NAMES.rockets, 4, '0');
+    await type(TEAM_NAMES.planets, 3, '2');
+    await type(TEAM_NAMES.planets, 4, '2');
+    await waitFor(() => expect(pending).toHaveLength(2));
+    await act(async () => pending[1].go());
+    await act(async () => pending[0].go());
+    await waitFor(() => expect(cell(TEAM_NAMES.rockets, 6)).toHaveTextContent('Final'));
+    await waitFor(() => expect(cell(TEAM_NAMES.planets, 6)).toHaveTextContent('Final'));
+    expect((await scores()).sort()).toEqual(
+      [
+        [first, 1, 0],
+        [second, 2, 2],
+      ].sort()
+    );
+    expect(cell(TEAM_NAMES.rockets, 3)).toHaveTextContent('1');
+    expect(cell(TEAM_NAMES.planets, 4)).toHaveTextContent('2');
+  });
+
+  it('a score that is not a whole number is held and said, and nothing is sent', async () => {
+    await save([assignment('comets', 'rockets', 'slot-1')]);
+    renderPage();
+    await screen.findByText(TEAM_NAMES.rockets);
+    const pending = await holdSaves();
+    await type(TEAM_NAMES.rockets, 3, '2.5');
+    await type(TEAM_NAMES.rockets, 4, '1');
+    expect(cell(TEAM_NAMES.rockets, 6)).toHaveTextContent('Not a score');
+    expect(pending).toHaveLength(0);
+    expect(await scores()).toEqual([]);
+  });
+});

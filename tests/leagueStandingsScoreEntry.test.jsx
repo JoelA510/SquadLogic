@@ -7,7 +7,7 @@
  */
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import {
   ORG,
@@ -182,5 +182,108 @@ describe('LeagueStandings :: Recent Games is a bounded read (F11-3 review R9)', 
     expect(calls.find(([m]) => m === 'limit')).toEqual(['limit', 50]);
     const select = calls.find(([m]) => m === 'select')[1];
     expect(select).not.toMatch(/game_slots|fields|locations/);
+  });
+});
+
+describe('LeagueStandings :: a correction never shows older standings (F11-3 fix round 3, Codex P2)', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  /** Holds every standings read until released; `releaseAll` answers the held ones newest first. */
+  async function holdStandings() {
+    const supabase = await client();
+    const realFrom = supabase.from.bind(supabase);
+    const held = [];
+    const state = { holding: false };
+    vi.spyOn(supabase, 'from').mockImplementation((table) => {
+      const builder = realFrom(table);
+      if (table !== 'view_league_standings' || !state.holding) return builder;
+      const realSelect = builder.select.bind(builder);
+      builder.select = (...args) => {
+        const query = realSelect(...args);
+        const wrap = (q) =>
+          new Proxy(q, {
+            get(target, key) {
+              if (key === 'then') {
+                return (resolve, reject) =>
+                  new Promise((go) => held.push(go)).then(() => target.then(resolve, reject));
+              }
+              const value = target[key];
+              return typeof value === 'function' ? (...a) => wrap(value.apply(target, a)) : value;
+            },
+          });
+        return wrap(query);
+      };
+      return builder;
+    });
+    return {
+      state,
+      held,
+      releaseAll: async () => {
+        while (held.length > 0) {
+          const go = held.pop();
+          await act(async () => go());
+        }
+      },
+    };
+  }
+  const goalsFor = () => within(standing(TEAM_NAMES.comets)).getAllByRole('cell')[6].textContent;
+
+  it('2-0 then 3-0, the refreshes answered in reverse order: the table shows three goals for', async () => {
+    const run = await save([assignment('comets', 'rockets', 'slot-1')]);
+    const id = await gameId(run, 'comets', 'rockets');
+    render(<LeagueStandings />);
+    await waitFor(() => expect(cards()).toHaveLength(1));
+    const reads = await holdStandings();
+    reads.state.holding = true;
+    fireEvent.change(screen.getByLabelText('Home Score'), { target: { value: '2' } });
+    fireEvent.change(screen.getByLabelText('Away Score'), { target: { value: '0' } });
+    await waitFor(async () => expect(await scores()).toEqual([[id, 2, 0]]));
+    await waitFor(() => expect(reads.held.length).toBe(1));
+    // The correction, typed while the first refresh is still out.
+    fireEvent.change(screen.getByLabelText('Home Score'), { target: { value: '3' } });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await reads.releaseAll();
+    reads.state.holding = false;
+    // If the correction was held back until the first refresh came, it is typed again now.
+    if ((await scores())[0][1] !== 3) {
+      await waitFor(() => expect(screen.getByLabelText('Home Score')).toBeEnabled());
+      fireEvent.change(screen.getByLabelText('Home Score'), { target: { value: '3' } });
+    }
+    await waitFor(async () => expect(await scores()).toEqual([[id, 3, 0]]));
+    await waitFor(() => expect(goalsFor()).toBe('3'));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(goalsFor()).toBe('3');
+  });
+
+  it('a refresh that fails after a save releases the game and says so in words', async () => {
+    await save([assignment('comets', 'rockets', 'slot-1')]);
+    render(<LeagueStandings />);
+    await waitFor(() => expect(cards()).toHaveLength(1));
+    const supabase = await client();
+    const realFrom = supabase.from.bind(supabase);
+    vi.spyOn(supabase, 'from').mockImplementation((table) => {
+      const builder = realFrom(table);
+      if (table !== 'view_league_standings') return builder;
+      const realSelect = builder.select.bind(builder);
+      builder.select = (...args) => {
+        const query = realSelect(...args);
+        const failing = new Proxy(query, {
+          get(target, key) {
+            if (key === 'then')
+              return (resolve) => resolve({ data: null, error: { message: 'boom' } });
+            const value = target[key];
+            return typeof value === 'function' ? () => failing : value;
+          },
+        });
+        return failing;
+      };
+      return builder;
+    });
+    fireEvent.change(screen.getByLabelText('Home Score'), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Away Score'), { target: { value: '0' } });
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The score was saved, but the standings could not be read again: reload the page to see them.'
+    );
+    await waitFor(() => expect(screen.getByLabelText('Home Score')).toBeEnabled());
   });
 });

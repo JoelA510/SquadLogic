@@ -236,6 +236,68 @@ export function buildExportPayload({
 }
 
 /**
+ * The three reads of `useDashboardData()` the master export is made from: a caller makes no rows while any of them is
+ * still in flight or failed (a read not made is not "none"). The Exports page gates its files on them and the import
+ * panel's baseline (G5) its recording, in the same words.
+ */
+export const MASTER_EXPORT_SOURCES = Object.freeze(['team', 'practice', 'game']);
+
+/** How each failed source is named to an operator. */
+const SOURCE_LABELS = Object.freeze({
+  team: 'the teams',
+  practice: 'the practice assignments',
+  game: 'the game assignments',
+});
+
+/**
+ * The sources in `keys` whose rows cannot be trusted yet, in the order given.
+ *
+ * @param {Record<string, any> | null | undefined} sourceErrors
+ * @param {Record<string, any> | null | undefined} sourceLoading
+ * @param {ReadonlyArray<string>} keys
+ */
+export function unreadableSources(sourceErrors, sourceLoading, keys) {
+  return keys.filter((key) => Boolean(sourceErrors?.[key]) || Boolean(sourceLoading?.[key]));
+}
+
+/**
+ * Whether any named source is unreadable because it has not arrived yet.
+ *
+ * @param {Record<string, any> | null | undefined} sourceLoading
+ * @param {ReadonlyArray<string>} keys
+ */
+export function anyLoading(sourceLoading, keys) {
+  return keys.some((key) => Boolean(sourceLoading?.[key]));
+}
+
+/**
+ * "the teams", "the teams and the game assignments", ...
+ *
+ * @param {ReadonlyArray<string>} keys
+ */
+export function describeSources(keys) {
+  const labels = keys.map((key) => SOURCE_LABELS[key]);
+  if (labels.length < 2) return labels.join('');
+  return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+}
+
+/**
+ * The schedule inputs of the master export, from what `useDashboardData()` returns: the one mapping the Exports page
+ * and the import panel's baseline (G5) both use, so the two hand `generateMasterExport` the same teams, practices and
+ * games and their rows cannot differ by an input.
+ *
+ * @param {{ team?: any, practice?: any, game?: any }} dashboard - `useDashboardData()`'s `team`, `practice`, `game`
+ */
+export function masterExportInputs({ team, practice, game }) {
+  return {
+    teams: team?.teams || [],
+    teamSummary: team?.summary || null,
+    practiceAssignments: practice?.scheduleAssignments || [],
+    gameAssignments: game?.assignments || [],
+  };
+}
+
+/**
  * What one generation of the master export came to. The panel turns each into its sentence.
  *
  * @typedef {{ rows: Array<Record<string, any>>, items: Array<import('@squadlogic/core/scheduleTbd.js').ScheduleTbdItem> }} TbdList

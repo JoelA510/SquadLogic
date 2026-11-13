@@ -61,6 +61,7 @@ import { PERMISSIONS } from '../constants/permissions.js';
 import { persistGameScheduleReview } from '../utils/gamePersistenceClient.js';
 import { parseGameUnscheduled } from '@squadlogic/core/scheduleTbd.js';
 import { carryGameIds, holdReason, isHeld } from '@squadlogic/core/gameIdentity.js';
+import { rekeyReview } from '../utils/gameReviewRekey.js';
 import { isUnknownPersistenceOutcome } from '../lib/persistenceRequest.js';
 import { useFieldClosures } from '../hooks/useFieldClosures.js';
 import { toBlackoutWarnings, toClosureInputs, toFieldBookings } from '../utils/fieldBookings.js';
@@ -1582,19 +1583,47 @@ export default function GameSchedulingPage() {
   // the saved schedule is read again; the staged review is left as it was.
   //
   // A save refused for a game's identity (409 `GAME_IDENTITY`: a game removed, of another season, named twice, or
-  // colliding with another) is refused because the page's saved schedule is older than the database's: it is read
-  // again too, so the next Apply starts from what is saved (owner, 2026-11-09; F11-3 task C6).
+  // colliding with another) names saved games by ids the database no longer holds where the review thinks. The saved
+  // schedule is read again (owner, 2026-11-09; F11-3 task C6), and when that read lands the staged review is matched to
+  // it again (`rekeyReview`, review R1): sending the same ids would be refused the same way. A review the new read does
+  // not change is discarded, in words, and the schedule is generated again.
   const refetchGame = game?.refetch;
+  const rekeyAgainstRef = useRef(/** @type {unknown} */ (null));
   const rereadAfterUnknownOutcome = useCallback(
     (err) => {
       if (isUnknownPersistenceOutcome(err)) refetchGame?.();
       else if (err?.code === 'GAME_IDENTITY') {
+        rekeyAgainstRef.current = savedGamesRef.current ?? null;
         markSavedStale();
         refetchSaved?.();
       }
     },
     [refetchGame, markSavedStale, refetchSaved]
   );
+  useEffect(() => {
+    const before = rekeyAgainstRef.current;
+    const saved = game?.assignments;
+    // Waiting for the read the refusal asked for: the saved rows are still the ones the refused review was made from.
+    if (before === null || !Array.isArray(saved) || saved === before) return;
+    rekeyAgainstRef.current = null;
+    if (!Array.isArray(reviewAssignments)) return;
+    const { review, changed } = rekeyReview(reviewAssignments, saved);
+    // The refusal's own words give way to what was done about it.
+    setApplyError(null);
+    if (changed) {
+      setReviewAssignments(review);
+      setApplyStatus('review');
+      setStatusMessage(
+        'The saved schedule changed while this review was open: its games were matched again to the saved schedule as it is now. Check the review and apply it again.'
+      );
+    } else {
+      setReviewAssignments(null);
+      setApplyStatus('discarded');
+      setStatusMessage(
+        'This review was discarded: the saved schedule was read again and matches the review as it was, so applying it again would be refused the same way. Generate the schedule again.'
+      );
+    }
+  }, [game?.assignments, reviewAssignments]);
 
   const handleApplySchedule = useCallback(async () => {
     if (!canManageSchedule || !canApplySchedule || reviewAssignments == null) return;

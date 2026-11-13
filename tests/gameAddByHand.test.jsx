@@ -1573,6 +1573,201 @@ describe('Codex re-review of #731, round 5: a later Apply keeps an earlier added
   });
 });
 
+describe('Codex re-review of #731, round 6: what a generated Apply saved is never appended to (C12)', () => {
+  /** Two more North Field slots (weeks 3 and 4), so a generated schedule leaves one empty to move into. */
+  async function twoMoreSlots() {
+    for (const [id, date, week] of [
+      ['gs-5', '2026-10-17', 3],
+      ['gs-6', '2026-10-24', 4],
+    ]) {
+      const { error } = await mockSupabase.from('game_slots').insert({
+        ...SLOTS[0],
+        id,
+        slot_date: date,
+        start: at(date, '09:00'),
+        end: at(date, '10:00'),
+        week_index: week,
+      });
+      if (error) throw new Error(error.message);
+    }
+  }
+  async function generate() {
+    const button = await screen.findByRole('button', {
+      name: 'Auto-Generate: run auto-scheduler optimization',
+    });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+    await screen.findByRole('button', { name: /apply schedule/i });
+  }
+  const types = (call) => call.runMetadata.results.warnings.map((w) => w.type);
+  const bannerSays = (pattern) =>
+    screen
+      .queryAllByTestId('conflict-item-team-double-booked')
+      .some((item) => pattern.test(item.textContent ?? ''));
+  /** Generate, add Comets v Meteors over the Published G1's hour (a double booking), Apply, wait for the reload. */
+  async function generatedApplyWithDoubleBooking() {
+    await twoMoreSlots();
+    await mount();
+    await generate();
+    await stage({
+      home: 'team-1',
+      away: 'team-3',
+      where: { field: 'f-south', date: '2026-10-03', start: '09:30', end: '10:30' },
+    });
+    await apply();
+    await screen.findByText(/Game schedule applied through the persistence workflow\./);
+    expect(types(SAVE.calls[0])).toContain('team-double-booked');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Add a game' })).toBeEnabled());
+    expect(bannerSays(/Synthetic Comets already plays/)).toBe(true);
+    const ids = new Set([...SLOTS.map((slot) => slot.id), 'gs-5', 'gs-6']);
+    const added = orgGames().find((g) => !ids.has(g.slot_id ?? g.game_slot_id));
+    if (!added) throw new Error('the added game was not saved at its new time');
+    return added;
+  }
+  async function moveTo(gameId, cellId) {
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Manual Override' }));
+    await screen.findByTestId('game-schedule-grid');
+    const card = within(screen.getByTestId(`game-card-${gameId}`));
+    const select = card.getByRole('combobox');
+    fireEvent.focus(select);
+    fireEvent.change(select, { target: { value: cellId } });
+    fireEvent.click(card.getByRole('button', { name: 'Move' }));
+    await screen.findByText(/Manual game move staged/);
+  }
+
+  /** Holds the saved schedule's reads while `gate.open` is false, until `gate.release()`. */
+  function holdSavedReads() {
+    const realFrom = mockSupabase.from.bind(mockSupabase);
+    const gate = { open: true, release: () => {} };
+    vi.spyOn(mockSupabase, 'from').mockImplementation((table) => {
+      const builder = realFrom(table);
+      if (gate.open || (table !== 'game_assignments' && table !== 'current_game_runs')) {
+        return builder;
+      }
+      const select = builder.select;
+      builder.select = (...args) => {
+        const query = select(...args);
+        const then = query.then;
+        const held = new Promise((resolve) => {
+          const prior = gate.release;
+          gate.release = () => {
+            prior();
+            resolve(undefined);
+          };
+        });
+        query.then = (ok, ko) => held.then(() => then.call(query, ok, ko));
+        return query;
+      };
+      return builder;
+    });
+    return gate;
+  }
+
+  it('Codex’s repro: the added game moved where nothing overlaps: the second save records no double booking, and the banner clears', async () => {
+    const added = await generatedApplyWithDoubleBooking();
+    await moveTo(added.id, 'f-north:gs-6');
+    await apply();
+    await waitFor(() => expect(SAVE.calls).toHaveLength(2));
+    await screen.findByText(/Game schedule applied through the persistence workflow\./);
+    // Nothing: the double booking is gone, and the generator's own warnings were about the generated review, which this
+    // save is not.
+    expect(SAVE.calls[1].runMetadata.results.warnings).toEqual([]);
+    await waitFor(() => expect(bannerSays(/Synthetic Comets already plays/)).toBe(false));
+  });
+
+  it('control: moved to a slot that still clashes with the Published game: the double booking is kept, saved and shown', async () => {
+    const added = await generatedApplyWithDoubleBooking();
+    await moveTo(added.id, 'f-south:gs-2');
+    await apply();
+    await waitFor(() => expect(SAVE.calls).toHaveLength(2));
+    await screen.findByText(/Game schedule applied through the persistence workflow\./);
+    const kept = SAVE.calls[1].runMetadata.results.warnings;
+    expect(kept.map((w) => w.type)).toEqual(['team-double-booked']);
+    expect(kept[0].message).toMatch(/^Synthetic Comets already plays/);
+    await waitFor(() => expect(bannerSays(/Synthetic Comets already plays/)).toBe(true));
+  });
+
+  it('generate, Apply with no added games: the saved warnings are the generator’s, exactly', async () => {
+    await mount();
+    await generate();
+    // The readiness panel lists the generator's own warnings, one "Conflict" card each.
+    const panelConflicts = () =>
+      [...screen.getByRole('region', { name: 'Game readiness' }).querySelectorAll('.insight-card')]
+        .filter((card) => card.querySelector('h3')?.textContent === 'Conflict')
+        .map((card) => card.querySelector('p')?.textContent);
+    const shown = panelConflicts();
+    expect(shown.length).toBeGreaterThan(0);
+    await apply();
+    await screen.findByText(/Game schedule applied through the persistence workflow\./);
+    expect(SAVE.calls[0].runMetadata.results.warnings.map((w) => w.message)).toEqual(shown);
+    // And shown once after it, not added to.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Add a game' })).toBeEnabled());
+    expect(panelConflicts()).toEqual(shown);
+  });
+
+  it('Apply is off, with the reason, while the saved schedule is read again after an Apply, and on once it is read', async () => {
+    const gate = holdSavedReads();
+    await mount();
+    await stage({
+      home: 'team-2',
+      away: 'team-4',
+      where: { field: 'f-north', date: '2026-10-24', start: '09:00', end: '10:00' },
+    });
+    gate.open = false;
+    await apply();
+    await screen.findByText(/Game schedule applied through the persistence workflow\./);
+    // The saved schedule is being read again: a move staged now cannot be applied yet, and the page says why.
+    await moveTo(G2, 'f-north:gs-3');
+    const button = screen.getByRole('button', { name: /apply schedule/i });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAccessibleDescription(
+      'Apply waits while the saved schedule is read again.'
+    );
+    fireEvent.click(button);
+    expect(SAVE.calls).toHaveLength(1);
+    // The read lands: Apply is on, the reason gone.
+    gate.open = true;
+    gate.release();
+    await waitFor(() => expect(button).toBeEnabled());
+    expect(screen.queryByText('Apply waits while the saved schedule is read again.')).toBeNull();
+  });
+
+  it('a flag the last Apply saved and the same clash staged again before the read lands: the banner says it once', async () => {
+    await twoMoreSlots();
+    const gate = holdSavedReads();
+    await mount();
+    await generate();
+    await stage({
+      home: 'team-1',
+      away: 'team-3',
+      where: { field: 'f-south', date: '2026-10-03', start: '09:30', end: '10:30' },
+    });
+    gate.open = false;
+    await apply();
+    await screen.findByText(/Game schedule applied through the persistence workflow\./);
+    // Before the saved schedule is read again, the added game (still the staged one) is moved where it still clashes.
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Manual Override' }));
+    await screen.findByTestId('game-schedule-grid');
+    const [cardEl] = screen
+      .getAllByTestId(/^game-card-/)
+      .filter((el) => /^game-card-added-/.test(el.getAttribute('data-testid') ?? ''));
+    if (!cardEl) throw new Error('no card for the added game');
+    const card = within(cardEl);
+    const select = card.getByRole('combobox');
+    fireEvent.focus(select);
+    fireEvent.change(select, { target: { value: 'f-south:gs-2' } });
+    fireEvent.click(card.getByRole('button', { name: 'Move' }));
+    await screen.findByText(/Manual game move staged/);
+    expect(
+      screen
+        .getAllByTestId('conflict-item-team-double-booked')
+        .filter((item) => /Synthetic Comets already plays/.test(item.textContent ?? ''))
+    ).toHaveLength(1);
+    gate.open = true;
+    gate.release();
+  });
+});
+
 /** The page's context for the pure rule, over the league above. */
 function context({ review }) {
   const names = new Map([

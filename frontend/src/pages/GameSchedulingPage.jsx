@@ -95,6 +95,7 @@ import {
 } from '../utils/gamePublishedText.js';
 import {
   addedGameWarningsToSave,
+  addedWarningsNotShown,
   describeNewSlot,
   planAddedGame,
   resolveAddedSlots,
@@ -672,6 +673,15 @@ export default function GameSchedulingPage() {
   const [schedulerStatus, setSchedulerStatus] = useState('idle');
   const [schedulerProgress, setSchedulerProgress] = useState(null);
   const [schedulerResult, setSchedulerResult] = useState(null);
+  // What this page's last Apply saved over the current generated result, kept as two sets and never written into the
+  // result itself (Codex re-review of #731, C12): the generator's own warnings, saved only when the review applied was
+  // the generated one, and the flags of games added by hand, worked out afresh on every Apply. Null until an Apply
+  // follows a generation: the generated review is then still the one being applied.
+  const [appliedRunWarnings, setAppliedRunWarnings] = useState(
+    /** @type {null | { generator: Array<Record<string, any>>, manual: Array<Record<string, any>> }} */ (
+      null
+    )
+  );
   const [schedulerError, setSchedulerError] = useState(null);
   const [applyStatus, setApplyStatus] = useState('idle');
   const [applyError, setApplyError] = useState(null);
@@ -1069,6 +1079,8 @@ export default function GameSchedulingPage() {
     : loading.game || savedIsStale
       ? 'reading'
       : 'ready';
+  // Apply waits for the saved schedule while it is read (after an Apply): the next save carries its flags forward (C12).
+  const applyWaitsForRead = savedReadState === 'reading';
   /** Why the Published controls are off right now, or null. Said once, in the bar, and pointed at by each switch. */
   let publishedReason = null;
   if (!canChangePublished) {
@@ -1362,13 +1374,17 @@ export default function GameSchedulingPage() {
     if (!source) return game?.snapshot ?? {};
     return {
       ...source,
+      // After an Apply, what it saved: the two sets, each once (C12); before it, the generator's own.
+      warnings: appliedRunWarnings
+        ? [...appliedRunWarnings.generator, ...appliedRunWarnings.manual]
+        : (source.warnings ?? []),
       generatedAt: schedulerResult.generatedAt,
       unscheduled: (schedulerResult.unscheduled ?? []).map((entry) => ({
         ...entry,
         matchup: formatUnscheduledMatchup(entry),
       })),
     };
-  }, [game?.snapshot, schedulerResult]);
+  }, [appliedRunWarnings, game?.snapshot, schedulerResult]);
 
   const reviewSummary = useMemo(
     () =>
@@ -1465,6 +1481,7 @@ export default function GameSchedulingPage() {
 
       setReviewAssignments(nextAssignments);
       setSchedulerResult(nextResult);
+      setAppliedRunWarnings(null);
       setSchedulerProgress({
         iteration: 1,
         bestScore: summary.scheduledRate,
@@ -1513,6 +1530,7 @@ export default function GameSchedulingPage() {
     setSchedulerStatus('idle');
     setSchedulerProgress(null);
     setSchedulerResult(null);
+    setAppliedRunWarnings(null);
     setSchedulerError(null);
     setReviewAssignments(null);
     setApplyStatus('idle');
@@ -1523,6 +1541,7 @@ export default function GameSchedulingPage() {
   const discardReview = useCallback(() => {
     setReviewAssignments(null);
     setSchedulerResult(null);
+    setAppliedRunWarnings(null);
     setApplyStatus('discarded');
     setApplyError(null);
     setStatusMessage(null);
@@ -1535,6 +1554,7 @@ export default function GameSchedulingPage() {
       resultSummary,
       resultDetails,
       knownSlotIds = undefined,
+      generatorWarnings = [],
       extraWarnings = [],
     }) => {
       const persistenceAssignments = assignments.map(toPersistenceAssignment);
@@ -1586,8 +1606,9 @@ export default function GameSchedulingPage() {
               ? parseGameUnscheduled(resultDetails.unscheduled)
               : undefined,
             sharedSlotUsage: resultDetails?.sharedSlotUsage ?? [],
-            // A game added by hand carries its double bookings (flagged, not blocked: PR 8), so the saved run says them.
-            warnings: [...(resultDetails?.evaluation?.warnings ?? []), ...extraWarnings],
+            // The generator's own warnings when the generated review is the one saved, and the flags of the games added
+            // by hand (flagged, not blocked: PR 8), each set given by the caller (C12).
+            warnings: [...generatorWarnings, ...extraWarnings],
           },
           completedAt: now,
         },
@@ -1730,6 +1751,8 @@ export default function GameSchedulingPage() {
 
   const handleApplySchedule = useCallback(async () => {
     if (!canManageSchedule || !canApplySchedule || reviewAssignments == null) return;
+    // Not while the saved schedule is being read (after an Apply): the flags it carries forward come from it (C12).
+    if (applyWaitsForRead) return;
 
     setApplyStatus('applying');
     setApplyError(null);
@@ -1828,6 +1851,11 @@ export default function GameSchedulingPage() {
       savedGames: savedAssignments,
       names: { isExternal: isExternalTeam, fieldName: fieldNameOf, divisionName: divisionNameOf },
     });
+    // The generator's own warnings, unchanged, only while the review being applied is the generated one (C12).
+    const generatorWarnings =
+      schedulerResult && appliedRunWarnings === null
+        ? (schedulerResult.evaluation?.warnings ?? [])
+        : [];
     // The summary of the games actually saved (C7): a generated review's own summary does not count a game added by
     // hand. The generator's byes and unscheduled games stay; with no generation the save makes it from the games
     // itself, as it always did.
@@ -1847,6 +1875,7 @@ export default function GameSchedulingPage() {
         resultSummary: finalSummary,
         resultDetails: schedulerResult,
         knownSlotIds: new Set(slotRows.map((row) => String(row.id))),
+        generatorWarnings,
         extraWarnings: finalWarnings,
       });
 
@@ -1863,24 +1892,13 @@ export default function GameSchedulingPage() {
         }))
       );
       setReviewAssignments(null);
-      // A generated review's result is what the banner and the readiness panel read after Apply, so it is brought to
-      // what the run saved: the summary of the final games (C7) and the added games' flags with the generator's (C3).
+      // A generated review's result is what the banner and the readiness panel read after Apply, so its summary is
+      // brought to the final games (C7). Its warnings stay the generator's own; what this Apply saved is kept beside
+      // them, each set replaced, never appended to (C12).
       setSchedulerResult((current) =>
-        current
-          ? {
-              ...current,
-              summary: finalSummary ?? current.summary,
-              ...(current.evaluation && finalWarnings.length > 0
-                ? {
-                    evaluation: {
-                      ...current.evaluation,
-                      warnings: [...(current.evaluation.warnings ?? []), ...finalWarnings],
-                    },
-                  }
-                : {}),
-            }
-          : current
+        current ? { ...current, summary: finalSummary ?? current.summary } : current
       );
+      setAppliedRunWarnings({ generator: generatorWarnings, manual: finalWarnings });
       setApplyStatus('applied');
       // A game moved, flipped or regenerated keeps its id, its Published state and its history (the save updates it
       // in place). A game that had a Published history and that the new schedule no longer holds stays in the old run
@@ -1913,6 +1931,7 @@ export default function GameSchedulingPage() {
     fieldNameOf,
     game?.runId,
     game?.warnings,
+    appliedRunWarnings,
     gameSlotRows,
     isExternalTeam,
     localAssignments,
@@ -1922,6 +1941,7 @@ export default function GameSchedulingPage() {
     rereadAfterUnknownOutcome,
     reviewAssignments,
     savedAssignments,
+    applyWaitsForRead,
     schedulerResult,
     withLeftSlots,
   ]);
@@ -2391,7 +2411,11 @@ export default function GameSchedulingPage() {
         warnings={[
           ...(reviewSnapshot?.warnings ?? game?.warnings ?? []),
           ...blackoutWarnings,
-          ...addedGameWarnings,
+          // The staged added games' flags, less those already shown from what the last Apply saved (C12).
+          ...addedWarningsNotShown(
+            reviewSnapshot?.warnings ?? game?.warnings ?? [],
+            addedGameWarnings
+          ),
         ]}
       />
 
@@ -2458,6 +2482,13 @@ export default function GameSchedulingPage() {
                       Only an organization admin can apply a game schedule.
                     </p>
                   )}
+                {/* The saved schedule is read again after an Apply; the next Apply waits for it, because the flags it
+                    carries forward come from it (C12). */}
+                {canApplySchedule && isReviewing && applyWaitsForRead && (
+                  <p id="game-apply-waits-for-read" className="mt-1 text-text-muted">
+                    Apply waits while the saved schedule is read again.
+                  </p>
+                )}
               </div>
             </div>
             {isReviewing && canManageSchedule && (
@@ -2473,8 +2504,14 @@ export default function GameSchedulingPage() {
                   variant="primary"
                   onClick={handleApplySchedule}
                   loading={applyStatus === 'applying'}
-                  disabled={applyStatus === 'applying' || !canApplySchedule}
-                  aria-describedby={canApplySchedule ? undefined : 'game-apply-admin-only'}
+                  disabled={applyStatus === 'applying' || !canApplySchedule || applyWaitsForRead}
+                  aria-describedby={
+                    !canApplySchedule
+                      ? 'game-apply-admin-only'
+                      : applyWaitsForRead
+                        ? 'game-apply-waits-for-read'
+                        : undefined
+                  }
                 >
                   Apply Schedule
                 </Button>

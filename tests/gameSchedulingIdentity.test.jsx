@@ -574,7 +574,17 @@ describe('the re-key waits for the CURRENT run’s games, not any new answer (F1
         const [
           { id: _gone, run_id: _r, published: _q, published_at: _qa, published_by: _qb, ...again },
         ] = savedGames().filter((row) => row.id === GAME(1));
-        await realSave([...carried, again]);
+        // At another slot of its week, so it is a new row (the same place would update game 1 in place).
+        await realSave([
+          ...carried,
+          {
+            ...again,
+            game_slot_id: slotId(1, 0),
+            slot_id: slotId(1, 0),
+            start: `${SATURDAYS[0]}T13:00:00+00:00`,
+            end: `${SATURDAYS[0]}T14:00:00+00:00`,
+          },
+        ]);
         holding = true;
         throw Object.assign(new Error('game is of another schedule'), {
           code: 'GAME_IDENTITY',
@@ -614,5 +624,46 @@ describe('the re-key waits for the CURRENT run’s games, not any new answer (F1
     expect(sentIds.filter(Boolean)).toHaveLength(6);
     // Nothing was inserted: six in the current run, and game 1 left behind in the first.
     expect(orgGames()).toHaveLength(7);
+  });
+
+  it('a re-read that fails leaves the review as it was, armed, and says so', async () => {
+    seed();
+    const realFrom = mockSupabase.from.bind(mockSupabase);
+    let failing = false;
+    vi.spyOn(mockSupabase, 'from').mockImplementation((table) => {
+      const builder = realFrom(table);
+      if (table !== 'game_assignments' || !failing) return builder;
+      const realSelect = builder.select.bind(builder);
+      builder.select = (...args) => {
+        const query = realSelect(...args);
+        query.range = () => Promise.resolve({ data: null, error: { message: 'boom' } });
+        return query;
+      };
+      return builder;
+    });
+    SAVE.sent = [];
+    SAVE.impl = async () => {
+      failing = true;
+      throw Object.assign(new Error('game is of another schedule'), {
+        code: 'GAME_IDENTITY',
+        status: 409,
+      });
+    };
+    await mount();
+    const run = await screen.findByRole('button', {
+      name: 'Auto-Generate: run auto-scheduler optimization',
+    });
+    await waitFor(() => expect(run).toBeEnabled());
+    fireEvent.click(run);
+    const apply = await screen.findByRole('button', { name: /apply schedule/i });
+    await waitFor(() => expect(apply).toBeEnabled());
+    fireEvent.click(apply);
+    expect(
+      await screen.findByText(
+        /The saved schedule could not be read again, so this review was not matched to it/
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/This review was discarded/)).toBeNull();
+    expect(screen.getByRole('button', { name: /apply schedule/i })).toBeInTheDocument();
   });
 });

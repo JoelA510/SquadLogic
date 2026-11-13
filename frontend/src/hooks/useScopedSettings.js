@@ -81,6 +81,13 @@ export async function readScopedSettingRows(
   return (await Promise.all(reads)).flat();
 }
 
+/** Name order, then id, for the levels' lists. @template {{ id: string, name: string }} T @param {T[]} list */
+const byName = (list) =>
+  [...list].sort(
+    (a, b) =>
+      String(a.name).localeCompare(String(b.name)) || String(a.id).localeCompare(String(b.id))
+  );
+
 /**
  * One read of what the panel shows: the season's programs and divisions, then the scoped setting rows of the
  * organization and of those programs and divisions. Answers which organization and season it was read for, so a read
@@ -91,28 +98,28 @@ export async function readScopedSettingRows(
 async function readScopedSettings(organizationId, seasonId) {
   const readFor = `${organizationId}|${seasonId}`;
   try {
-    const [programRead, divisionRead] = await Promise.all([
-      seasonId
-        ? supabase
-            .from('programs')
-            .select('id, name, is_default')
-            .eq('organization_id', organizationId)
-            .eq('season_settings_id', seasonId)
-            .order('name', { ascending: true })
-        : Promise.resolve({ data: [], error: null }),
-      seasonId
-        ? supabase
-            .from('divisions')
-            .select('id, name, program_id')
-            .eq('organization_id', organizationId)
-            .eq('season_settings_id', seasonId)
-            .order('name', { ascending: true })
-        : Promise.resolve({ data: [], error: null }),
-    ]);
-    if (programRead.error) throw programRead.error;
-    if (divisionRead.error) throw divisionRead.error;
-    const programs = programRead.data || [];
-    const divisions = divisionRead.data || [];
+    // Each list paged to completion (ordered by `id`, a unique key, so no page skips or repeats a row), then put in
+    // name order here: the server's row cap must never cut a level out of the table.
+    const [programRows, divisionRows] = seasonId
+      ? await Promise.all([
+          fetchAllPages(() =>
+            supabase
+              .from('programs')
+              .select('id, name, is_default')
+              .eq('organization_id', organizationId)
+              .eq('season_settings_id', seasonId)
+          ),
+          fetchAllPages(() =>
+            supabase
+              .from('divisions')
+              .select('id, name, program_id')
+              .eq('organization_id', organizationId)
+              .eq('season_settings_id', seasonId)
+          ),
+        ])
+      : [[], []];
+    const programs = byName(programRows);
+    const divisions = byName(divisionRows);
     const rows = await readScopedSettingRows(supabase, {
       organizationId,
       programIds: programs.map((p) => String(p.id)),
@@ -166,24 +173,35 @@ export function useScopedSettings(organizationId, seasonId) {
     latest.current = readKey;
   }, [readKey]);
 
-  /** Read again; true when the read succeeded for the pair still shown. */
+  // One generation counter for every read (the first read, a save's read-back, the Programs signal): each read takes
+  // the next number when it starts, and only the latest one's answer is applied. A read that started earlier and
+  // lands later (a refresh begun before a save, landing after the save's read-back) is dropped, never shown over it.
+  const generation = useRef(0);
+
+  /**
+   * Read again. Resolves true when the read succeeded, or when a later read superseded it (that one's answer, error
+   * included, is the one shown); false when it failed or the pair has changed since.
+   */
   const load = useCallback(async () => {
     if (!organizationId) return false;
+    const mine = ++generation.current;
     const next = await readScopedSettings(organizationId, seasonId ?? null);
     if (latest.current !== next.readFor) return false;
+    if (mine !== generation.current) return true;
     setState(next);
     return next.error === null;
   }, [organizationId, seasonId]);
 
   useEffect(() => {
     if (!organizationId) return undefined;
-    let cancelled = false;
+    const mine = ++generation.current;
     (async () => {
       const next = await readScopedSettings(organizationId, seasonId ?? null);
-      if (!cancelled && latest.current === next.readFor) setState(next);
+      if (mine === generation.current && latest.current === next.readFor) setState(next);
     })();
     return () => {
-      cancelled = true;
+      // a read begun for this pair is superseded once the pair changes or the panel goes
+      if (generation.current === mine) generation.current += 1;
     };
   }, [organizationId, seasonId]);
 

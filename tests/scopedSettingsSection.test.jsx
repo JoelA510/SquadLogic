@@ -59,6 +59,7 @@ const { default: ScopedSettingsSection } =
 const { default: ProgramsSection } =
   await import('../frontend/src/components/settings/modules/ProgramsSection.jsx');
 const { readScopedSettingRows } = await import('../frontend/src/hooks/useScopedSettings.js');
+const { REFRESH_TOPICS, emitRefresh } = await import('../frontend/src/lib/refreshBus.js');
 
 const division = (id, name, programId, season = SEASON) => ({
   id,
@@ -653,4 +654,75 @@ describe('a change in the Programs section above (Codex C4 on #737)', () => {
     await screen.findByRole('rowheader', { name: 'Program: Seniors' });
     expect(select('Program: Seniors').value).toBe('');
   });
+});
+
+/**
+ * Hold only the NEXT read of `table` (the mock takes its rows when the read is made, so a held read carries the rows
+ * as they were then, as a slow answer from the server does); later reads go through.
+ * @param {string} table
+ */
+function holdNextRead(table) {
+  /** @type {() => void} */
+  let release = () => {};
+  const gate = new Promise((resolve) => {
+    release = () => resolve(undefined);
+  });
+  let armed = true;
+  let started = false;
+  const realFrom = mockSupabase.from.bind(mockSupabase);
+  vi.spyOn(mockSupabase, 'from').mockImplementation((t) => {
+    const builder = realFrom(t);
+    if (t !== table || !armed) return builder;
+    armed = false;
+    started = true;
+    return wrapRead(builder, (run) => (ok, fail) => gate.then(() => run(ok, fail)));
+  });
+  return { release, started: () => started };
+}
+
+describe('overlapping reads of one organization and season (Codex C5 on #737)', () => {
+  it('a refresh begun before a save and landing after its read-back does not put the old value back', async () => {
+    await ready();
+    expect(select('Division: U8').value).toBe('');
+    // a Programs refresh starts, and its read of the settings is slow (it holds the rows from before the save)
+    const held = holdNextRead('scoped_settings');
+    act(() => emitRefresh(REFRESH_TOPICS.PROGRAMS));
+    await waitFor(() => expect(held.started()).toBe(true));
+    // the save, and its read-back, land first
+    fireEvent.change(select('Division: U8'), { target: { value: 'true' } });
+    await waitFor(() =>
+      expect(screen.getByRole('status').textContent).toBe('Saved. Division: U8: Count.')
+    );
+    expect(appliesNow('Division: U8')).toBe('Counted, set here');
+    // then the old refresh lands: superseded, it is dropped
+    held.release();
+    await settle();
+    expect(select('Division: U8').value).toBe('true');
+    expect(appliesNow('Division: U8')).toBe('Counted, set here');
+    expect(screen.getByRole('status').textContent).toBe('Saved. Division: U8: Count.');
+  });
+});
+
+describe('more than 1,000 divisions in a season (Codex C6 on #737)', () => {
+  it("lists every division, past the server's 1,000-row answer, and reads each one's setting", async () => {
+    // the mock cuts every list answer at 1,000 rows, as the hosted API does
+    const many = Array.from({ length: 1001 }, (_, i) => `d-many-${String(i).padStart(4, '0')}`);
+    seedMockDb({
+      divisions: many.map((id, i) =>
+        division(id, `Many ${String(i).padStart(4, '0')}`, 'p-default')
+      ),
+    });
+    // the last by id, the one a single 1,000-row answer leaves out first
+    await preset('division', 'd-many-1000', true);
+    await ready();
+    const divisionHeaders = screen
+      .getAllByRole('rowheader')
+      .filter((h) => h.textContent.startsWith('Division: '));
+    // 1,001 plus the seed's U8, U10 and U12
+    expect(divisionHeaders).toHaveLength(1004);
+    expect(appliesNow('Division: Many 1000')).toBe('Counted, set here');
+    expect(select('Division: Many 1000').value).toBe('true');
+    // CONTROL: the divisions past the first 1,000 by id (the seed's own) are there too
+    expect(appliesNow('Division: U8')).toBe('Not counted, by default');
+  }, 30000);
 });

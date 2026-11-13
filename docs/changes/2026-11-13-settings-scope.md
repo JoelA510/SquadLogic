@@ -565,6 +565,12 @@ text above, each a decision of the build:
     chunks of 100), each read paged to completion (`fetchAllPages`).
   - **C4:** the Programs section's writes signal `REFRESH_TOPICS.PROGRAMS` (`refreshBus.js`), and the panel reads
     again.
+- **Codex's second round on #737:**
+  - **C5:** every read (the first read, a save's read-back, the Programs signal) takes a number from one generation
+    counter, and only the latest read's answer is applied. A refresh that started before a save and lands after the
+    save's read-back is dropped.
+  - **C6:** the season's programs and divisions are each paged to completion (`fetchAllPages`, by `id`) and then put in
+    name order. `usePrograms` still reads both unpaged (a follow-up; the panel does not depend on it).
 - **Not done here (S8):** the program delete and merge dialogs do not yet say that a program's values go with it; neither
   task list names it, and the stop condition forbids markup changes outside the panel. A follow-up.
 

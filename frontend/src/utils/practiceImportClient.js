@@ -23,6 +23,7 @@
  */
 
 import { practiceImportReadsHeader } from '@squadlogic/core/practiceImport/parseRows.js';
+import { describeTooManyColumns } from '@squadlogic/core/scheduleImport/reasonCodes.js';
 import {
   PRACTICE_IMPORT_PREVIEW_STALE,
   practiceImportConfirmCounts,
@@ -141,7 +142,7 @@ export async function startPracticeImport(
   // open slot (Codex on #732).
   if (headers.length > PRACTICE_IMPORT_STAGE_LIMITS.MAX_HEADERS) {
     throw refusal(
-      `The file has ${headers.length} columns; one import reads at most ${PRACTICE_IMPORT_STAGE_LIMITS.MAX_HEADERS}. Remove the columns it does not need and choose it again.`,
+      describeTooManyColumns(headers.length, PRACTICE_IMPORT_STAGE_LIMITS.MAX_HEADERS),
       'too-many-columns'
     );
   }

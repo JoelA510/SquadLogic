@@ -45,6 +45,7 @@ import {
   parseScheduleLength,
   parseScheduleTime,
 } from '../scheduleImport/parseRows.js';
+import { describeTooManyColumns } from '../scheduleImport/reasonCodes.js';
 import { PRACTICE_IMPORT_LIMITS, PRACTICE_IMPORT_REASON as R } from './reasonCodes.js';
 import { practiceLabelKey, practiceTuple } from './slotKey.js';
 
@@ -265,7 +266,7 @@ export function parsePracticeRows({ headers, rows, season, dates }) {
   if (headers.length > PRACTICE_IMPORT_LIMITS.MAX_COLUMNS) {
     return fileRefusal(
       R.TOO_MANY_COLUMNS,
-      `The file has ${headers.length} columns; one import reads at most ${PRACTICE_IMPORT_LIMITS.MAX_COLUMNS}. Remove the columns it does not need and choose it again.`
+      describeTooManyColumns(headers.length, PRACTICE_IMPORT_LIMITS.MAX_COLUMNS)
     );
   }
 

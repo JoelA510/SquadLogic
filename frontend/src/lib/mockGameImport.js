@@ -34,6 +34,7 @@
 import { evaluateGameSchedule } from '@squadlogic/core/gameMetrics.js';
 import {
   SCHEDULE_IMPORT_CHUNK_LIMITS,
+  SCHEDULE_IMPORT_LIMITS,
   SCHEDULE_IMPORT_RETIRED_ROW_REFUSALS,
   SCHEDULE_IMPORT_ROW_REFUSALS,
   diffScheduleImportConfirmCounts,
@@ -1931,6 +1932,8 @@ function httpRefusal(status, body) {
  * 409 `game_import_preview_stale` with both sets of counts and the fresh preview, and nothing is written; a database
  * refusal keeps its code in `code`.
  *
+ * **Mirrored from the request shape:** more than 200 headers is a 400 `Invalid payload`, as `GamesImportPayload` answers.
+ *
  * **Not mirrored:** the JWT, the rate limit, the payload size limit, Zod's shape errors beyond the ones named here,
  * the demo fence (the database's own fence refuses a demo's job) and the audit rows of the staging step.
  *
@@ -1946,7 +1949,14 @@ export function handleGameImportFunction(db, body, ctx) {
   const now = ctx.now ?? (() => new Date().toISOString());
   if (!ctx.currentUserId)
     return done(httpRefusal(401, { status: 'error', message: 'Unauthorized' }));
-  if (!body?.organization_id || !body?.import_job_id) {
+  const headers = body?.headers ?? [];
+  // The request shape's own cap (`GamesImportPayload.headers`, at most 200): a 400 before anything is read.
+  if (
+    !body?.organization_id ||
+    !body?.import_job_id ||
+    !Array.isArray(headers) ||
+    headers.length > SCHEDULE_IMPORT_LIMITS.MAX_COLUMNS
+  ) {
     return done(httpRefusal(400, { status: 'error', message: 'Invalid payload' }));
   }
   if (!ctx.isOrgAdmin(body.organization_id)) {
@@ -2066,7 +2076,7 @@ export function handleGameImportFunction(db, body, ctx) {
   }
   const chunk = stageScheduleChunk({
     clean: sanitizeImportText,
-    headers: Array.isArray(body.headers) ? body.headers : [],
+    headers,
     rows,
     season: {
       timeZone: season.timezone ?? null,

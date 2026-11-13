@@ -13,6 +13,7 @@ import {
   describeScheduleImportReason,
   describeScheduleImportSkip,
   parseScheduleRows,
+  splitScheduleImportHeaders,
   proposeScheduleMapping,
   resolveScheduleRows,
   scheduleImportConfirmCounts,
@@ -27,6 +28,7 @@ import Button from '../ui/Button.jsx';
 import { NAMED, NamedList, Notice } from './importParts.jsx';
 import { csvBlob, saveFile } from '../../utils/scheduleDownloads.js';
 import { importFileSizeProblem } from '../../utils/importFileLimits.js';
+import { sanitizeImportText } from '../../utils/importRows.js';
 import { practiceImportConfirmCounts } from '@squadlogic/core/practiceImport/previewCounts.js';
 import {
   confirmGameImport,
@@ -158,7 +160,14 @@ const KINDS = Object.freeze({
       'Bring in a schedule that already exists. Conflicts in the file are imported and flagged, never refused; a game with no time is kept on its date as TIME TBD.',
     columns:
       'Date, Start Time, End Time (or Length in minutes), Venue, Field, Division, Home Team, Away Team. Optional: Game ID, Week. Any other column is dropped and never stored.',
-    parseFile: parseScheduleRows,
+    // The browser's early reading is of what the client SENDS: the columns the import reads, found by name, so a wide
+    // file is read whole and never refused for its width (the parse refuses more headers than a request takes).
+    parseFile: (/** @type {any} */ input) =>
+      parseScheduleRows({
+        headers: splitScheduleImportHeaders(input.headers, sanitizeImportText).read,
+        rows: input.rows,
+        season: input.season,
+      }),
     start: startGameImport,
     readStaged: readStagedGameRows,
     readLeague: readGameImportLeague,

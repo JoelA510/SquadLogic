@@ -29,7 +29,12 @@ import {
   venueDecisionKey,
 } from './mapping.js';
 import { SCHEDULE_IMPORT_COLUMNS, parseScheduleRows } from './parseRows.js';
-import { SCHEDULE_IMPORT_STAGED_FLAGS } from './reasonCodes.js';
+import {
+  SCHEDULE_IMPORT_LIMITS,
+  SCHEDULE_IMPORT_REASON,
+  SCHEDULE_IMPORT_STAGED_FLAGS,
+  describeTooManyColumns,
+} from './reasonCodes.js';
 
 /** The staged flags as plain text, for a membership test of any code. */
 const STAGED_FLAGS = /** @type {readonly string[]} */ (SCHEDULE_IMPORT_STAGED_FLAGS);
@@ -113,8 +118,43 @@ export const SCHEDULE_IMPORT_CHUNK_LIMITS = Object.freeze({
   MAX_CHUNK_ROWS: 500,
   /** A cell longer than this is cut before it is read (no label of a schedule is this long). */
   MAX_CELL_LENGTH: 500,
-  MAX_HEADERS: 200,
 });
+
+/**
+ * Which headers of a games file the import reads, found by NAME as the stage finds them (each cleaned by `clean`, then
+ * its label key). The browser sends these and only these, so a file is never cut by position, a column the import
+ * reads is read wherever it stands (column 230 as well as column 3), and a file's width is never a reason to refuse it.
+ *
+ * `read` is those headers as the file wrote them (the rows are keyed by them), in the file's order, a repeat kept (the
+ * parse refuses it as `duplicate-column`). `dropped` is every other header that is not blank, cleaned and trimmed, the
+ * way the parse names a column it drops. A blank header is in neither: the stage drops it unread too.
+ *
+ * @param {unknown[]} headers  the header row as the file wrote it
+ * @param {(value: unknown, maxLength: number) => string} clean  `sanitizeImportText`
+ * @returns {{ read: string[], dropped: string[] }}
+ */
+export function splitScheduleImportHeaders(headers, clean) {
+  if (!Array.isArray(headers)) {
+    throw new TypeError('splitScheduleImportHeaders: headers must be an array');
+  }
+  if (typeof clean !== 'function') {
+    throw new TypeError('splitScheduleImportHeaders: clean must be the cell cleaner');
+  }
+  const keys = new Set(
+    Object.values(SCHEDULE_IMPORT_COLUMNS).map((name) => scheduleLabelKey(name))
+  );
+  /** @type {string[]} */
+  const read = [];
+  /** @type {string[]} */
+  const dropped = [];
+  for (const header of headers) {
+    const cleaned = clean(header, SCHEDULE_IMPORT_CHUNK_LIMITS.MAX_CELL_LENGTH);
+    if (cleaned.trim() === '') continue;
+    if (keys.has(scheduleLabelKey(cleaned))) read.push(String(header ?? ''));
+    else dropped.push(cleaned.trim());
+  }
+  return { read, dropped };
+}
 
 /**
  * One request's rows, read and made ready to stage: what the Edge function does with a chunk of a games file
@@ -149,15 +189,37 @@ export function stageScheduleChunk({ headers, rows, season, rowOffset, clean }) 
   }
   /** @param {unknown} value */
   const cleanCell = (value) => clean(value, SCHEDULE_IMPORT_CHUNK_LIMITS.MAX_CELL_LENGTH);
+  const empty = {
+    rows: 0,
+    ok: 0,
+    tbd: 0,
+    refused: 0,
+    flagged: 0,
+    by_reason: {},
+    dropped_columns: [],
+    warnings: [],
+    refused_rows: [],
+  };
+  // More headers than one request may send is refused, never cut. Counted as SENT, a blank header included, as the
+  // Edge request shape counts them (which refuses such a request with a 400 before this runs: this is the backstop).
+  if (headers.length > SCHEDULE_IMPORT_LIMITS.MAX_COLUMNS) {
+    return {
+      refusal: {
+        code: SCHEDULE_IMPORT_REASON.TOO_MANY_COLUMNS,
+        message: describeTooManyColumns(headers.length, SCHEDULE_IMPORT_LIMITS.MAX_COLUMNS),
+      },
+      staged: [],
+      summary: empty,
+    };
+  }
   const byKey = new Map(
     Object.values(SCHEDULE_IMPORT_COLUMNS).map((name) => [scheduleLabelKey(name), name])
   );
-  // The header row as the file wrote it, cut to what a header can be; names the allowlist does not hold stay in the
-  // list (so the parse can report them as dropped) and their VALUES are never read.
+  // The header row as sent; names the allowlist does not hold stay in the list (so the parse can report them as
+  // dropped) and their VALUES are never read. Every header is read: nothing cuts the row by position.
   // A VALUE is read by the header as the file wrote it (the row is keyed by that); the cleaned name only says which
   // column it is. Reading by the cleaned name lost every value of a column whose header had a stray space.
   const named = headers
-    .slice(0, SCHEDULE_IMPORT_CHUNK_LIMITS.MAX_HEADERS)
     .map((h) => ({ original: String(h ?? ''), cleaned: cleanCell(h) }))
     .filter((h) => h.cleaned.trim() !== '');
   const fileHeaders = named.map((h) => h.cleaned);
@@ -172,17 +234,6 @@ export function stageScheduleChunk({ headers, rows, season, rowOffset, clean }) 
     return out;
   });
   const parsed = parseScheduleRows({ headers: fileHeaders, rows: allowlisted, season, rowOffset });
-  const empty = {
-    rows: 0,
-    ok: 0,
-    tbd: 0,
-    refused: 0,
-    flagged: 0,
-    by_reason: {},
-    dropped_columns: [],
-    warnings: [],
-    refused_rows: [],
-  };
   if (!parsed.ok) return { refusal: parsed.refusal, staged: [], summary: empty };
   const staged = parsed.rows.map((row, i) => {
     /** @type {Record<string, string>} */

@@ -1122,12 +1122,16 @@ BEGIN
                AND (pa.effective_date_range IS NULL OR NOT isempty(pa.effective_date_range))
                AND pa.id NOT IN (SELECT a.existing_id FROM _pi_asg a WHERE a.existing_id IS NOT NULL)
         )
-        SELECT sv.id, sv.team_id, sv.team, sv.day, sv.start_time, sv.end_time, sv.field_id, sv.field_subunit_id, sv.rng,
-               daterange(sv.lo, sv.hi, '[]') AS live
-          FROM saved sv
-          JOIN span sp ON sp.team_ref = sv.team_id
-         WHERE (sv.lo IS NULL OR sv.hi IS NULL OR sv.lo <= sv.hi)
-           AND daterange(sv.lo, sv.hi, '[]') && sp.rng;
+        , lived AS (
+            -- (A range that ends before its slot starts holds nothing: empty, never a constructor error.)
+            SELECT sv.*, CASE WHEN sv.lo IS NULL OR sv.hi IS NULL OR sv.lo <= sv.hi THEN daterange(sv.lo, sv.hi, '[]')
+                              ELSE 'empty'::daterange END AS live
+              FROM saved sv
+        )
+        SELECT lv.id, lv.team_id, lv.team, lv.day, lv.start_time, lv.end_time, lv.field_id, lv.field_subunit_id, lv.rng, lv.live
+          FROM lived lv
+          JOIN span sp ON sp.team_ref = lv.team_id
+         WHERE lv.live && sp.rng;
         -- New in this file, for a team with a row leaving on a date this row is live too: a probable move (the pair is the
         -- team, as core's pairProbableMoves pairs it, narrowed to rows whose dates meet), not added unless the admin ticked it.
         UPDATE _pi_asg a SET probable_move = true, held_back = NOT (a.row_key = ANY (v_add))

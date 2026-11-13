@@ -607,7 +607,9 @@ INSERT INTO public.practice_assignments (organization_id, team_id, slot_id, prac
     ('a1111111-1111-1111-1111-111111111111', pg_temp.u(922), pg_temp.u(930), pg_temp.u(930), '[2026-09-07,2026-11-20]', 'manual', 'manual'),
     ('a1111111-1111-1111-1111-111111111111', pg_temp.u(923), pg_temp.u(931), pg_temp.u(931), '[2026-09-07,2026-11-20]', 'manual', 'manual'),
     ('a1111111-1111-1111-1111-111111111111', pg_temp.u(924), pg_temp.u(932), pg_temp.u(932), '[2026-09-07,2026-09-30]', 'manual', 'manual'),
-    ('a1111111-1111-1111-1111-111111111111', pg_temp.u(925), pg_temp.u(933), pg_temp.u(933), '[2026-09-07,2026-11-20]', 'manual', 'manual');
+    ('a1111111-1111-1111-1111-111111111111', pg_temp.u(925), pg_temp.u(933), pg_temp.u(933), '[2026-09-07,2026-11-20]', 'manual', 'manual'),
+    -- MT also holds a row whose range ends before its slot starts: it is live on no date, and is neither leaving nor an error.
+    ('a1111111-1111-1111-1111-111111111111', pg_temp.u(925), pg_temp.u(930), pg_temp.u(930), '[2026-09-07,2026-09-10]', 'manual', 'manual');
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 INSERT INTO t_job VALUES ('J7', pg_temp.job('dates.csv'));
 SELECT pg_temp.stage((SELECT id FROM t_job WHERE k = 'J7'), 1, 'placement', 'CX', 'C Div', 'tue', '07:00', '08:00', 'Before Park', 'Before Field', NULL, '2026-09-07', '2026-09-30');

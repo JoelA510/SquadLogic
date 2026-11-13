@@ -540,6 +540,7 @@ describe('the review round, through the mock and held to the pgTAP file (section
         pa(U(941), U(923), U(931), '[2026-09-07,2026-11-21)'),
         pa(U(942), U(924), U(932), '[2026-09-07,2026-10-01)'),
         pa(U(943), U(925), U(933), '[2026-09-07,2026-11-21)'),
+        pa(U(944), U(925), U(930), '[2026-09-07,2026-09-11)'),
       ],
       import_jobs: [
         {

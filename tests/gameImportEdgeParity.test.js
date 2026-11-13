@@ -157,9 +157,14 @@ describe('the Edge mirror stages what core stages', () => {
     for (const v of TABLE.vectors) expect(run(v), v.name).toEqual(v.expected);
   });
 
-  it('every vector again under three other host zones (the host zone is not read)', () => {
-    const seen = new Set();
-    for (const tz of OTHER_ZONES) {
+  // One test per host zone, each with its own timeout. Timed (fix round 3 of #726): the three zones as ONE test took
+  // 7178 ms in CI's Build & Test on 031db6f (past vitest's 5000 ms default) against 22 ms for the same vectors with no
+  // zone switch in the test above; locally the three took 55 ms under coverage and 52 ms without. What costs that time
+  // on the runner is the switch of the host zone (every Date read after it), not the vectors; the cause there is
+  // unverified. A third of that work per test, and 15 s each: about six times the 2.4 s a zone took in CI.
+  const seen = new Set();
+  for (const tz of OTHER_ZONES) {
+    it(`every vector again with the host zone ${tz} (the host zone is not read)`, () => {
       underZone(tz, (noonHour) => {
         seen.add(noonHour);
         for (const v of TABLE.vectors) {
@@ -178,9 +183,11 @@ describe('the Edge mirror stages what core stages', () => {
           ).toEqual(v.expected);
         }
       });
-    }
-    // The zones really differed: three different host readings of one instant.
-    expect(seen.size).toBe(3);
+    }, 15_000);
+  }
+
+  it('the zones above really differed: three different host readings of one instant', () => {
+    expect(seen.size).toBe(OTHER_ZONES.length);
   });
 
   it('the shipped fixtures: 574 games and every refusal reason, in chunks of 500 as the browser sends them', () => {

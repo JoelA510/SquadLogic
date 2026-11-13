@@ -42,6 +42,7 @@ import {
   baselineRows,
   overrideRow,
   exportGames,
+  exportTeams,
   savedGames,
   tbdGames,
 } from './helpers/reportsWorld.js';
@@ -513,6 +514,130 @@ describe('why: the audit rows that name the game', () => {
       overrideRow({ id: 'old', gameId: 'x', game: g1, createdAt: BEFORE }),
     ];
     expect(view({ ...gone, auditRows: reachedBack, auditLimit: 5 }).auditMayBeCut).toBe(false);
+  });
+});
+
+describe('a game against an outside club is one row of the baseline, and is read as one game (G5)', () => {
+  // An outside club (`teams.is_external`) is named as the opponent and has no rows of its own, so each of its games is
+  // the own team's row alone: at home (g-x1), away at the club (g-x2), and waiting on the TIME TBD list (week 4).
+  const CLUB = {
+    id: 't-x',
+    name: 'Gulls FC',
+    divisionId: 'd-10',
+    division: 'U10',
+    isExternal: true,
+  };
+  const at = (day, hour) => `2026-10-${day}T${hour}:00:00+00:00`;
+  const clubGames = () => [
+    ...savedGames(),
+    {
+      ...savedGames()[0],
+      id: 'g-x1',
+      homeTeamId: 't-1',
+      awayTeamId: 't-x',
+      slotId: 's-7',
+      gameSlotId: 's-7',
+      weekIndex: 3,
+      start: at(17, 15),
+      end: at(17, 16),
+    },
+    {
+      ...savedGames()[0],
+      id: 'g-x2',
+      homeTeamId: 't-x',
+      awayTeamId: 't-2',
+      slotId: 's-8',
+      gameSlotId: 's-8',
+      weekIndex: 3,
+      start: at(17, 17),
+      end: at(17, 18),
+    },
+  ];
+  const clubTbd = {
+    homeTeamId: 't-3',
+    awayTeamId: 't-x',
+    weekIndex: 4,
+    reason: 'no-slot-available',
+  };
+  /** The master export's rows of that schedule, from the real producer, as the Exports page records them. */
+  const clubRows = () =>
+    generateScheduleExports({
+      teams: [
+        ...exportTeams(),
+        { id: CLUB.id, name: CLUB.name, division: 'U10', isExternal: true },
+      ],
+      gameAssignments: exportGames(clubGames()),
+      tbdItems: [...tbdGames(), clubTbd].map((g) => ({ kind: 'game', ...g })),
+    }).master.rows;
+  const clubView = (teams) =>
+    view({
+      baseline: { rows: clubRows(), recordedAt: RECORDED_AT, version: 3, label: 'x' },
+      savedGames: clubGames(),
+      tbdGames: [...tbdGames(), clubTbd],
+      teams,
+    });
+
+  it('the club has no rows of its own: its three games are three single rows', () => {
+    const rows = clubRows().filter((r) => r['Event Type'] === 'Game');
+    expect(rows.filter((r) => r['Team ID'] === 't-x')).toHaveLength(0);
+    expect(rows.filter((r) => r.Opponent === 'Gulls FC')).toHaveLength(3);
+  });
+
+  it('nothing has changed: every game, the club’s three with them, is unchanged, and nothing is unreadable', () => {
+    const result = clubView([...TEAMS, CLUB]);
+    expect(result.counts).toMatchObject({
+      baselineGames: 8,
+      savedGames: 8,
+      unchanged: 8,
+      changed: 0,
+      removed: 0,
+      added: 0,
+      baselineTbd: 2,
+      nowTbd: 2,
+      baselineUnreadable: 0,
+    });
+    expect(result.sound).toBe(true);
+    expect(result.rows).toEqual([]);
+  });
+
+  it('a club game that moved is one removed and one new, as any other', () => {
+    const games = clubGames().map((g) =>
+      g.id === 'g-x1'
+        ? { ...g, slotId: 's-6b', gameSlotId: 's-6b', start: at(18, 15), end: at(18, 16) }
+        : g
+    );
+    const result = view({
+      baseline: { rows: clubRows(), recordedAt: RECORDED_AT, version: 3, label: 'x' },
+      savedGames: games,
+      tbdGames: [...tbdGames(), clubTbd],
+      teams: [...TEAMS, CLUB],
+    });
+    expect(result.counts).toMatchObject({
+      unchanged: 7,
+      removed: 1,
+      added: 1,
+      baselineUnreadable: 0,
+    });
+  });
+
+  it('CONTROL: without the club in the registry (or as an own team) the single rows are unreadable, as before', () => {
+    expect(clubView(TEAMS).counts.baselineUnreadable).toBe(3);
+    expect(clubView([...TEAMS, { ...CLUB, isExternal: false }]).counts.baselineUnreadable).toBe(3);
+    // a club of that name in ANOTHER division is not this game's opponent
+    expect(clubView([...TEAMS, { ...CLUB, division: 'U12' }]).counts.baselineUnreadable).toBe(3);
+  });
+  it('CONTROL: a label that names both an own team and an outside club of the division is not guessed', () => {
+    // An own team of the club's name in U10 beside the club: the three single rows could be either, so they stay
+    // unreadable, as every one-row game was before the outside-club reading.
+    const own = { id: 't-own-gulls', name: 'Gulls FC', divisionId: 'd-10', division: 'U10' };
+    const result = clubView([...TEAMS, own, CLUB]);
+    expect(result.counts.baselineUnreadable).toBe(3);
+    expect(result.sound).toBe(false);
+    // the same own team in ANOTHER division does not stand in the way
+    expect(
+      clubView([...TEAMS, { ...own, divisionId: 'd-12', division: 'U12' }, CLUB]).counts
+        .baselineUnreadable
+    ).toBe(0);
   });
 });
 

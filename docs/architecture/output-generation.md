@@ -63,6 +63,15 @@ audit read (`get_schedule_audit_log`) returns only the two Published actions, so
 game and the view says it does not record whether a game was cancelled or moved. The baseline is read through the existing
 store hook, which gains `readBaseline` (`compareWithBaseline` now uses it), so the publication seam still has one caller.
 
+**A baseline recorded at import (2026-11-13, PR 6b, task G5).** The games import can record the schedule it leaves as a
+baseline (`docs/operations/ingestion-pipeline.md`, the games import). It makes the rows with `generateMasterExport` over
+the inputs `masterExportInputs` maps from `useDashboardData`, the mapping the Exports page passes too, and records them
+through the same hook's `publishBaseline`, so a schedule's baseline is the same rows whichever page recorded it (channel
+`schedule import`). **An outside club has no rows of its own** in the master export, so a game against one is one row;
+"Changes since publication" reads a row with no partner whose opponent is exactly one outside club of its division
+(`teams.is_external`) as that game. Before this every such game was unreadable and the comparison was never a verdict
+for a league with outside clubs.
+
 ## TeamSnap Integration Considerations
 
 - Maintain a mapping of Supabase fields to TeamSnap import columns (referenced historically as `teamsnap-mapping.md`, see [**`docs/README.md`**](../README.md) for current active indices).

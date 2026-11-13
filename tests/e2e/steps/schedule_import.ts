@@ -226,6 +226,10 @@ Then(
 Then('nothing is imported until I tick the list of what will be created', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Confirm and import' })).toBeDisabled();
   await expect(page.getByLabel(/Games arrive Published/)).toBeChecked();
+  // G5: the baseline is recorded by default when the games arrive Published
+  await expect(
+    page.getByLabel(/^Record this schedule as the baseline for Changes since publication/)
+  ).toBeChecked();
 });
 
 When('I tick the list and confirm the schedule import', async ({ page }) => {
@@ -243,6 +247,16 @@ Then('the schedule import is applied and its games are Published', async ({ page
     `Imported: ${PLACED} games added, 0 changed, ${UNTIMED.length} TIME TBD games added. The new games are Published.`
   );
 });
+
+Then(
+  'the import is recorded as the publication baseline, as the box ticked by default asked',
+  async ({ page }) => {
+    await expect(page.getByTestId('schedule-import-baseline')).toContainText(
+      /^Recorded the schedule as it now stands as published baseline v\d+, for "Changes since publication" on the Exports page\.$/,
+      { timeout: 30_000 }
+    );
+  }
+);
 
 When('I open the Games page after the import', async ({ page }) => {
   await page.goto('/schedule/game');
@@ -283,6 +297,16 @@ Then('the import is rolled back and no longer offered', async ({ page }) => {
   );
   await expect(page.getByTestId('schedule-import-last')).toHaveCount(0);
 });
+
+Then(
+  "the roll back says the import's baseline still describes the imported schedule",
+  async ({ page }) => {
+    await expect(page.getByTestId('schedule-import-baseline-rolled-back')).toContainText(
+      /^Published baseline v\d+, recorded from this import, still describes the imported schedule/,
+      { timeout: 30_000 }
+    );
+  }
+);
 
 Then('the Games page has no Published game', async ({ page }) => {
   await expect(page.getByTestId('published-summary')).toContainText(

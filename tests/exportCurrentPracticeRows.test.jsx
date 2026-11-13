@@ -293,8 +293,19 @@ describe('exports read the current practice schedule, not the latest run', () =>
   it('both export call sites hand the panel the season schedule, not the run rows', () => {
     // `DashboardWorkflow` is not rendered here (`exportGateOnFailedRead` renders
     // it); this pins that it is fed from the same field `ExportsPage` is.
+    // `ExportsPage` (and the import's baseline, G5) take their inputs from `masterExportInputs`.
+    const exportsPage = readFileSync(
+      resolve(process.cwd(), 'frontend/src/pages/ExportsPage.jsx'),
+      'utf8'
+    );
+    expect(exportsPage).toContain('{...masterExportInputs({ team, practice, game })}');
+    expect(exportsPage).not.toMatch(/practiceAssignments=/);
+    const inputs = readFileSync(
+      resolve(process.cwd(), 'frontend/src/utils/masterExport.js'),
+      'utf8'
+    );
+    expect(inputs).toContain('practiceAssignments: practice?.scheduleAssignments || [],');
     const sources = {
-      'frontend/src/pages/ExportsPage.jsx': 'practice?.scheduleAssignments',
       'frontend/src/components/DashboardWorkflow.jsx': 'practiceData?.scheduleAssignments',
     };
     for (const [file, field] of Object.entries(sources)) {

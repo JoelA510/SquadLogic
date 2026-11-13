@@ -28,10 +28,12 @@ Feature: Importing a game schedule that already exists (schedule expansion, PR 6
     Then axe finds no serious or critical violations on "/import" in the "dark" theme
     When I tick the list and confirm the schedule import
     Then the schedule import is applied and its games are Published
+    And the import is recorded as the publication baseline, as the box ticked by default asked
     When I open the Games page after the import
     Then the Games page counts every imported game as Published
     And the Games page lists the game with no time as TIME TBD on its date
     When I return to the Data Import page and roll back the last import
     Then the import is rolled back and no longer offered
+    And the roll back says the import's baseline still describes the imported schedule
     When I open the Games page after the import
     Then the Games page has no Published game

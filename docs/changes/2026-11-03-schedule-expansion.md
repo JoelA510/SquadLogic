@@ -1469,7 +1469,7 @@ preview and apply parity.
       conflicts, confirm, see the games Published, roll back. Only this feature locally.
 - [x] G3 (S, moved from PR 7) The SquadLogic schedule CSV, whose test exports the fixture's imported schedule and
       re-imports it as a dry run: **zero changes**. It is here because the importer it tests is here.
-- [ ] G5 (S, moved from PR 7) Optional "record as baseline" at import (decision 15), ticked by default when the games
+- [x] G5 (S, moved from PR 7; built in PR 6b, 2026-11-13) Optional "record as baseline" at import (decision 15), ticked by default when the games
       arrive Published. **Deferred, 2026-11-10 (the coordinating agent, under the delegation of section 10): to PR 6b
       (baseline at import). It needs the Exports page's generation as a shared function.** Tests of G3 and G5: as they were in PR 7 (as 5.1 and 5.6, each with a case for a cancelled game
       and a TIME TBD game).
@@ -1604,7 +1604,7 @@ clocks skip, and the import refuses a file that names one, so the export has no 
    imports, and a finalize that committed and lost its answer throws (statically read, not reproduced; not changed
    in PR 6).
 
-### PR 6b: baseline at import (S after its refactor; no migration; Review: (a); added 2026-11-10)
+### PR 6b: baseline at import (S after its refactor; no migration; Review: (a) for G5a, (c) for G5 as the coordinator classed it (import flagging logic); added 2026-11-10)
 
 Depends on: PR 6 merged. On no other pull request's dependency path; placed after F11-3 in the order.
 
@@ -1619,10 +1619,61 @@ Depends on: PR 6 merged. On no other pull request's dependency path; placed afte
       every sentence. `onTbdRead` keeps the page's TIME TBD count updated before the directory read, as it was.
       Tests: `tests/exportMasterRowsCharacterization.test.jsx` (the page's whole output as JSON, committed before
       the move and unchanged by it) and `tests/masterExport.test.jsx` (the function's rows equal to the page's).
-- [ ] G5 (S) The import's result offers "record this import as the publication baseline", ticked by default when the
+- [x] G5 (S) The import's result offers "record this import as the publication baseline", ticked by default when the
       games arrive Published, and records the shared function's rows through `admin_publish_schedule_baseline`. Tests
       as 5.1 and 5.6 (each with a case for a cancelled game and a TIME TBD game), and "Changes since publication"
       against that baseline shows no change right after the import.
+      **As built (2026-11-13), no migration:** the option is on the confirm step ("Record this schedule as the baseline
+      for Changes since publication"), its default the STORED mapping's "Games arrive Published", set again each time a
+      mapping is stored. After a successful apply (or a lost answer settled from the job as applied) a lazy chunk
+      (`frontend/src/components/import/ImportBaseline.jsx`) reads the saved schedule through `useDashboardData`, maps it
+      with `masterExportInputs` (new in `utils/masterExport.js`; the Exports page now passes its panel the same mapping),
+      makes the rows with `generateMasterExport` and records them through `usePublicationBaselines().publishBaseline`,
+      channel `schedule import`, snapshot id `schedule-import-<job id>` (the table's unique snapshot id makes it one per
+      import). Tests: `tests/gameImportBaseline.test.jsx` (the import's baseline equal row for row, columns and digest,
+      to the Exports page's for the same schedule, over the characterization fixture's cases: own v own, an outside club,
+      a TIME TBD game with a date and one without, a game cancelled before, the run's coach; the default; unticked; two
+      failures; the roll back three ways; "Changes since publication" over the recorded baseline: no change, then a
+      game moved by a second import is one no longer saved and one new), `tests/gameImportBaselineChunk.test.jsx` (a
+      chunk that cannot load), cases in `tests/dashboardErrorConsumers.test.jsx` (a refused read, reads that never
+      settle) and `tests/reportsChangesSincePublication.test.js`, and two steps of `schedule_import.feature`.
+      **Decisions taken (under the delegation of section 10):**
+      - **A roll back leaves the import's baseline and says so** (of the three the brief offered). A baseline is a
+        record of what was published: re-recording from the rolled-back schedule would record a publication that never
+        happened and make "Changes since publication" show no change where the families may already hold the imported
+        games; clearing it needs a delete path the table does not have (`publication_baselines` has no write policy and
+        `admin_publish_schedule_baseline` only inserts), so a migration this PR did not plan. The panel finds the
+        baseline by its snapshot id after the roll back (from the result and from the upload step's "Roll back the last
+        import") and says that version still describes the imported schedule and to choose another baseline in the
+        report; a list that cannot be read says it could not be checked; an import that recorded none says nothing.
+      - The result's buttons (roll back, import another, continue) wait while the baseline is recorded, so a roll back
+        cannot race a recording. Reads that are still in flight after a minute (a team run still running is polled) and
+        a chunk that cannot load are said as failed recordings, so the screen is never held.
+      - Found by running the reader over the writer's output: "Changes since publication" could not read a game against
+        an outside club (the club has no rows of its own, so the game is one row), for any baseline, the Exports page's
+        included; every such game was "unreadable" and the comparison never a verdict. `buildChangesSincePublication`
+        now reads a row with no partner whose opponent is exactly one outside club of its division as that game
+        (lesson 110).
+      **Review round (2026-11-13; Codex C1 and C2, one `/code-review high`), all taken:** the whole recording (the
+      reads, the TIME TBD and directory reads, the rows, the write and the check after it) is bounded by one minute and
+      always ends in an outcome; a recording given up before its write never writes. A write whose answer is refused or
+      lost is followed by a read of the import's baseline by its snapshot id: found, it is said as recorded; the read
+      failing, the outcome is said to be not known, with where to look ("Changes since publication" lists every
+      baseline), never as "none"; only a clear miss says nothing was recorded. A failed or unknown recording offers
+      "Record the baseline again", which asks for the snapshot first and writes only when it is absent. A chunk that
+      cannot load is not kept (React.lazy keeps a rejected load for good, so the panel takes a new lazy part per
+      attempt). Once the admin sets the box, a later stored mapping does not reset it. The recorder uses the app's
+      client for every read and the write (`useDashboardData` and `usePublicationBaselines` read through it, as the
+      Exports page's panel is handed it), so a baseline is never made from two clients. The roll back's look-up reads
+      the one row by its snapshot id (`readBaselineBySnapshotId`, beside the hook); the recorder still mounts the list
+      hook, because `publishBaseline` is only reachable through it without moving its body out of the hook. The
+      sources a recording waits for, and their words, are the Exports page's (`MASTER_EXPORT_SOURCES`,
+      `unreadableSources`, `describeSources` in `utils/masterExport.js`). The outside-club reading does not pair a row
+      whose label also names one of the league's own teams in that division.
+      **Known limit, left:** an outside club is matched by the club name and division the baseline row prints, so a
+      club or division renamed after the baseline, or a game between divisions against a club, leaves that row
+      unreadable, as every one-row game was before this PR. The real fix carries the opponent's id in the export,
+      which changes the export's columns and is out of scope.
 
 ### PR 7: reports (M; no migration; Review: (a))
 
@@ -2670,15 +2721,17 @@ owner's answers of 2026-11-09 and of 2026-11-09 evening and 2026-11-10 follow th
 `ad18861`). **Updated 2026-11-11:** PR 6 is merged (#722, `53c79cc`; task G5 not built, see "As built" under PR 6 in
 section 7). **Updated 2026-11-13:** F11-2 is merged (#725, `dcb54ff`) and its migration `20261122010000` is deployed
 (verified by the coordinator on 2026-11-12; it closed follow-ups 3 (two of its three lines) and 5 of PR 6's review).
-F11-3 (every reader on the saved schedule; no migration; it closes follow-ups 1 and 2 and removes the two pre-migration
-fallbacks F11-2 left) is merged (#726, `5151f6c`, read from `git log`; whether its client is deployed was not checked here).
-Its task C3 was the blocker for turning score entry on: **once F11-3's client is deployed, `score_entry` may be turned on.** **Not merged:** PR 8, 10, 11 and 12, F11-4 and F11-5. PR 14 stays held. **Updated 2026-11-13 (later):** PR 10 is in review (the practice import's database half, migration `20261123010000`; see "As built" under PR 10 in section 7); PR 11 waits for it to be merged and deployed.
+**Updated 2026-11-13 (later):** F11-3 is merged (#726, `5151f6c`; its task C3 was the blocker for turning score entry
+on: **once F11-3's client is deployed, `score_entry` may be turned on**), and so are PR 6b's refactor G5a (#728,
+`70f443a`) and its G5 (#729, `be268be`; the import recorded as the publication baseline; no migration; see "As built"
+under PR 6b in section 7). **In review:** PR 10 (the practice import's database half, migration `20261123010000`; see
+"As built" under PR 10 in section 7); PR 11 waits for it to be merged and deployed. **Not merged:** PR 8, 10, 11 and
+12, F11-4 and F11-5. PR 14 stays held.
 
 - **Order and the dependency rule.** Section 7 ("Dependencies and order") has the dependency table and the one priority
   rule: at most two PRs in flight; a free slot takes the first PR, in the order PR 1; PR 4; PR 2; PR 5; PR 3; PR 9;
   PR 6; PR 10; PR 7; PR 13; PR 8; PR 11; PR 12, whose dependencies are merged and deployed. There are no waves. PR 14 is
   held (decision 28). Left, with the F11 plan's pull requests in their places (2026-11-13, later): PR 10 (in review),
-  PR 6b (baseline at import, task G5, deferred from PR 6 on 2026-11-10; it is on no dependency path),
   and the follow-ups of PR 6's review still open, listed under PR 6 in section 7 (the preview-stale check inside the
   RPC at the next replacement; a SQL sweep for abandoned games jobs), none with a pull request number yet,
   PR 8, PR 11 (after PR 10 is merged and its migration deployed), F11-4, PR 12. F11-5 and PR 14 are the coordinating agent's call when their turn comes (section 10, the 2026-11-10

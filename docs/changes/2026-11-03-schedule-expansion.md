@@ -1695,9 +1695,39 @@ Changes view enumerates from the changed rows only (a cancelled game vanishes).
 Depends on: PR 3 and PR 5. Review (c) as a judgment call: it writes through `persist_game_schedule` and
 `ensure_game_slot` over Published slots, which fits none of the four criteria strictly.
 
-- [ ] H1 (M) The dialog and the staged manual game (5.5). Test `tests/gameAddByHand.test.jsx`.
+- [x] H1 (M) The dialog and the staged manual game (5.5). Test `tests/gameAddByHand.test.jsx`.
 
 Plants: a game addable over a Published slot; a double booking blocked instead of flagged; a new game arriving Published.
+
+**As built (2026-11-13; the pull request has the detail).** No migration, and no change to `persist_game_schedule` or
+`ensure_game_slot`. The rules are in `frontend/src/utils/gameAddByHand.js`, the dialog is
+`frontend/src/components/scheduling/AddGameDialog.jsx`, and the page stages the game into the review and, on Apply,
+calls `ensure_game_slot` for a new time and then the existing save. Decisions taken here (within 5.5 and the owner's
+answers; none adds scope):
+
+- **"A Published slot" is a slot holding a held game** (Published, or with a score: the one predicate `isHeld`). It is
+  refused when the game is staged and again on Apply against the slot id the database returns, since a new time can be
+  an existing slot (`ensure_game_slot` finds one by field, date and start time). A time that overlaps a Published game
+  in another slot on the same field is not "over" it: it is a double booking, flagged.
+- **A double booking** is a team (not an outside club, which stands for several real teams, as the import rules) already
+  playing, or the field already in use, at an overlapping time. Flagged in the dialog, in the conflict banner while
+  staged, and in the saved run's `results.warnings`; never refused (owner, 2026-11-09, entry 2). A new time in the very
+  slot of a game that is not Published is such a double booking (the grid draws one game per cell, so one of the two is
+  seen in the list only: a known limit, recorded under the PR's risks).
+- **A new time's week** is `scheduleWeekOf(date, season_start)`, the import's rule; a date before the season starts, or
+  a season with no start date, is refused (no week can be given). A daylight-saving gap is refused with the season
+  clock's words. The form waits, with its reason, for two different teams and an end after the start.
+- **The same pair in the slot and week it already holds is refused** (one place holds one game of a pair: the save's
+  unique key, a necessary blocker), said by the dialog instead of the save's identity conflict; the reverse pair there
+  is a double booking, flagged.
+- **Divisions offered** are those that play games; their teams are the run's teams and the season's outside clubs.
+- **A failed save after a slot was made** keeps the slot and names it in the error; the review then names the
+  database's slot, so a second Apply does not ask again.
+- **Plant evidence** (executed, 2026-11-13): each plant turned its cases red (3, 3 and 1 of 21, re-run after the review's fix round)
+  and the restored code is green; a plant removing only the Apply-time check turned its one case red, and one removing
+  the same-pair refusal its one; the E2E refusal scenario fails
+  under the first plant. "Arriving Published" is caught on the staged game; once saved, the database cannot be told to
+  publish it through this save, so the post-Apply assertions hold under the plant too (said, not hidden).
 
 ### PR 9: Practice import I, the fixture and the pure core (L; no migration; Review: (c); added 2026-11-06)
 
@@ -2694,7 +2724,7 @@ section 7). **Updated 2026-11-13:** F11-2 is merged (#725, `dcb54ff`) and its mi
 **Updated 2026-11-13 (later):** F11-3 is merged (#726, `5151f6c`; its task C3 was the blocker for turning score entry
 on: **once F11-3's client is deployed, `score_entry` may be turned on**), and so is PR 6b's refactor G5a (#728,
 `70f443a`). **In review:** PR 6b's G5 (the import recorded as the publication baseline; no migration; see "As built"
-under PR 6b in section 7). **Not merged:** PR 8, 10, 11 and 12, F11-4 and F11-5. PR 14 stays held.
+under PR 6b in section 7). **Not merged:** PR 8 (in review, 2026-11-13; see "As built" under PR 8 in section 7), 10, 11 and 12, F11-4 and F11-5. PR 14 stays held.
 
 - **Order and the dependency rule.** Section 7 ("Dependencies and order") has the dependency table and the one priority
   rule: at most two PRs in flight; a free slot takes the first PR, in the order PR 1; PR 4; PR 2; PR 5; PR 3; PR 9;

@@ -64,6 +64,24 @@ A game is its `game_assignments.id`; `docs/changes/2026-11-06-games-table-source
 - **One held predicate.** `game_held_ids(uuid[])` and `game_is_held(uuid)` say whether a game is held where it is: Published, or scored since `20261122010000` (a row of `game_scores`; F11-2). `game_hold_code(uuid)` gives the words of a refusal (`game_published`, or `game_scored` for a held game that is not Published) and never decides whether a game is held; the import's apply skips a held game as `skipped-published` or `skipped-scored`, and its rollback refuses once a game it wrote has a score. A scored game is carried by a regeneration like a Published one (the page's pin set asks `isHeld`, which reads the `scored` flag `useGameAssignments` sets from `game_scores`), and `admin_delete_team` takes the scores of a team's games that are not Published with it (`game_scores_deleted` in the audit row). The guard trigger (now fired for every row), `admin_cancel_game_assignment`, `admin_delete_team` and the omission check ask it; `isHeld` in core and `mockGameIdentity.js` are its twins (the test oracle `tests/helpers/gameIdentityRefusal.js` holds the mock to the save's identity checks). They are internal: no client role may execute them.
 - **The season is on the game.** `game_assignments.season_settings_id` is set by the save from the run's season (NULL for a game saved before, and for a save that names none), and the save reads it back: it refuses a named game stored in another season. The Published guard, the omission check and the completed-season trigger still find a game's season through its home team's division until F11-3 moves them to the column (the two can disagree for a game whose home team was moved to a division of another season after it was saved). Together with the four-column unique index on `(id, organization_id, home_team_id, away_team_id)` it is what the score table and the Game ID of the schedule import will build on.
 
+## Adding one game by hand (2026-11-13, PR 8)
+
+The Games page's **Add a game** dialog (`AddGameDialog.jsx`; the rules in `frontend/src/utils/gameAddByHand.js`) takes a
+division, a home and an away team (an outside club allowed) and either an **open slot** (a slot on its own field with no
+game, the cells "Move to" offers) or **a new time** (a field, a date, a start and an end; its week is the date's week
+from the season's start, as the import counts it). It stages one `manual` game with no id into the review; **Apply**
+saves it through `persist_game_schedule` like a move, so the grid, the conflict banner and `game.saved` are unchanged.
+A new time is found or made by `ensure_game_slot` first (audited `game.slot_created` only when it makes one), then the
+save names it; if the save then fails, the slot stays, unused, and the error names it. No migration and no change to
+either function. The rules: a slot that holds a Published or scored game is **refused** (when staged, and again on Apply
+against the slot the database returns); a team already playing, or a field already in use, at that time is a
+**double booking, flagged and not blocked** (owner, 2026-11-09: warnings, not blockers), shown in the dialog and the
+banner and recorded in the saved run's warnings; an outside club is never double-booked; the game **starts not
+Published** (the save never writes the flag). A time that overlaps a Published game in a different slot on the same
+field is a double booking, flagged: only the very slot is refused. The same pair in the slot and week it already holds
+is refused too (the save's unique key). Tests: `tests/gameAddByHand.test.jsx`; E2E: four
+scenarios in `tests/e2e/features/published_games.feature`.
+
 ## Testing Strategy
 
 - **Unit Tests**: Cover round-robin generation for even/odd team counts, slot compatibility checks, and conflict detection utilities.

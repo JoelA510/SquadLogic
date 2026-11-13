@@ -82,12 +82,31 @@ export const PRACTICE_IMPORT_TEMPLATE_HEADER = Object.freeze([
   C.USE,
 ]);
 
-/** Header names read as another column (plan 4.11.2): `Venue` for `Location`, `Half`/`Side` for `Subunit`. */
-const HEADER_ALIASES = Object.freeze({
+/**
+ * Header names read as another column (plan 4.11.2): `Venue` for `Location`, `Half`/`Side` for `Subunit`, by their
+ * label key. Exported for the stage (`staging.js`) and its Edge mirror, which keep only the columns this file reads.
+ */
+export const PRACTICE_IMPORT_HEADER_ALIASES = Object.freeze({
   [practiceLabelKey('Venue')]: C.LOCATION,
   [practiceLabelKey('Half')]: C.SUBUNIT,
   [practiceLabelKey('Side')]: C.SUBUNIT,
 });
+
+/** The label keys of every header the practice parse reads (its columns and their aliases). */
+const READ_HEADER_KEYS = new Set([
+  ...Object.values(PRACTICE_IMPORT_COLUMNS).map((name) => practiceLabelKey(name)),
+  ...Object.keys(PRACTICE_IMPORT_HEADER_ALIASES),
+]);
+
+/**
+ * Whether the practice parse reads a column of this name (its own name or an alias, any case and spacing). The browser
+ * sends only these columns; the stage drops the rest before a value is read.
+ *
+ * @param {unknown} header
+ * @returns {boolean}
+ */
+export const practiceImportReadsHeader = (header) =>
+  READ_HEADER_KEYS.has(practiceLabelKey(String(header ?? '')));
 
 /**
  * The weekday words the SQL day parser reads (`import_text_to_day_of_week`,
@@ -243,7 +262,10 @@ export function parsePracticeRows({ headers, rows, season, dates }) {
     const written = String(raw ?? '');
     const key = practiceLabelKey(written);
     const canonical =
-      byKey.get(key) ?? (Object.hasOwn(HEADER_ALIASES, key) ? HEADER_ALIASES[key] : undefined);
+      byKey.get(key) ??
+      (Object.hasOwn(PRACTICE_IMPORT_HEADER_ALIASES, key)
+        ? PRACTICE_IMPORT_HEADER_ALIASES[key]
+        : undefined);
     if (canonical === undefined) {
       if (written.trim() !== '') droppedColumns.push(written.trim());
       continue;

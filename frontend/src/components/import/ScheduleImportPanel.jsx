@@ -9,7 +9,6 @@ import React, {
   useState,
 } from 'react';
 import Papa from 'papaparse';
-import { AlertCircle, CheckCircle, Info } from 'lucide-react';
 import {
   describeScheduleImportReason,
   describeScheduleImportSkip,
@@ -25,8 +24,10 @@ import { supabase } from '../../lib/supabaseClient.js';
 import { logger } from '../../lib/logger.js';
 import { useOrganization } from '../../contexts/OrganizationContext.jsx';
 import Button from '../ui/Button.jsx';
+import { NAMED, NamedList, Notice } from './importParts.jsx';
 import { csvBlob, saveFile } from '../../utils/scheduleDownloads.js';
 import { importFileSizeProblem } from '../../utils/importFileLimits.js';
+import { practiceImportConfirmCounts } from '@squadlogic/core/practiceImport/previewCounts.js';
 import {
   confirmGameImport,
   discardGameImport,
@@ -95,6 +96,24 @@ const nextLookup = baselinePart('ImportBaselineLookup', (error) =>
   reportOnce('onResult', { status: 'unchecked', message: String(error?.message ?? error) })
 );
 
+// PR 11: the Practices tab's steps (mapping with its proposals and division settings, the preview with its flags and
+// probable moves, the result) are their own chunk, loaded only when that tab is opened. A chunk that cannot be loaded
+// is said where the steps would be, never left to throw in render; a reload loads it again.
+const PracticeImportSteps = lazy(() =>
+  import('./PracticeImportSteps.jsx').catch((error) => {
+    logger.error('The practice import steps could not be loaded:', error);
+    return {
+      default: function StepsFailed() {
+        return (
+          <Notice tone="error" testId="practice-import-load-failed">
+            {`This page could not load the practice import (${String(error?.message ?? error)}). Reload the page and try again.`}
+          </Notice>
+        );
+      },
+    };
+  })
+);
+
 /**
  * The schedule import: upload, mapping, preview, confirm, result, roll back (plan
  * `docs/changes/2026-11-03-schedule-expansion.md` 4.2; PR 6, tasks F2, F7, F8).
@@ -113,9 +132,27 @@ const nextLookup = baselinePart('ImportBaselineLookup', (error) =>
  * admin ticked that list.
  */
 
+/**
+ * A call of the practice import's client, loaded when the Practices tab first calls it: the client and the practice
+ * mapping it reads are not part of what the Games tab loads.
+ *
+ * @param {string} name  an export of `practiceImportClient.js`
+ * @returns {(...args: any[]) => Promise<any>}
+ */
+const practiceCall =
+  (name) =>
+  (...args) =>
+    import('../../utils/practiceImportClient.js').then((client) => client[name](...args));
+
+/** @type {Readonly<Record<'games' | 'practices', any>>} */
 const KINDS = Object.freeze({
   games: {
     noun: 'games',
+    /** Whether the import reads a column of this name (a repeat of one it reads refuses the file). */
+    headerReader: async () => (/** @type {string} */ name) =>
+      Object.values(SCHEDULE_IMPORT_COLUMNS).some(
+        (column) => scheduleLabelKey(column) === scheduleLabelKey(name)
+      ),
     title: 'Import a game schedule',
     intro:
       'Bring in a schedule that already exists. Conflicts in the file are imported and flagged, never refused; a game with no time is kept on its date as TIME TBD.',
@@ -137,14 +174,88 @@ const KINDS = Object.freeze({
     unfinished: readUnfinishedGameImportJobs,
     exportSaved: readSavedScheduleCsv,
     exportFileName: 'squadlogic-game-schedule.csv',
+    confirmCounts: scheduleImportConfirmCounts,
+    readPrevious: null,
+    /** @param {any} job */
+    describeLast: (job) =>
+      `${job.fileName || 'A file'}: ${Number(job.result?.games?.inserted ?? 0)} games added, ${Number(
+        job.result?.games?.updated ?? 0
+      )} changed, ${Number(job.result?.time_tbd?.inserted ?? 0)} TIME TBD games added.`,
+    lastNote:
+      'It can be rolled back while no game it wrote has been changed, cancelled or had changes allowed since.',
+    /** @param {any} undone */
+    describeRolledBack: (undone) =>
+      `The import was rolled back: ${Number(undone?.games?.deleted ?? 0)} games removed, ${Number(
+        undone?.games?.restored ?? 0
+      )} put back as they were.`,
+  },
+  // PR 11: the practice schedule (plan 4.11). Its file has no clock (a weekday and wall times), its preview is the
+  // database's dry run, and its confirm re-runs the dry run and refuses a stale one, as the games confirm does.
+  practices: {
+    noun: 'practices',
+    title: 'Import a practice schedule',
+    intro:
+      'Bring in a practice schedule that already exists. Conflicts in the file are imported and flagged, never refused; nothing saved is changed or deleted, and the imported practices are saved, locked, as every saved practice is.',
+    columns:
+      'Team, Division, Day, Start, End (or Length in minutes), Location (or Venue), Field. Optional: Subunit (or Half, Side), Valid From, Valid Until, Capacity, Use ("hold" for a cell held for a non-team activity). A row with no Team is an open slot. Any other column is dropped and never stored.',
+    // The practice parser is loaded when a practice file is read, not with the panel the Games tab loads.
+    headerReader: () =>
+      import('@squadlogic/core/practiceImport/parseRows.js').then(
+        (m) => m.practiceImportReadsHeader
+      ),
+    parseFile: (/** @type {any} */ input) =>
+      import('@squadlogic/core/practiceImport/parseRows.js').then((m) =>
+        m.parsePracticeRows({
+          headers: input.headers,
+          rows: input.rows,
+          season: { startDate: input.season?.startDate, endDate: input.season?.endDate },
+          dates: input.dates,
+        })
+      ),
+    start: practiceCall('startPracticeImport'),
+    readStaged: practiceCall('readStagedPracticeRows'),
+    readLeague: practiceCall('readPracticeImportLeague'),
+    saveMapping: practiceCall('savePracticeImportMapping'),
+    preview: practiceCall('previewPracticeImport'),
+    confirm: practiceCall('confirmPracticeImport'),
+    rollback: practiceCall('rollbackPracticeImport'),
+    discard: practiceCall('discardPracticeImport'),
+    jobState: practiceCall('readPracticeImportJobState'),
+    latest: practiceCall('readLatestPracticeImportJob'),
+    unfinished: practiceCall('readUnfinishedPracticeImportJobs'),
+    exportSaved: null,
+    exportFileName: null,
+    confirmCounts: practiceImportConfirmCounts,
+    readPrevious: practiceCall('readPreviousPracticeMapping'),
+    /** @param {any} job */
+    describeLast: (job) =>
+      `${job.fileName || 'A file'}: ${Number(job.result?.counts?.inserted ?? 0)} practices added, ${Number(
+        job.result?.counts?.slots_created ?? 0
+      )} practice slots created.`,
+    lastNote:
+      'It can be rolled back while no practice it added has been changed or has an exception since, and while the season is not completed.',
+    /** @param {any} undone */
+    describeRolledBack: (undone) => {
+      const deleted = undone?.deleted ?? {};
+      const kept = (undone?.kept ?? []).length;
+      return `The import was rolled back: ${Number(undone?.assignments_deleted ?? 0)} practices removed${
+        Number(undone?.assignments_already_gone ?? 0) > 0
+          ? ` (${Number(undone.assignments_already_gone)} were gone already)`
+          : ''
+      }, ${Number(deleted.practice_slots ?? 0)} practice slots, ${Number(deleted.teams ?? 0)} teams, ${Number(
+        deleted.divisions ?? 0
+      )} divisions, ${Number(deleted.locations ?? 0)} locations, ${Number(deleted.fields ?? 0)} fields and ${Number(
+        deleted.field_subunits ?? 0
+      )} halves or sides it created removed.${
+        kept > 0 ? ` ${kept} records it created are still in use and were kept.` : ''
+      }`;
+    },
   },
 });
 
-/** How many rows of a list are named on screen; the rest are counted. */
 /** A job the apply finished: its result is stored on it, and it can be rolled back. */
 const APPLIED_STATUSES = new Set(['completed', 'completed_with_warnings']);
 const DISCARDABLE_STATUS = GAME_IMPORT_DISCARDABLE_STATUS;
-const NAMED = 25;
 
 /** The counts of a preview, in the order and the words the confirm screen shows them. */
 const COUNT_ROWS = Object.freeze([
@@ -204,55 +315,8 @@ function warningLine(warning, league) {
 }
 
 /**
- * A list of sentences, the first `NAMED` named and the rest counted.
- *
- * @param {{ items: string[], total: number, testId: string, heading: string }} props
- */
-function NamedList({ items, total, testId, heading }) {
-  if (total <= 0) return null;
-  const shown = items.slice(0, NAMED);
-  const more = total - shown.length;
-  return (
-    <section data-testid={testId} className="mt-4">
-      <h4 className="text-sm font-semibold text-text-primary mb-1">{`${heading} (${total})`}</h4>
-      <ul className="text-sm text-text-secondary space-y-1 break-words list-disc pl-5">
-        {shown.map((item, index) => (
-          <li key={`${index}-${item}`}>{item}</li>
-        ))}
-      </ul>
-      {more > 0 && <p className="text-xs text-text-muted mt-1">{`and ${more} more`}</p>}
-    </section>
-  );
-}
-
-/**
- * A message with an icon and a word, never colour alone.
- *
- * @param {{ tone?: 'info' | 'error' | 'warning' | 'success', testId?: string, children: any, role?: string }} props
- */
-function Notice({ tone = 'info', testId, children, role }) {
-  const styles = {
-    info: 'border-border-subtle bg-bg-surface text-text-secondary',
-    error: 'border-status-error/30 bg-status-error-bg text-status-error-text',
-    warning: 'border-status-warning/30 bg-status-warning/10 text-status-warning-text',
-    success: 'border-border-subtle bg-bg-surface text-status-success-text',
-  };
-  const Icon = tone === 'success' ? CheckCircle : tone === 'info' ? Info : AlertCircle;
-  return (
-    <div
-      data-testid={testId}
-      role={role ?? (tone === 'error' ? 'alert' : 'status')}
-      className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-sm ${styles[tone]}`}
-    >
-      <Icon size={16} className="shrink-0 mt-0.5" aria-hidden="true" />
-      <div className="min-w-0 break-words">{children}</div>
-    </div>
-  );
-}
-
-/**
  * @param {Object} props
- * @param {'games'} [props.kind]
+ * @param {'games' | 'practices'} [props.kind]
  * @param {boolean} [props.isDemo] - a demo league reads no file: the parent's notice opens instead
  * @param {() => void} [props.onDemoBlocked]
  * @param {() => void} [props.onDone] - "Continue" after an applied import
@@ -305,7 +369,7 @@ function ScheduleImportWorkflow({
   // The mapping AS IT IS STORED on the job, with what it would create: set only when the save succeeded. The
   // "Games arrive Published" box and the confirm's list of names read THIS, never what is being edited.
   const [sent, setSent] = useState(
-    /** @type {{ published: boolean, creations: Record<string, Array<{ name: string }>> } | null} */ (
+    /** @type {{ published: boolean, creations: Record<string, Array<{ name: string }>>, mapping?: any, settings?: any[] } | null} */ (
       null
     )
   );
@@ -337,6 +401,19 @@ function ScheduleImportWorkflow({
     /** @type {{ jobId: string, found: any } | null} */ (null)
   );
   const [lastImport, setLastImport] = useState(/** @type {any} */ (null));
+  // PR 11, the Practices tab: the confirm step's two dates (decision 25), sent with the file; the alias file (read in
+  // the browser, never uploaded); the previous import's mapping (a proposal); the division settings and the probable
+  // moves the admin ticked; and what became of the ticked settings after the apply.
+  const [practice, setPractice] = useState(
+    /** @type {{ dates: { validFrom: string, validUntil: string }, aliasFile: { name: string, headers: string[], rows: any[] } | null, previous: any, settingsTicks: Record<string, boolean>, moveTicks: string[] }} */ ({
+      dates: { validFrom: '', validUntil: '' },
+      aliasFile: null,
+      previous: null,
+      settingsTicks: {},
+      moveTicks: [],
+    })
+  );
+  const [settingsOutcome, setSettingsOutcome] = useState(/** @type {any} */ (null));
   const [unfinished, setUnfinished] = useState(
     /** @type {Array<{ id: string, fileName: string, createdAt: string | null }>} */ ([])
   );
@@ -384,9 +461,10 @@ function ScheduleImportWorkflow({
   }, [K, client, organizationId, seasonSettingsId, lastKey]);
 
   const decisions = useMemo(() => decisionsFromChoices(choices), [choices]);
+  // The games mapping's own reading (the Practices tab's is its steps' own: `PracticeImportSteps.jsx`).
   const proposal = useMemo(
-    () => (league ? K.propose({ rows, league, decisions }) : null),
-    [K, rows, league, decisions]
+    () => (league && kind === 'games' ? K.propose({ rows, league, decisions }) : null),
+    [K, kind, rows, league, decisions]
   );
   // What the rows resolve to under the mapping AS IT IS STORED (the admin's choices, and a match they left standing),
   // read the way the database reads it: a label with no stored decision is unknown, never matched for them.
@@ -433,6 +511,14 @@ function ScheduleImportWorkflow({
     setRecordChosen(false);
     setBaseline(null);
     setRolledBaseline(null);
+    setPractice((prev) => ({
+      dates: prev.dates,
+      aliasFile: null,
+      previous: null,
+      settingsTicks: {},
+      moveTicks: [],
+    }));
+    setSettingsOutcome(null);
   }, []);
 
   // False once this workflow is gone (the scope changed, or the page closed): a step that was waiting does not go on
@@ -467,6 +553,16 @@ function ScheduleImportWorkflow({
     setError(err?.message || fallback);
     setBusy(null);
   };
+
+  // The confirm step's two dates (decision 25): sent with the file, where they stand in for a row's blank Valid From or
+  // Valid Until ahead of the season's. The games file takes none.
+  const confirmDates =
+    kind === 'practices'
+      ? {
+          validFrom: practice.dates.validFrom || null,
+          validUntil: practice.dates.validUntil || null,
+        }
+      : null;
 
   const handleFile = (file) => {
     if (!file) return;
@@ -503,11 +599,9 @@ function ScheduleImportWorkflow({
           // The CSV reader renames an exact repeat of a header (`Date`, `Date_1`) and goes on, so the parse below would
           // never see two columns of one name and the first would be used without a word. A repeat of a column the
           // import READS refuses the file; a repeat of one it drops is dropped twice.
-          const read = new Set(
-            Object.values(SCHEDULE_IMPORT_COLUMNS).map((name) => scheduleLabelKey(name))
-          );
+          const readsHeader = await K.headerReader();
           const repeated = Object.values(meta.renamedHeaders ?? {}).find((original) =>
-            read.has(scheduleLabelKey(original))
+            readsHeader(String(original))
           );
           if (repeated !== undefined) {
             setError(
@@ -518,7 +612,7 @@ function ScheduleImportWorkflow({
           }
           // The browser's own reading is only the early answer for a file that cannot be imported at all (nothing is
           // created for it). What is imported is what the server reads and stages.
-          const local = K.parseFile({
+          const local = await K.parseFile({
             headers,
             rows: data,
             season: {
@@ -526,6 +620,7 @@ function ScheduleImportWorkflow({
               startDate: currentSeasonSetting?.season_start ?? null,
               endDate: currentSeasonSetting?.season_end ?? null,
             },
+            dates: confirmDates,
           });
           if (!local.ok) {
             setError(local.refusal?.message ?? 'The file cannot be imported.');
@@ -533,7 +628,7 @@ function ScheduleImportWorkflow({
             return;
           }
           if (data.length === 0) {
-            setError('The file has a header row and no games.');
+            setError(`The file has a header row and no ${K.noun}.`);
             setBusy(null);
             return;
           }
@@ -545,11 +640,20 @@ function ScheduleImportWorkflow({
             fileName: file.name,
             headers,
             rows: data,
+            dates: confirmDates,
           });
-          const [stagedRows, leagueView] = await Promise.all([
+          const [stagedRows, leagueView, previous] = await Promise.all([
             K.readStaged(client, started.jobId),
             K.readLeague(client, { organizationId, seasonSettingsId }),
+            K.readPrevious
+              ? K.readPrevious(client, { organizationId, seasonSettingsId }).catch((err) => {
+                  // Said, not swallowed: the mapping step works without the previous import's proposals.
+                  logger.warn('The previous practice import could not be read:', err);
+                  return null;
+                })
+              : null,
           ]);
+          if (kind === 'practices') setPractice((prev) => ({ ...prev, previous }));
           setJobId(started.jobId);
           setStaging(started.summary);
           setRows(stagedRows);
@@ -566,14 +670,28 @@ function ScheduleImportWorkflow({
 
   const runPreview = async (published) => {
     if (!jobId || !proposal || !league) return;
-    setError(null);
-    setStale(null);
-    setCreateAck(false);
-    setBusy('Working out what the import would do');
     // The mapping that is sent, and what IT would create: taken once, here, so a choice changed while the call is in
     // flight is in neither the stored mapping nor the list the confirm shows.
     const mapping = mappingForJob(proposal, choices, published);
     const creations = K.resolve({ rows, league, decisions: mapping, explicitOnly: true }).creations;
+    await previewWith(mapping, creations, published);
+  };
+
+  /**
+   * Store a mapping on the job and make its preview (the database's dry run). Both kinds come here: the games mapping
+   * from `runPreview`, the Practices tab's from its steps, each with the names of what that mapping would create.
+   *
+   * @param {Record<string, any>} mapping
+   * @param {Record<string, Array<{ name: string }>>} creations
+   * @param {boolean} published
+   * @param {any[]} [settings]  the Practices tab's ticked division settings, saved after the apply
+   */
+  const previewWith = async (mapping, creations, published, settings = []) => {
+    if (!jobId) return;
+    setError(null);
+    setStale(null);
+    setCreateAck(false);
+    setBusy('Working out what the import would do');
     try {
       await K.saveMapping(client, jobId, mapping);
     } catch (err) {
@@ -583,7 +701,7 @@ function ScheduleImportWorkflow({
     }
     if (!alive.current) return;
     // From here the job holds THIS mapping. A preview of the one before it is no longer the import's.
-    setSent({ published: published === true, creations });
+    setSent({ published: published === true, creations, mapping, settings });
     // The baseline's default follows the mapping now stored, ticked when its games arrive Published (decision 15),
     // until the admin sets the box themselves.
     if (!recordChosen) setRecordBaseline(published === true);
@@ -601,7 +719,7 @@ function ScheduleImportWorkflow({
     }
   };
 
-  const counts = useMemo(() => (preview ? scheduleImportConfirmCounts(preview) : null), [preview]);
+  const counts = useMemo(() => (preview ? K.confirmCounts(preview) : null), [K, preview]);
   const createdTotal = counts
     ? CREATED_ROWS.reduce((n, [key]) => n + Number(counts[key] ?? 0), 0)
     : 0;
@@ -613,7 +731,7 @@ function ScheduleImportWorkflow({
     setBusy(null);
     setStep('result');
     refreshLast();
-    if (recordBaseline && jobId && baseline?.jobId !== jobId) {
+    if (kind === 'games' && recordBaseline && jobId && baseline?.jobId !== jobId) {
       setBaseline({ jobId, attempt: 1, status: 'recording' });
       setBusy('Recording the publication baseline');
     }
@@ -685,7 +803,14 @@ function ScheduleImportWorkflow({
     // racing the apply could end the job the apply is about to write.
     pendingJob.current = null;
     try {
-      const outcome = await K.confirm(client, { organizationId, jobId, confirmed: counts });
+      const outcome = await K.confirm(client, {
+        organizationId,
+        seasonSettingsId,
+        jobId,
+        confirmed: counts,
+        // the Practices tab's ticked division settings, saved after the apply (the games confirm takes none)
+        extra: { settings: sent?.settings ?? [] },
+      });
       if (outcome.status === 'stale') {
         pendingJob.current = jobId;
         // Nothing was written. The new preview replaces the old one, and what changed is said.
@@ -695,6 +820,7 @@ function ScheduleImportWorkflow({
         setBusy(null);
         return;
       }
+      setSettingsOutcome(outcome.settings ?? null);
       showApplied(outcome.result);
     } catch (err) {
       // No answer, or a refusal: either way the job says what happened, and it is read before anything else.
@@ -939,12 +1065,53 @@ function ScheduleImportWorkflow({
             {K.columns}
           </p>
           <p className="text-sm text-text-secondary max-w-prose mt-2">
-            {`Times are read on the season's clock${
-              currentSeasonSetting?.timezone ? ` (${currentSeasonSetting.timezone})` : ''
-            }. One file holds at most ${SCHEDULE_IMPORT_LIMITS.MAX_ROWS.toLocaleString('en-US')} rows. The import goes into ${
-              currentSeasonSetting?.name || 'the active season'
-            }.`}
+            {kind === 'practices'
+              ? `A practice is a weekday and two wall times, with no time zone. One file holds at most ${SCHEDULE_IMPORT_LIMITS.MAX_ROWS.toLocaleString('en-US')} rows. The import goes into ${
+                  currentSeasonSetting?.name || 'the active season'
+                }.`
+              : `Times are read on the season's clock${
+                  currentSeasonSetting?.timezone ? ` (${currentSeasonSetting.timezone})` : ''
+                }. One file holds at most ${SCHEDULE_IMPORT_LIMITS.MAX_ROWS.toLocaleString('en-US')} rows. The import goes into ${
+                  currentSeasonSetting?.name || 'the active season'
+                }.`}
           </p>
+          {kind === 'practices' && (
+            <fieldset className="mt-4 max-w-prose" data-testid="practice-import-dates">
+              <legend className="text-sm font-semibold text-text-primary">
+                Dates for rows that leave them blank (optional)
+              </legend>
+              <p className="text-xs text-text-muted mt-1">
+                {`A row's own Valid From and Valid Until come first, then these, then the season's (${
+                  currentSeasonSetting?.season_start ?? 'none'
+                } to ${currentSeasonSetting?.season_end ?? 'none'}). They are read when the file is checked: choose them before the file.`}
+              </p>
+              <div className="flex flex-wrap gap-4 mt-2">
+                {[
+                  ['validFrom', 'First date, for a blank Valid From'],
+                  ['validUntil', 'Last date, for a blank Valid Until'],
+                ].map(([key, label]) => (
+                  <label key={key} className="flex flex-col text-sm text-text-secondary gap-1">
+                    {label}
+                    <input
+                      type="date"
+                      className="rounded-md border border-border-subtle bg-bg-surface text-text-primary px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80"
+                      value={practice.dates[key]}
+                      min={currentSeasonSetting?.season_start ?? undefined}
+                      max={currentSeasonSetting?.season_end ?? undefined}
+                      disabled={busy !== null}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setPractice((prev) => ({
+                          ...prev,
+                          dates: { ...prev.dates, [key]: value },
+                        }));
+                      }}
+                    />
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          )}
           <div className="flex flex-wrap items-center gap-3 mt-4">
             <label
               htmlFor={fileInputId}
@@ -975,9 +1142,11 @@ function ScheduleImportWorkflow({
                 Download the template
               </Button>
             )}
-            <Button variant="ghost" disabled={busy !== null} onClick={handleExport}>
-              Download the saved schedule as CSV
-            </Button>
+            {K.exportSaved && (
+              <Button variant="ghost" disabled={busy !== null} onClick={handleExport}>
+                Download the saved schedule as CSV
+              </Button>
+            )}
           </div>
           {exportNote && (
             <div className="mt-3">
@@ -1029,14 +1198,9 @@ function ScheduleImportWorkflow({
             >
               <h4 className="text-sm font-semibold text-text-primary">The last import</h4>
               <p className="text-sm text-text-secondary mt-1 break-words">
-                {`${lastImport.fileName || 'A file'}: ${Number(lastImport.result?.games?.inserted ?? 0)} games added, ${Number(
-                  lastImport.result?.games?.updated ?? 0
-                )} changed, ${Number(lastImport.result?.time_tbd?.inserted ?? 0)} TIME TBD games added.`}
+                {K.describeLast(lastImport)}
               </p>
-              <p className="text-xs text-text-muted mt-1 max-w-prose">
-                It can be rolled back while no game it wrote has been changed, cancelled or had
-                changes allowed since.
-              </p>
+              <p className="text-xs text-text-muted mt-1 max-w-prose">{K.lastNote}</p>
               <div className="mt-2">
                 <Button
                   variant="danger"
@@ -1052,17 +1216,60 @@ function ScheduleImportWorkflow({
           {rolledBack && (
             <div className="mt-4">
               <Notice tone="success" testId="schedule-import-rolled-back">
-                {`The import was rolled back: ${Number(undone?.games?.deleted ?? 0)} games removed, ${Number(
-                  undone?.games?.restored ?? 0
-                )} put back as they were.`}
+                {K.describeRolledBack(undone)}
               </Notice>
-              <div className="mt-2">{rolledBaselineNote}</div>
+              {kind === 'games' && <div className="mt-2">{rolledBaselineNote}</div>}
             </div>
           )}
         </div>
       )}
 
-      {step === 'mapping' && proposal && staging && (
+      {kind === 'practices' && step !== 'upload' && staging && league && (
+        <Suspense
+          fallback={
+            <p role="status" className="text-sm text-text-secondary">
+              Loading the practice import...
+            </p>
+          }
+        >
+          <PracticeImportSteps
+            step={step}
+            fileName={fileName}
+            staging={staging}
+            rows={rows}
+            league={league}
+            choices={choices}
+            setChoices={setChoices}
+            practice={practice}
+            setPractice={setPractice}
+            sent={sent}
+            preview={preview}
+            stale={stale}
+            counts={counts}
+            createAck={createAck}
+            setCreateAck={setCreateAck}
+            result={result}
+            settingsOutcome={settingsOutcome}
+            busy={busy}
+            unknown={unknown}
+            rolledBackHere={rolledBackHere}
+            undone={undone}
+            jobId={jobId}
+            onPreview={(mapping, creations, settings) =>
+              previewWith(mapping, creations, false, settings)
+            }
+            onConfirm={handleConfirm}
+            onBack={() => setStep('mapping')}
+            onCancel={handleDiscard}
+            onRollback={handleRollback}
+            onReset={reset}
+            onDone={onDone}
+            describeRolledBack={K.describeRolledBack}
+          />
+        </Suspense>
+      )}
+
+      {kind === 'games' && step === 'mapping' && proposal && staging && (
         <div>
           <p
             className="text-sm text-text-secondary max-w-prose"
@@ -1229,7 +1436,7 @@ function ScheduleImportWorkflow({
         </div>
       )}
 
-      {step === 'preview' && preview && counts && (
+      {kind === 'games' && step === 'preview' && preview && counts && (
         <div>
           {stale && (
             <div className="mb-4">
@@ -1433,7 +1640,7 @@ function ScheduleImportWorkflow({
         </div>
       )}
 
-      {step === 'result' && result && (
+      {kind === 'games' && step === 'result' && result && (
         <div>
           {rolledBackHere ? (
             <Notice tone="success" testId="schedule-import-rolled-back">

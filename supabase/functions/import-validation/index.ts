@@ -28,6 +28,7 @@ import { logFailure, withFailureLogging } from '../_shared/logtail.ts';
 import { SENSITIVE_IMPORT_TYPES, stripSensitiveColumns } from '../_shared/sensitive-headers.ts';
 import {
   ALLOWLIST_ENTITY_TYPES,
+  isAllowedImportKey,
   isAllowlistedImportType,
   keepAllowedColumns,
   withDeclaredColumns,
@@ -49,6 +50,7 @@ import {
   type SeasonReader,
   stageGameChunk,
 } from '../_shared/schedule-import.ts';
+import { PRACTICE_IMPORT_LIMITS, stagePracticeFile } from '../_shared/practice-import.ts';
 
 // --- Constants ---
 const MAX_ROWS = 5000;
@@ -577,6 +579,41 @@ const GamesImportPayload = z.object({
   confirmed: z.record(z.union([z.number(), z.boolean()])).optional(),
 });
 
+/**
+ * A practice schedule import (plan `docs/changes/2026-11-03-schedule-expansion.md` 4.11; PR 11, task L1). Stage only:
+ * the mapping, the preview (the apply's dry run) and the apply are the database's own RPCs, called by the admin's
+ * client (`apply_practice_import_job` is granted to `authenticated` and checks the caller itself).
+ *
+ * - **The whole file in one request** (at most 2,400 rows): the parse judges the file as a whole and a row key is
+ *   unique in it; it converts no instant, so the cap is a few milliseconds of CPU (`_shared/practice-import.ts`).
+ * - `dates`: the confirm step's two dates (decision 25), which stand in for a row's blank `Valid From`/`Valid Until`
+ *   ahead of the season's. A date that is not a calendar date is refused here, before anything is read.
+ */
+const ISO_DATE_TEXT = /^\d{4}-\d{2}-\d{2}$/;
+const PracticeImportPayload = z.object({
+  import_type: z.literal('practice_schedule'),
+  action: z.literal('stage').optional().default('stage'),
+  organization_id: z.string().uuid(),
+  import_job_id: z.string().uuid(),
+  headers: z
+    .array(z.string().max(PRACTICE_IMPORT_LIMITS.MAX_CELL_LENGTH))
+    .max(PRACTICE_IMPORT_LIMITS.MAX_HEADERS),
+  rows: z
+    .array(z.record(z.unknown()))
+    .max(
+      PRACTICE_IMPORT_LIMITS.MAX_ROWS,
+      `One import takes at most ${PRACTICE_IMPORT_LIMITS.MAX_ROWS} rows`
+    ),
+  dates: z
+    .object({
+      valid_from: z.string().regex(ISO_DATE_TEXT).nullable().optional(),
+      valid_until: z.string().regex(ISO_DATE_TEXT).nullable().optional(),
+    })
+    .strict()
+    .nullable()
+    .optional(),
+});
+
 /** The HTTP status a database refusal of the games RPCs is answered with. */
 function statusOfDatabaseError(code: string | undefined): number {
   if (code === '42501') return 403;
@@ -632,18 +669,24 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
     );
   }
 
-  // 3. Parse and validate request body. A games import has its own shape (see `GamesImportPayload`).
+  // 3. Parse and validate request body. A games import and a practice schedule import have their own shapes (see
+  // `GamesImportPayload` and `PracticeImportPayload`).
   let parsedGeneric: z.infer<typeof ImportValidationPayload> | null = null;
   let parsedGames: z.infer<typeof GamesImportPayload> | null = null;
+  let parsedPractices: z.infer<typeof PracticeImportPayload> | null = null;
   try {
     const raw = await req.json();
-    const isGames =
-      raw !== null &&
-      typeof raw === 'object' &&
-      (raw as Record<string, unknown>).import_type === 'games';
+    const type =
+      raw !== null && typeof raw === 'object'
+        ? (raw as Record<string, unknown>).import_type
+        : undefined;
+    const isGames = type === 'games';
+    const isPractices = type === 'practice_schedule';
     const parsed = isGames
       ? GamesImportPayload.safeParse(raw)
-      : ImportValidationPayload.safeParse(raw);
+      : isPractices
+        ? PracticeImportPayload.safeParse(raw)
+        : ImportValidationPayload.safeParse(raw);
     if (!parsed.success) {
       return jsonResponse(
         { status: 'error', message: 'Invalid payload', issues: parsed.error.issues },
@@ -651,14 +694,16 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
       );
     }
     if (isGames) parsedGames = parsed.data as z.infer<typeof GamesImportPayload>;
+    else if (isPractices) parsedPractices = parsed.data as z.infer<typeof PracticeImportPayload>;
     else parsedGeneric = parsed.data as z.infer<typeof ImportValidationPayload>;
   } catch {
     return jsonResponse({ status: 'error', message: 'Invalid JSON' }, 400);
   }
   // Constants from here on: a callback below reads them, and only a constant keeps its narrowing inside one.
   const games = parsedGames;
+  const practices = parsedPractices;
   const generic = parsedGeneric;
-  const organizationId = (games ?? generic)?.organization_id;
+  const organizationId = (games ?? practices ?? generic)?.organization_id;
   if (!organizationId) {
     return jsonResponse({ status: 'error', message: 'Invalid payload' }, 400);
   }
@@ -915,6 +960,180 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
       valid_rows: chunk.summary.ok + chunk.summary.tbd,
       error_rows: chunk.summary.refused,
       summary: chunk.summary,
+    });
+  }
+
+  // ---------------------------------------------------------------------------------------------- practice schedule
+  if (practices) {
+    const { data: job, error: jobError } = await serviceClient
+      .from('import_jobs')
+      .select('id, organization_id, job_type, status, season_settings_id')
+      .eq('id', practices.import_job_id)
+      .eq('organization_id', organizationId)
+      .maybeSingle();
+    if (jobError) {
+      await logFailure(logCtx, 'Import job lookup failed', jobError);
+      return jsonResponse({ status: 'error', message: 'Import job lookup failed' }, 500);
+    }
+    if (!job) {
+      return jsonResponse(
+        { status: 'error', message: 'Import job not found for organization' },
+        404
+      );
+    }
+    if (job.job_type !== 'practice_schedule') {
+      return jsonResponse(
+        {
+          status: 'error',
+          message: `Import job type ${job.job_type} does not match practice_schedule`,
+        },
+        409
+      );
+    }
+    if (['completed', 'completed_with_warnings', 'failed', 'needs_fix'].includes(job.status)) {
+      return jsonResponse(
+        { status: 'error', message: `Import job cannot accept staged rows while ${job.status}` },
+        409
+      );
+    }
+    // The season's window is the JOB's season, never the request's word (the games import's shared read; it is
+    // read here, not changed).
+    const { data: seasonRow, error: seasonError } = await loadGameImportSeason(
+      serviceClient as unknown as SeasonReader,
+      { seasonSettingsId: job.season_settings_id, organizationId }
+    );
+    if (seasonError) {
+      await logFailure(logCtx, 'Season lookup failed', seasonError);
+      return jsonResponse({ status: 'error', message: 'Season lookup failed' }, 500);
+    }
+    if (!seasonRow) {
+      return jsonResponse(
+        {
+          status: 'error',
+          code: 'season_missing',
+          message: 'This import has no season to import into. Start the import again.',
+        },
+        409
+      );
+    }
+
+    let staged: ReturnType<typeof stagePracticeFile>;
+    try {
+      staged = stagePracticeFile({
+        headers: practices.headers,
+        rows: practices.rows as Array<Record<string, unknown>>,
+        season: {
+          startDate: seasonRow.season_start ?? null,
+          endDate: seasonRow.season_end ?? null,
+        },
+        dates: {
+          validFrom: practices.dates?.valid_from ?? null,
+          validUntil: practices.dates?.valid_until ?? null,
+        },
+        clean: sanitizeImportText,
+      });
+    } catch (error) {
+      // The parse throws only on a date it was given that is not a calendar date (the request's, or the season's).
+      if (!(error instanceof TypeError)) throw error;
+      return jsonResponse(
+        {
+          status: 'refused',
+          import_type: 'practice_schedule',
+          code: 'bad-date',
+          message:
+            'A date chosen for the import, or one of the season’s, is not a calendar date. Choose the dates again.',
+        },
+        200
+      );
+    }
+
+    const userClient = createUserClient(req, supabaseUrl, anonKey);
+    if (staged.refusal) {
+      await recordAuditNow(userClient, logCtx, {
+        organizationId,
+        action: 'import.failed',
+        resourceType: 'import_job',
+        metadata: {
+          import_type: 'practice_schedule',
+          total_rows: practices.rows.length,
+          valid_rows: 0,
+          error_rows: practices.rows.length,
+          staged_rows: 0,
+          refusal: staged.refusal.code,
+        },
+      });
+      return jsonResponse({
+        status: 'refused',
+        import_type: 'practice_schedule',
+        code: staged.refusal.code,
+        message: staged.refusal.message,
+        column: staged.refusal.column ?? null,
+      });
+    }
+    // The allowlist, asserted: a staged key it does not hold is a defect of the stage, never stored.
+    const stray = staged.staged
+      .flatMap((row) => Object.keys(row.normalized_payload ?? {}))
+      .find((key) => !isAllowedImportKey('practice_schedule', key));
+    if (stray !== undefined) {
+      await logFailure(logCtx, 'A practice row carried a key the allowlist does not hold', {
+        message: stray,
+      });
+      return jsonResponse({ status: 'error', message: 'Failed to stage import rows' }, 500);
+    }
+
+    // The file is one request, so what an earlier attempt staged under this job goes first.
+    const { error: deleteError } = await serviceClient
+      .from('staging_import_rows')
+      .delete()
+      .eq('import_job_id', practices.import_job_id)
+      .eq('import_type', 'practice_schedule');
+    if (deleteError) {
+      await logFailure(logCtx, 'Failed to replace staged practice rows', deleteError);
+      return jsonResponse(
+        { status: 'error', message: 'Failed to replace staged import rows' },
+        500
+      );
+    }
+    if (staged.staged.length > 0) {
+      const { error: stageError } = await serviceClient.from('staging_import_rows').insert(
+        staged.staged.map((row) => ({
+          import_job_id: practices.import_job_id,
+          organization_id: organizationId,
+          import_type: 'practice_schedule',
+          source_row_number: row.source_row_number,
+          raw_payload: row.raw_payload,
+          normalized_payload: row.normalized_payload,
+          validation_errors: row.validation_errors,
+        }))
+      );
+      if (stageError) {
+        await logFailure(logCtx, 'Failed to stage practice rows', stageError);
+        return jsonResponse({ status: 'error', message: 'Failed to stage import rows' }, 500);
+      }
+    }
+
+    const s = staged.summary;
+    await recordAuditNow(userClient, logCtx, {
+      organizationId,
+      action: 'import.started',
+      resourceType: 'import_job',
+      metadata: {
+        import_type: 'practice_schedule',
+        total_rows: s.rows,
+        valid_rows: s.placements + s.open + s.holds,
+        error_rows: s.refused,
+        staged_rows: staged.staged.length,
+      },
+    });
+
+    return jsonResponse({
+      status: 'success',
+      import_type: 'practice_schedule',
+      total_rows: s.rows,
+      staged_rows: staged.staged.length,
+      valid_rows: s.placements + s.open + s.holds,
+      error_rows: s.refused,
+      summary: s,
     });
   }
 

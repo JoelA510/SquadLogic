@@ -50,7 +50,7 @@ import {
 import { handleHeatSettingsRpc } from './mockHeatSettings.js';
 import { handleEvaluationImportRpc } from './mockEvaluations.js';
 import { handleGameImportFunction, handleGameImportRpc } from './mockGameImport.js';
-import { handlePracticeImportRpc } from './mockPracticeImport.js';
+import { handlePracticeImportFunction, handlePracticeImportRpc } from './mockPracticeImport.js';
 import { validateEvaluationRow } from '../utils/importEvaluations.js';
 import { handleScheduleTbdRpc } from './mockScheduleTbd.js';
 import {
@@ -8033,6 +8033,31 @@ export const mockSupabase = {
           ? JSON.parse(storedSession)?.user?.id || 'mock-admin-id'
           : null;
         const { wrote, ...answer } = handleGameImportFunction(db, options.body, {
+          currentUserId,
+          isOrgAdmin: (organizationId) =>
+            ADMIN_ROLES.includes(
+              String(
+                (db.organization_members || []).find(
+                  (item) =>
+                    String(item.organization_id) === String(organizationId) &&
+                    String(item.profile_id) === String(currentUserId)
+                )?.role || ''
+              )
+            ),
+        });
+        if (wrote) saveDB(db);
+        return answer;
+      }
+      if (name === 'import-validation' && options?.body?.import_type === 'practice_schedule') {
+        // The practice schedule arm (PR 11): the whole file staged by core's `stagePracticeFile`
+        // (`mockPracticeImport.js` says what is mirrored).
+        const db = getDB();
+        const storedSession =
+          typeof window !== 'undefined' ? sessionStorage.getItem('__MOCK_SESSION__') : null;
+        const currentUserId = storedSession
+          ? JSON.parse(storedSession)?.user?.id || 'mock-admin-id'
+          : null;
+        const { wrote, ...answer } = handlePracticeImportFunction(db, options.body, {
           currentUserId,
           isOrgAdmin: (organizationId) =>
             ADMIN_ROLES.includes(

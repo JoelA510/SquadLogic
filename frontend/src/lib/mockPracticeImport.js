@@ -31,6 +31,12 @@
 
 import { carryTeamRunResults } from '@squadlogic/core/utils/teamRunResults.js';
 import { practiceLabelKey } from '@squadlogic/core/practiceImport/slotKey.js';
+import {
+  PRACTICE_IMPORT_STAGE_LIMITS,
+  stagePracticeFile,
+} from '@squadlogic/core/practiceImport/staging.js';
+import { sanitizeImportText } from '../utils/importRows.js';
+import { defaultProgramOf } from './mockPrograms.js';
 
 export const PRACTICE_IMPORT_RPCS = Object.freeze([
   'map_practice_import_job',
@@ -1018,6 +1024,10 @@ function planAndWrite(db, jobId, season, map, ctx, env) {
         id: e.ref,
         organization_id: org,
         season_settings_id: seasonId,
+        // The SQL's BEFORE INSERT trigger (20261101020000) puts a new division in its season's default program, so
+        // the applied image the rollback compares with carries it (PR 11: without it the mock's read-time program
+        // backfill changed the row after the apply, and the rollback kept the division as changed).
+        program_id: defaultProgramOf(db, seasonId)?.id ?? null,
         name: e.cname,
         practices_per_week: 1,
         practice_minutes: null,
@@ -2037,4 +2047,166 @@ function rollbackJob(db, job, ctx, env) {
     warning_summary: { ...(job.warning_summary || {}), practice_import_rollback: result },
   });
   return { data: result, error: null };
+}
+
+// ------------------------------------------------------------------------------------------------- the Edge stage
+
+/** A non-2xx answer of an Edge function, as supabase-js gives it (the body on `context`). */
+function httpRefusal(status, body) {
+  const error = new Error('Edge Function returned a non-2xx status code');
+  return {
+    data: null,
+    error: Object.assign(error, { context: { status, json: async () => body } }),
+  };
+}
+
+const ISO_DATE_TEXT = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The mock's `import-validation` for `import_type: 'practice_schedule'` (the Edge function's practice arm,
+ * `supabase/functions/import-validation/index.ts`; plan 4.11, PR 11, task L1).
+ *
+ * **Mirrored.** The caller is signed in and an admin of the organization; the request's shape (at most 2,400 rows, the
+ * two dates `YYYY-MM-DD` or null); the job is a practice schedule job of the organization that still takes rows; the
+ * season's window is the JOB's; the file is read whole by core's `stagePracticeFile` (the function the Edge mirror is
+ * held to); a date that is not a calendar date is refused; a refused file stages nothing and answers
+ * `status: 'refused'`; a staged file replaces everything the job had staged. **Not mirrored:** the rate limit, the
+ * payload byte limit, the demo fence (the mock's own league is no demo here) and the audit rows.
+ *
+ * @param {any} db
+ * @param {any} body
+ * @param {{ currentUserId: string | null, isOrgAdmin: (organizationId: string) => boolean,
+ *   newId?: () => string, now?: () => string }} ctx
+ * @returns {{ data: any, error: any, wrote: boolean }}
+ */
+export function handlePracticeImportFunction(db, body, ctx) {
+  const done = (answer, wrote = false) => ({ ...answer, wrote });
+  const newId = ctx.newId ?? (() => globalThis.crypto.randomUUID());
+  const now = ctx.now ?? (() => new Date().toISOString());
+  if (!ctx.currentUserId)
+    return done(httpRefusal(401, { status: 'error', message: 'Unauthorized' }));
+  const dates = body?.dates ?? null;
+  const badDate = (v) =>
+    v !== undefined && v !== null && !(typeof v === 'string' && ISO_DATE_TEXT.test(v));
+  if (
+    !body?.organization_id ||
+    !body?.import_job_id ||
+    (body.action ?? 'stage') !== 'stage' ||
+    !Array.isArray(body.headers) ||
+    body.headers.length > PRACTICE_IMPORT_STAGE_LIMITS.MAX_HEADERS ||
+    !Array.isArray(body.rows) ||
+    body.rows.length > PRACTICE_IMPORT_STAGE_LIMITS.MAX_ROWS ||
+    (dates !== null &&
+      (typeof dates !== 'object' || badDate(dates.valid_from) || badDate(dates.valid_until)))
+  ) {
+    return done(httpRefusal(400, { status: 'error', message: 'Invalid payload' }));
+  }
+  if (!ctx.isOrgAdmin(body.organization_id)) {
+    return done(
+      httpRefusal(403, {
+        status: 'error',
+        message: 'Access denied: not an admin of this organization',
+      })
+    );
+  }
+  const job = (db.import_jobs || []).find(
+    (item) => same(item.id, body.import_job_id) && same(item.organization_id, body.organization_id)
+  );
+  if (!job) {
+    return done(
+      httpRefusal(404, { status: 'error', message: 'Import job not found for organization' })
+    );
+  }
+  if (job.job_type !== 'practice_schedule') {
+    return done(
+      httpRefusal(409, {
+        status: 'error',
+        message: `Import job type ${job.job_type} does not match practice_schedule`,
+      })
+    );
+  }
+  if (['completed', 'completed_with_warnings', 'failed', 'needs_fix'].includes(job.status)) {
+    return done(
+      httpRefusal(409, {
+        status: 'error',
+        message: `Import job cannot accept staged rows while ${job.status}`,
+      })
+    );
+  }
+  const season = jobSeason(db, job);
+  if (!season) {
+    return done(
+      httpRefusal(409, {
+        status: 'error',
+        code: 'season_missing',
+        message: 'This import has no season to import into. Start the import again.',
+      })
+    );
+  }
+  let staged;
+  try {
+    staged = stagePracticeFile({
+      headers: body.headers,
+      rows: body.rows,
+      season: { startDate: season.season_start ?? null, endDate: season.season_end ?? null },
+      dates: { validFrom: dates?.valid_from ?? null, validUntil: dates?.valid_until ?? null },
+      clean: sanitizeImportText,
+    });
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error;
+    return done({
+      data: {
+        status: 'refused',
+        import_type: 'practice_schedule',
+        code: 'bad-date',
+        message:
+          'A date chosen for the import, or one of the season’s, is not a calendar date. Choose the dates again.',
+      },
+      error: null,
+    });
+  }
+  if (staged.refusal) {
+    return done({
+      data: {
+        status: 'refused',
+        import_type: 'practice_schedule',
+        code: staged.refusal.code,
+        message: staged.refusal.message,
+        column: staged.refusal.column ?? null,
+      },
+      error: null,
+    });
+  }
+  db.staging_import_rows = (db.staging_import_rows || []).filter(
+    (row) => !same(row.import_job_id, job.id) || row.import_type !== 'practice_schedule'
+  );
+  for (const row of staged.staged) {
+    db.staging_import_rows.push({
+      id: newId(),
+      organization_id: job.organization_id,
+      import_job_id: job.id,
+      import_type: 'practice_schedule',
+      source_row_number: row.source_row_number,
+      raw_payload: row.raw_payload,
+      normalized_payload: row.normalized_payload,
+      validation_errors: row.validation_errors,
+      created_at: now(),
+    });
+  }
+  const sum = staged.summary;
+  return done(
+    {
+      data: {
+        status: 'success',
+        import_type: 'practice_schedule',
+        total_rows: sum.rows,
+        staged_rows: staged.staged.length,
+        valid_rows: sum.placements + sum.open + sum.holds,
+        error_rows: sum.refused,
+        summary: sum,
+      },
+      error: null,
+    },
+    true
+  );
 }

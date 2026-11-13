@@ -299,6 +299,33 @@ deployments a day; at most two PRs in flight; push once per PR) are in
 Index: [`docs/README.md`](docs/README.md); the most used docs are listed in
 [`docs/agents-reference.md` §13](docs/agents-reference.md#13-key-documentation-reference).
 
+## Review guidelines
+
+For every reviewer, Codex's pull-request review included.
+
+- Flag correctness, security, data-loss and error-handling defects. Leave formatting and lint to CI.
+- Each finding gives its severity, `path:line`, the input or state that triggers it, and the fix,
+  and says whether it is confirmed (reproduced) or plausible (read only).
+- Flag a swallowed error, unchecked input from outside the process (user input, files, network
+  responses, environment), and a blank or missing value treated as zero.
+- Flag new logic without a test, and a test that would still pass with the change reverted (§3,
+  Verification conventions).
+- Flag a new dependency, network call or changed stored-data shape that the PR description does
+  not call out, and changes outside the PR's stated purpose. If nothing rises to a defect, say so
+  in one line.
+- A security finding names the defect and the fix only: no exploit steps, credentials or player
+  and coach data in a review comment ("Security findings stay private", §2).
+- In this repository, also check:
+  - a new table, view or write path without RLS and row-level tenancy (§2);
+  - a migration that replaces a function without a guard on the md5 of its old body, or without
+    revert and smoke scripts (§3, Definition of Done);
+  - a client read of an object a migration adds: Vercel ships the client at merge, before CI
+    applies the migration, so the read needs a fallback until then;
+  - a row, column or value silently dropped, cut off or defaulted instead of refused or flagged
+    in words;
+  - a mock (`frontend/src/lib/mock*.js`) or Edge mirror (`supabase/functions/_shared/`) that
+    disagrees with the SQL or core code it stands in for.
+
 ## Don't
 
 - Don't edit `prompts/` or the template's skills in `.agents/skills/` and `.claude/skills/`

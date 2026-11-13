@@ -17,6 +17,7 @@
 //     pairs nothing;
 //   - the import is rolled back from its result.
 import React from 'react';
+import Papa from 'papaparse';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -534,38 +535,49 @@ describe('the review round of #732', () => {
 });
 
 describe('Codex C5 and C6 on #732', () => {
-  it('C5: a file whose Team is its 201st column is refused on upload, and no job is made', async () => {
-    const rpc = vi.spyOn(mockSupabase, 'rpc');
+  /** A CSV of the file's rows under `headers`: a filler column carries a value the import must never store. */
+  const wideCsv = (headers) =>
+    Papa.unparse({
+      fields: headers,
+      data: FILE_ROWS.map((r) =>
+        headers.map((h) => (FILE_HEADERS.includes(h) ? (r[h] ?? '') : `unread ${h}`))
+      ),
+    });
+  const filler = (n, from = 0) => Array.from({ length: n }, (_, i) => `Extra ${from + i}`);
+
+  it('C5, the follow-up of #734: a 250-column file with Team at column 230 imports, and its Team is read', async () => {
+    const rest = FILE_HEADERS.filter((h) => h !== 'Team');
+    const headers = [...rest, ...filler(229 - rest.length), 'Team'];
+    headers.push(...filler(250 - headers.length, 217));
+    expect(headers).toHaveLength(250);
+    expect(headers.indexOf('Team')).toBe(229);
     render(<ScheduleImportPanel kind="practices" />);
-    const extra = Array.from({ length: 188 }, (_, i) => `Extra ${i}`);
-    const headers = [...FILE_HEADERS.filter((h) => h !== 'Team'), ...extra, 'Team'];
+    await toMapping(wideCsv(headers));
+    // the upload summary names the columns that are not stored, the wide ones among them
+    const said = screen.getByTestId('practice-import-staged').textContent;
+    expect(said).toMatch(/Columns not read and not stored: .*Coach/);
+    expect(said).toMatch(/Extra 0, /);
+    expect(said).toMatch(/Extra 236\./);
+    const staged = (await table('staging_import_rows')).filter(
+      (r) => r.import_type === 'practice_schedule'
+    );
+    expect(staged).toHaveLength(FILE_ROWS.length);
+    // the Team past column 200 was read: the first row is U10B-01's placement, not an open slot
+    const first = staged.find((r) => Number(r.source_row_number) === 1);
+    expect(first.normalized_payload).toMatchObject({ status: 'placement', team: 'U10B-01' });
+    // and nothing of a column the import does not read was stored
+    expect(JSON.stringify(staged)).not.toContain('unread');
+  });
+
+  it('C5, the follow-up of #734: a 201-column file with no column it reads past 200 imports', async () => {
+    const headers = [...FILE_HEADERS, ...filler(201 - FILE_HEADERS.length)];
     expect(headers).toHaveLength(201);
-    const line = headers.map((h) =>
-      h === 'Team'
-        ? 'U10B-01'
-        : h === 'Division'
-          ? 'U10 Boys'
-          : h === 'Day'
-            ? 'Tue'
-            : h === 'Start'
-              ? '16:00'
-              : h === 'End'
-                ? '17:00'
-                : h === 'Location'
-                  ? 'Venue A'
-                  : h === 'Field'
-                    ? 'Field 1'
-                    : ''
+    render(<ScheduleImportPanel kind="practices" />);
+    await toMapping(wideCsv(headers));
+    const staged = (await table('staging_import_rows')).filter(
+      (r) => r.import_type === 'practice_schedule'
     );
-    upload(`${headers.join(',')}\r\n${line.join(',')}\r\n`, 'wide.csv');
-    await waitFor(() =>
-      expect(screen.getByTestId('schedule-import-error').textContent).toMatch(
-        /201 columns; one import reads at most 200/
-      )
-    );
-    expect(step()).toMatch(/1 of 4/);
-    expect(rpc.mock.calls.filter(([name]) => name === 'create_import_job')).toEqual([]);
-    expect(await table('staging_import_rows')).toEqual([]);
+    expect(staged).toHaveLength(FILE_ROWS.length);
   });
 });
 

@@ -24,6 +24,7 @@
 
 import {
   type GameImportRpc,
+  describeTooManyColumns,
   parseScheduleDate,
   parseScheduleLength,
   parseScheduleTime,
@@ -66,7 +67,11 @@ export const PRACTICE_IMPORT_LIMITS = Object.freeze({
   MAX_ROWS: 2400,
   MAX_CAPACITY: 32767,
   MAX_CELL_LENGTH: 500,
-  MAX_HEADERS: 200,
+  /**
+   * The headers one request may send: more is a 400 of the request shape, and the stage and the parse refuse more
+   * with `too-many-columns`, never cut (core: `PRACTICE_IMPORT_LIMITS.MAX_COLUMNS`).
+   */
+  MAX_COLUMNS: 200,
 });
 
 /** The columns of plan 4.11.2 (core: `PRACTICE_IMPORT_COLUMNS`). */
@@ -240,10 +245,10 @@ export function parsePracticeRows({
 }): PracticeImportParseResult {
   if (!Array.isArray(headers)) throw new TypeError('parsePracticeRows: headers must be an array');
   if (!Array.isArray(rows)) throw new TypeError('parsePracticeRows: rows must be an array');
-  if (headers.length > PRACTICE_IMPORT_LIMITS.MAX_HEADERS) {
+  if (headers.length > PRACTICE_IMPORT_LIMITS.MAX_COLUMNS) {
     return fileRefusal(
       R.TOO_MANY_COLUMNS,
-      `The file has ${headers.length} columns; one import reads at most ${PRACTICE_IMPORT_LIMITS.MAX_HEADERS}. Remove the columns it does not need and choose it again.`
+      describeTooManyColumns(headers.length, PRACTICE_IMPORT_LIMITS.MAX_COLUMNS)
     );
   }
 
@@ -710,7 +715,30 @@ export function stagePracticeFile({
   if (!Array.isArray(rows)) throw new TypeError('stagePracticeFile: rows must be an array');
   const cleanCell = (value: unknown): string =>
     clean(value, PRACTICE_IMPORT_LIMITS.MAX_CELL_LENGTH);
-  // Every header is read: a file with more than the cap is refused by the parse, never cut.
+  const empty: PracticeStageSummary = {
+    rows: 0,
+    placements: 0,
+    open: 0,
+    holds: 0,
+    refused: 0,
+    flagged: 0,
+    by_reason: {},
+    dropped_columns: [],
+    warnings: [],
+    refused_rows: [],
+  };
+  // Core's backstop: more headers than one request may send, counted as sent (a blank one included), is refused.
+  if (headers.length > PRACTICE_IMPORT_LIMITS.MAX_COLUMNS) {
+    return {
+      refusal: {
+        code: R.TOO_MANY_COLUMNS,
+        message: describeTooManyColumns(headers.length, PRACTICE_IMPORT_LIMITS.MAX_COLUMNS),
+      },
+      staged: [],
+      summary: empty,
+    };
+  }
+  // Every header sent is read: nothing cuts the row by position.
   const named = headers
     .map((h) => ({ original: String(h ?? ''), cleaned: cleanCell(h) }))
     .filter((h) => h.cleaned.trim() !== '');
@@ -729,18 +757,6 @@ export function stagePracticeFile({
     for (const h of keptNames) out[h.cleaned] = cleanCell(row?.[h.original]);
     return out;
   });
-  const empty: PracticeStageSummary = {
-    rows: 0,
-    placements: 0,
-    open: 0,
-    holds: 0,
-    refused: 0,
-    flagged: 0,
-    by_reason: {},
-    dropped_columns: [],
-    warnings: [],
-    refused_rows: [],
-  };
   const parsed = parsePracticeRows({ headers: fileHeaders, rows: allowlisted, season, dates });
   if (!parsed.ok) return { refusal: parsed.refusal, staged: [], summary: empty };
   const staged = parsed.rows.map((row, i) => {

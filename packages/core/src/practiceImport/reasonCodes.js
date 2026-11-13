@@ -182,11 +182,13 @@ export const PRACTICE_IMPORT_LIMITS = Object.freeze({
   /** `practice_slots.capacity` is a smallint. */
   MAX_CAPACITY: 32767,
   /**
-   * The most columns a file may have (PR 11 review of #732). A file with more is refused, never cut: a column the
-   * import reads past the cap would be dropped while its values stayed in the rows (a Team, and a placement read as an
-   * open slot).
+   * The headers one request may SEND, the games import's cap (#734): the Edge request shape refuses more with a 400,
+   * and the stage and the parse refuse more with `too-many-columns`, never cut (a column the import reads past a cap
+   * would be dropped while its values stayed in the rows: a Team, and a placement read as an open slot; PR 11 review
+   * of #732). The browser sends only the columns the import reads, found by name (`splitPracticeImportHeaders`), so a
+   * wide file is never refused for its width.
    */
-  MAX_COLUMNS: 200,
+  MAX_COLUMNS: SCHEDULE_IMPORT_LIMITS.MAX_COLUMNS,
   /**
    * What `admin_upsert_division_settings` accepts (`20261105010000`, lines 1573-1580): 0 to 7 practices a
    * week, and a practice length of 15 to 240 minutes (or none, any slot length). A proposal outside

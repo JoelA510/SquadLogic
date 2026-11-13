@@ -225,10 +225,16 @@ const KINDS = Object.freeze({
       import('@squadlogic/core/practiceImport/parseRows.js').then(
         (m) => m.practiceImportReadsHeader
       ),
+    // As the Games tab: the early reading is of what the client SENDS, the columns the import reads, found by name,
+    // so a wide file is read whole and never refused for its width (the parse refuses more headers than a request
+    // takes).
     parseFile: (/** @type {any} */ input) =>
-      import('@squadlogic/core/practiceImport/parseRows.js').then((m) =>
+      Promise.all([
+        import('@squadlogic/core/practiceImport/parseRows.js'),
+        import('@squadlogic/core/practiceImport/staging.js'),
+      ]).then(([m, staging]) =>
         m.parsePracticeRows({
-          headers: input.headers,
+          headers: staging.splitPracticeImportHeaders(input.headers, sanitizeImportText).read,
           rows: input.rows,
           season: { startDate: input.season?.startDate, endDate: input.season?.endDate },
           dates: input.dates,

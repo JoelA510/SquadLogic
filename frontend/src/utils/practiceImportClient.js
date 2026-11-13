@@ -22,7 +22,6 @@
  * Every refusal is thrown as an `Error` with the database's or the function's own words and a `code` where it gave one.
  */
 
-import { practiceImportReadsHeader } from '@squadlogic/core/practiceImport/parseRows.js';
 import { describeTooManyColumns } from '@squadlogic/core/scheduleImport/reasonCodes.js';
 import {
   PRACTICE_IMPORT_PREVIEW_STALE,
@@ -30,6 +29,7 @@ import {
 } from '@squadlogic/core/practiceImport/previewCounts.js';
 import {
   PRACTICE_IMPORT_STAGE_LIMITS,
+  splitPracticeImportHeaders,
   stagedPracticeRowToParsed,
 } from '@squadlogic/core/practiceImport/staging.js';
 
@@ -39,6 +39,7 @@ import { fetchAllPages } from '../lib/pagedFetch.js';
 import { readSeasonTeamDirectory } from './scheduleReportsRead.js';
 import { readScheduleTbd, refreshScheduleTbd } from './scheduleTbdClient.js';
 import { functionErrorBody, refusal, requireClient, rpcRefusal } from './importClientCommon.js';
+import { sanitizeImportText } from './importRows.js';
 
 const TYPE = 'practice_schedule';
 
@@ -133,12 +134,16 @@ export async function startPracticeImport(
       'too-many-rows'
     );
   }
-  // A file with more columns than the import reads is refused here, before a job is made, and never cut: a column the
-  // import reads past the cap (a Team) would be dropped while its values stayed, and a placement would read as an
-  // open slot (Codex on #732).
-  if (headers.length > PRACTICE_IMPORT_STAGE_LIMITS.MAX_HEADERS) {
+  // Only the columns the import reads leave the browser, found by NAME as the stage finds them (a coach, an email or a
+  // note in the file has no reason to travel). Nothing is cut by position, so a column the import reads (a Team) is
+  // read wherever it stands, and a wide file is never refused for its width (Codex on #732; the games import's #734).
+  // The dropped columns are named from here.
+  const { read, dropped } = splitPracticeImportHeaders(headers, sanitizeImportText);
+  // More columns to send than one request takes cannot happen today (the import reads thirteen names and three
+  // aliases; only a column given many times over could): refused here, in words, before a job is made, never cut.
+  if (read.length > PRACTICE_IMPORT_STAGE_LIMITS.MAX_COLUMNS) {
     throw refusal(
-      describeTooManyColumns(headers.length, PRACTICE_IMPORT_STAGE_LIMITS.MAX_HEADERS),
+      describeTooManyColumns(read.length, PRACTICE_IMPORT_STAGE_LIMITS.MAX_COLUMNS),
       'too-many-columns'
     );
   }
@@ -154,17 +159,14 @@ export async function startPracticeImport(
     throw new Error('The import could not be started: the job came back without an id.');
   }
 
-  // Only the columns the import reads leave the browser (the function drops the rest too, but a coach, an email or a
-  // note in the file has no reason to travel). The header row goes whole, as names, so the dropped ones are named.
-  const kept = headers.filter((header) => practiceImportReadsHeader(header));
-  const sentRows = rows.map((row) => Object.fromEntries(kept.map((h) => [h, row?.[h] ?? ''])));
+  const sentRows = rows.map((row) => Object.fromEntries(read.map((h) => [h, row?.[h] ?? ''])));
   const { data, error } = await client.functions.invoke('import-validation', {
     body: {
       import_type: TYPE,
       action: 'stage',
       organization_id: organizationId,
       import_job_id: jobId,
-      headers,
+      headers: read,
       rows: sentRows,
       dates: {
         valid_from: dates?.validFrom || null,
@@ -186,7 +188,11 @@ export async function startPracticeImport(
   if (data?.status !== 'success' || !data.summary) {
     throw new Error('The file check answered in a shape this page cannot read.');
   }
-  const summary = data.summary;
+  // The function names none today (it is sent only what the import reads); a name it does give is kept as well.
+  const summary = { ...data.summary, dropped_columns: [...dropped] };
+  for (const name of data.summary.dropped_columns ?? []) {
+    if (!summary.dropped_columns.includes(name)) summary.dropped_columns.push(name);
+  }
   const ready = await client.rpc('mark_import_job_ready_to_apply', {
     p_import_job_id: jobId,
     p_import_type: TYPE,

@@ -505,6 +505,8 @@ const RETENTION_EXEMPT = {
   field_availability: 'field availability windows and blackouts: nothing that names a person',
   games:
     'venue, field, division and team labels, Game IDs, dates and times: the allowlist keeps no name of a person, no email and no contact, so a staged games row holds no personal data',
+  practice_schedule:
+    'PR 10: venue, field, subunit, division and team labels, weekdays, times, dates and capacities: the allowlist keeps no name of a person, no coach, no email and no contact, so a staged practice row holds no personal data',
 };
 
 describe('every staged import type is on a retention job or exempt for a reason', () => {

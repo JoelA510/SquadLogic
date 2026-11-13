@@ -639,7 +639,10 @@ SELECT is(
         'apply_game_import_job', 'ensure_game_slot', 'map_game_import_job', 'rollback_game_import_job',
         -- 20261122010000: the standings view's setting read (a boolean of the division's organization; the view calls it as
         -- its reader): allowed.
-        'standings_counts_outside'
+        'standings_counts_outside',
+        -- 20261123010000: the practice import (map, preview and apply, roll back): admin RPCs gated by is_org_admin, so
+        -- allowed; ensure_practice_slot is internal (no client role may execute it) and is not on this list.
+        'apply_practice_import_job', 'map_practice_import_job', 'rollback_practice_import_job'
       ])),
     NULL,
     'every function a signed-in caller may execute is on the anonymous list: refused, required, or allowed'
@@ -689,7 +692,10 @@ SELECT is(
         'apply_game_import_job', 'ensure_game_slot', 'map_game_import_job', 'rollback_game_import_job',
         -- 20261122010000: the standings view's setting read (a boolean of the division's organization; the view calls it as
         -- its reader): allowed.
-        'standings_counts_outside'
+        'standings_counts_outside',
+        -- 20261123010000: the practice import (map, preview and apply, roll back): admin RPCs gated by is_org_admin, so
+        -- allowed; ensure_practice_slot is internal (no client role may execute it) and is not on this list.
+        'apply_practice_import_job', 'map_practice_import_job', 'rollback_practice_import_job'
       ]) n WHERE n NOT IN (SELECT name FROM t_client_fns)),
     NULL,
     'control: every name on the list is still a function a signed-in caller may execute'

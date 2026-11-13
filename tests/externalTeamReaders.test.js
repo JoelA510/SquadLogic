@@ -174,6 +174,18 @@ const REGISTRY = {
     class: 'by-id',
     why: 'validates the team ids the admin mapped against the organization',
   },
+  'sql:fn:apply_practice_import_job': {
+    class: 'writer',
+    why: 'PR 10: creates the shells and reads teams to resolve what the admin mapped; a map onto an outside club is refused (NOT is_external), since an outside club has no practice',
+  },
+  'sql:fn:rollback_practice_import_job': {
+    class: 'writer',
+    why: 'PR 10: removes the shells the practice import created, when nothing else references them',
+  },
+  'sql:fn:map_practice_import_job': {
+    class: 'by-id',
+    why: 'PR 10: validates the team ids the admin mapped against the organization and season, and refuses an outside club',
+  },
   'sql:fn:persist_game_schedule': {
     class: 'writer',
     why: 'validates the two sides of a saved game by id; an outside club is a legal side',

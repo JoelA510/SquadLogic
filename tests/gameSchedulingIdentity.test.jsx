@@ -541,6 +541,7 @@ describe('the re-key waits for the CURRENT run’s games, not any new answer (F1
     // The latest-run lookup is held from the refusal on; the old run's games read answers at once.
     const realFrom = mockSupabase.from.bind(mockSupabase);
     let holding = false;
+    /** @type {(value?: unknown) => void} */
     let releaseLookup = () => {};
     const lookupHeld = new Promise((resolve) => (releaseLookup = resolve));
     vi.spyOn(mockSupabase, 'from').mockImplementation((table) => {

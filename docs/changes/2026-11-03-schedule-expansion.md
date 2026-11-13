@@ -1762,13 +1762,19 @@ answers; none adds scope):
   Still read from before Apply, by design: the generator's byes, unscheduled games and own flags, the saved games for
   the "left behind" note and the rollback, and the run's `slotCount` parameter (metadata; it does not count a slot the
   Apply made).
+- **A later Apply keeps an earlier added game's open flag** (Codex C11). Once saved, a game added by hand is a saved game
+  with nothing to say it was added, so each Apply carries forward the saved run's own added-game warnings. Each warning
+  records the places it names (`details.places`, the save's unique key: pair, slot, week; jsonb in `results.warnings`, no
+  schema change), because a new game has no id until it is saved. The place finds the saved game, its id finds it in the
+  final schedule, and it is judged again there. The warning is kept only while one of the same kind, on the same team or
+  field, still holds. No other game is flagged (moves record no warnings).
 - **Divisions offered** are those that play games; their teams are the run's teams and the season's outside clubs.
 - **A failed save after a slot was made** keeps the slot and names it in the error. When the outcome is unknown (a
   timeout, an unreadable answer) the error says instead that whether the game was saved into it is being checked. The
   review is left as staged, and a second Apply finds the slot rather than making it again.
-- **Plant evidence** (executed, 2026-11-13, re-run in full after the review round): twenty-three plants after the
-  fourth Codex round, each turning its cases red against the 40 cases of `tests/gameAddByHand.test.jsx`, the restored
-  code green. The plan's three: a Published slot addable (4 red), a double booking blocked (6 red), a new game arriving
+- **Plant evidence** (executed, 2026-11-13, re-run in full after the review round): twenty-four plants after the
+  fifth Codex round, each turning its cases red against the 42 cases of `tests/gameAddByHand.test.jsx`, the restored
+  code green. The plan's three: a Published slot addable (4 red), a double booking blocked (8 red), a new game arriving
   Published (6 red). The E2E
   refusal scenario fails under the first. "Arriving Published" is caught on the staged game; once saved, the database
   cannot be told to publish it through this save, so the post-Apply assertions hold under that plant too (said, not

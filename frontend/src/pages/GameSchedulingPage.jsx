@@ -94,6 +94,7 @@ import {
   stagedMoveNote,
 } from '../utils/gamePublishedText.js';
 import {
+  addedGameWarningsToSave,
   describeNewSlot,
   planAddedGame,
   resolveAddedSlots,
@@ -1818,10 +1819,14 @@ export default function GameSchedulingPage() {
     const freshIds = new Set(freshRows.map((row) => String(row.id)));
     const slotRows = [...gameSlotRows.filter((row) => !freshIds.has(String(row.id))), ...freshRows];
     const review = resolved.review;
-    const finalWarnings = warningsOfAddedGames(review, slotRows, {
-      isExternal: isExternalTeam,
-      fieldName: fieldNameOf,
-      divisionName: divisionNameOf,
+    // With them, the saved run's own flags of games added before, carried forward while they still hold (C11): an
+    // unrelated addition must not clear an open conflict.
+    const finalWarnings = addedGameWarningsToSave({
+      review,
+      slotRows,
+      savedWarnings: game?.warnings ?? [],
+      savedGames: savedAssignments,
+      names: { isExternal: isExternalTeam, fieldName: fieldNameOf, divisionName: divisionNameOf },
     });
     // The summary of the games actually saved (C7): a generated review's own summary does not count a game added by
     // hand. The generator's byes and unscheduled games stay; with no generation the save makes it from the games
@@ -1907,6 +1912,7 @@ export default function GameSchedulingPage() {
     divisionNameOf,
     fieldNameOf,
     game?.runId,
+    game?.warnings,
     gameSlotRows,
     isExternalTeam,
     localAssignments,

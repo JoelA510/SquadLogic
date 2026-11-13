@@ -37,6 +37,31 @@ const instant = (value) => {
 const sameId = (a, b) => a != null && b != null && String(a) === String(b);
 
 /**
+ * Where a game is, by the save's unique key (pair, slot, week): what a saved warning records about each game it names,
+ * because a game added by hand has no id until it is saved, and the key still finds it after (C11).
+ *
+ * @param {Record<string, any>} game
+ */
+const placeOf = (game) => ({
+  homeTeamId: String(game.homeTeamId),
+  awayTeamId: String(game.awayTeamId),
+  slotId: String(game.slotId),
+  weekIndex: Number(game.weekIndex),
+});
+const samePlace = (place, game) =>
+  sameId(place?.homeTeamId, game.homeTeamId) &&
+  sameId(place?.awayTeamId, game.awayTeamId) &&
+  sameId(place?.slotId, game.slotId) &&
+  Number(place?.weekIndex) === Number(game.weekIndex);
+
+/** The kinds of warning a game added by hand raises: what a later Apply carries forward. */
+const ADDED_GAME_WARNING_TYPES = new Set([
+  'team-double-booked',
+  'field-overlap',
+  'slot-other-division',
+]);
+
+/**
  * Why the form cannot be added yet, in words, or null when it is complete. Not a refusal: what is missing.
  *
  * @param {{ division?: string, homeTeamId?: string, awayTeamId?: string, where?: string, cellId?: string,
@@ -122,7 +147,7 @@ function addedGameWarnings(candidate, others, { isExternal, fieldName, slotDivis
     warnings.push({
       type: 'slot-other-division',
       message: `${home} vs ${away} is in a slot reserved for ${reserved}.`,
-      details: { gameIds: [candidate.id] },
+      details: { gameIds: [candidate.id], places: [placeOf(candidate)] },
     });
   }
   const start = instant(candidate.start);
@@ -147,7 +172,11 @@ function addedGameWarnings(candidate, others, { isExternal, fieldName, slotDivis
     warnings.push({
       type: 'team-double-booked',
       message: `${teamName} already plays ${o.home} vs ${o.away} at that time.`,
-      details: { teamId, gameIds: [candidate.id, other.id] },
+      details: {
+        teamId,
+        gameIds: [candidate.id, other.id],
+        places: [placeOf(candidate), placeOf(other)],
+      },
     });
   }
   const onField = clashing.find((game) => sameId(game.fieldId, candidate.fieldId));
@@ -156,7 +185,11 @@ function addedGameWarnings(candidate, others, { isExternal, fieldName, slotDivis
     warnings.push({
       type: 'field-overlap',
       message: `${fieldName(candidate.fieldId)} already has ${o.home} vs ${o.away} at that time.`,
-      details: { fieldId: candidate.fieldId, gameIds: [candidate.id, onField.id] },
+      details: {
+        fieldId: candidate.fieldId,
+        gameIds: [candidate.id, onField.id],
+        places: [placeOf(candidate), placeOf(onField)],
+      },
     });
   }
   return warnings;
@@ -361,6 +394,43 @@ export function warningsOfAddedGames(review, slotRows, { isExternal, fieldName, 
       .filter((game) => game.addedByHand === true)
       .flatMap((game) => addedGameWarnings(game, review, { isExternal, fieldName, slotDivision }))
   );
+}
+
+/**
+ * The flags a save records for the games added by hand: those of the games added in this review, and those the saved
+ * run recorded for games added before, carried forward (Codex re-review of #731, C11). A game added earlier is a saved
+ * game now, with nothing to say it was added by hand, so a save that left its warning out would clear an open conflict
+ * by the way. Each saved warning names its game by where it was saved (`details.places[0]`); that place finds the saved
+ * game, its id finds it in the final schedule (a move keeps the id), and it is judged again there: the warning is kept
+ * only while a warning of the same kind, on the same team or field, still holds. A game no warning named is never
+ * flagged here (moves record no warnings). Each clash once.
+ *
+ * @param {{ review: ReadonlyArray<Record<string, any>>, slotRows: ReadonlyArray<Record<string, any>>,
+ *   savedWarnings: ReadonlyArray<Record<string, any>>, savedGames: ReadonlyArray<Record<string, any>>,
+ *   names: { isExternal: (teamId: string) => boolean, fieldName: (fieldId: string) => string,
+ *     divisionName: (divisionId: string) => string | null } }} input
+ */
+export function addedGameWarningsToSave({ review, slotRows, savedWarnings, savedGames, names }) {
+  const slotDivision = (slotId) =>
+    reservedDivisionOf(
+      slotRows.find((row) => sameId(row.id, slotId)),
+      names.divisionName
+    );
+  const judge = { isExternal: names.isExternal, fieldName: names.fieldName, slotDivision };
+  const carried = savedWarnings.flatMap((warning) => {
+    const place = warning?.details?.places?.[0];
+    if (!ADDED_GAME_WARNING_TYPES.has(warning?.type) || !place) return [];
+    const saved = savedGames.find((game) => samePlace(place, game));
+    const now = saved ? review.find((game) => sameId(game.id, saved.id)) : undefined;
+    if (!now) return [];
+    return addedGameWarnings(now, review, judge).filter(
+      (fresh) =>
+        fresh.type === warning.type &&
+        String(fresh.details?.teamId ?? '') === String(warning.details?.teamId ?? '') &&
+        String(fresh.details?.fieldId ?? '') === String(warning.details?.fieldId ?? '')
+    );
+  });
+  return uniqueWarnings([...warningsOfAddedGames(review, slotRows, names), ...carried]);
 }
 
 /** A new time's slot as a person reads it: the field, and when it starts on the season's clock. */

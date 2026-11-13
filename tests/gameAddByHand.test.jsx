@@ -1435,6 +1435,69 @@ describe('Codex re-review of #731, round 4: Apply over resolved state', () => {
   });
 });
 
+describe('Codex re-review of #731, round 5: a later Apply keeps an earlier added game’s open flag (C11)', () => {
+  /** The first Apply: Comets v Meteors added in the U12-reserved South slot, saved and read back. */
+  async function firstApply() {
+    await mount();
+    await stage({ home: 'team-1', away: 'team-3', where: { slot: 'South Field' } });
+    await apply();
+    await screen.findByText(/Game schedule applied through the persistence workflow\./);
+    await waitFor(() => expect(orgGames()).toHaveLength(3));
+    expect(SAVE.calls[0].runMetadata.results.warnings.map((w) => w.type)).toEqual([
+      'slot-other-division',
+    ]);
+    // The saved schedule is read back: the game is a saved game now, nothing marks it added by hand.
+    await waitFor(() =>
+      expect(
+        listRows().find((r) => r.startsWith('Synthetic Comets vs Synthetic Meteors'))
+      ).toContain('Not published')
+    );
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Add a game' })).toBeEnabled());
+    return orgGames().find((g) => g.home_team_id === 'team-1' && g.away_team_id === 'team-3');
+  }
+  const clean = { field: 'f-north', date: '2026-10-24', start: '09:00', end: '10:00' };
+
+  it('an unrelated second addition: the second save still records the flag, and the banner still shows it', async () => {
+    await firstApply();
+    await stage({ home: 'team-2', away: 'team-4', where: clean });
+    await apply();
+    await waitFor(() => expect(SAVE.calls).toHaveLength(2));
+    await screen.findByText(/Game schedule applied through the persistence workflow\./);
+    expect(SAVE.calls[1].runMetadata.results.warnings.map((w) => w.type)).toEqual([
+      'slot-other-division',
+    ]);
+    await waitFor(() => expect(orgGames()).toHaveLength(4));
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId('game-conflict-banner')).getByTestId(
+          'conflict-item-slot-other-division'
+        )
+      ).toHaveTextContent('Synthetic Comets vs Synthetic Meteors is in a slot reserved for U12.')
+    );
+  });
+
+  it('control: the first game moved out of the reserved slot before the second Apply: the flag is gone', async () => {
+    const first = await firstApply();
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Manual Override' }));
+    await screen.findByTestId('game-schedule-grid');
+    const card = within(screen.getByTestId(`game-card-${first.id}`));
+    const select = card.getByRole('combobox');
+    fireEvent.focus(select);
+    const option = within(select)
+      .getAllByRole('option')
+      .find((o) => (o.textContent ?? '').startsWith('North Field,'));
+    if (!option) throw new Error('no empty slot on North Field');
+    fireEvent.change(select, { target: { value: option.getAttribute('value') } });
+    fireEvent.click(card.getByRole('button', { name: 'Move' }));
+    await screen.findByText(/Manual game move staged/);
+    await stage({ home: 'team-2', away: 'team-4', where: clean });
+    await apply();
+    await waitFor(() => expect(SAVE.calls).toHaveLength(2));
+    await screen.findByText(/Game schedule applied through the persistence workflow\./);
+    expect(SAVE.calls[1].runMetadata.results.warnings).toEqual([]);
+  });
+});
+
 /** The page's context for the pure rule, over the league above. */
 function context({ review }) {
   const names = new Map([

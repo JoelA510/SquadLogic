@@ -3677,7 +3677,7 @@ plant "R23 the revert leaves the lock helper in place" "$R23" \
 
 # Wave 2: the import.started audit keeps no file name. The smoke RAISEs on a
 # row that still stores one; the revert's md5 claim on a body that drifted.
-plant "M26 create_import_job still audits the file name" "$M70" \
+plant "M26 create_import_job still audits the file name" "$M80" \
   "jsonb_build_object('import_type',v_import_type,'job_type',v_job_type,'status','importing')" \
   "jsonb_build_object('import_type',v_import_type,'job_type',v_job_type,'file_name',v_file_name,'status','importing')" \
   "smoke 20261018050000"
@@ -4583,7 +4583,7 @@ plant "M43 the sanitizer takes date_of_birth again" "$M56" \
   "                 'buddy_request', 'date_of_birth' THEN" \
   "smoke 20261026010000"
 
-plant "M43 the allowlist keeps dob" "$M70" \
+plant "M43 the allowlist keeps dob" "$M80" \
   "            'gotsport_id', 'registration_id', 'player_id', 'natural_age'," \
   "            'gotsport_id', 'registration_id', 'player_id', 'natural_age', 'dob'," \
   "smoke 20261026010000"

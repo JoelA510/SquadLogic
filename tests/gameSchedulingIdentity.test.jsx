@@ -474,8 +474,7 @@ describe('after a 409 GAME_IDENTITY the staged review is matched to the saved sc
     const old = db.game_assignments.find((row) => row.id === GAME(1));
     db.game_assignments = db.game_assignments.filter((row) => row.id !== GAME(1));
     db.game_assignments.push({ ...old, id: GAME(99) });
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-    if (window.__MOCK_DB__) window.__MOCK_DB__ = db;
+    window.__saveMockDB__(db);
 
     await apply();
     await screen.findByText(/does not exist in this organization/);

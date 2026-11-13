@@ -345,8 +345,7 @@ describe('the team page and the feed show the same games (F11-3 review R6, R8)',
     db.divisions = db.divisions.map((d) =>
       d.id === DIVISION ? { ...d, season_settings_id: 'season-next' } : d
     );
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-    if (window.__MOCK_DB__) window.__MOCK_DB__ = db;
+    window.__saveMockDB__(db);
     expect(await feedGames(TEAMS.comets)).toEqual([]);
     expect(await pageGames(TEAMS.comets)).toEqual([]);
     expect(SEASON).toBeTruthy();

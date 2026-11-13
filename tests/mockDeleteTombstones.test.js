@@ -359,6 +359,9 @@ const SANCTIONED_WRITES = {
   // Two deliberate injections that test what getDB does with a stale window
   // copy against a fresh sessionStorage one.
   'tests/importStaleJobCleanup.test.js': 2,
+  // An init script (F11-3's played games): it runs before the page's mock client exists, so there is no saveDB to
+  // call, as for seedMockDb above; it must run on every load because a feature's Background rewrites the stored db.
+  'tests/e2e/steps/admin_navigation.ts': 1,
 };
 
 const KNOWN_E2E_DEBT = {

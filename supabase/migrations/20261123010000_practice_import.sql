@@ -1059,8 +1059,11 @@ BEGIN
         -- What was created and no written row uses (every row of a created half refused, say) is taken out again.
         DELETE FROM public.field_subunits s USING _pi_sub x
          WHERE x.creator AND s.id = x.ref AND NOT EXISTS (SELECT 1 FROM _pi_grp g WHERE g.sub_ref = s.id AND g.slot_id IS NOT NULL);
+        -- (A field is deleted only after the shared producer of bookings says it holds none: docs/sql/20260909000000_smoke.sql
+        -- holds every function that deletes a field to it. One made a moment ago holds none unless a slot of this file is on it.)
         DELETE FROM public.fields f USING _pi_fld x
-         WHERE x.creator AND f.id = x.ref AND NOT EXISTS (SELECT 1 FROM _pi_grp g WHERE g.fld_ref = f.id AND g.slot_id IS NOT NULL);
+         WHERE x.creator AND f.id = x.ref AND NOT EXISTS (SELECT 1 FROM _pi_grp g WHERE g.fld_ref = f.id AND g.slot_id IS NOT NULL)
+           AND NOT EXISTS (SELECT 1 FROM public.field_bookings(v_org, f.id, NULL) b);
         DELETE FROM public.locations l USING _pi_loc x
          WHERE x.creator AND l.id = x.ref AND NOT EXISTS (SELECT 1 FROM public.fields f WHERE f.location_id = l.id);
 
@@ -1477,6 +1480,21 @@ BEGIN
         SELECT t.tbl, t.ord FROM (VALUES ('practice_slots', 1), ('field_subunits', 2), ('fields', 3), ('locations', 4),
                                          ('teams', 5), ('divisions', 6)) AS t(tbl, ord) ORDER BY t.ord
     LOOP
+        -- A field is deleted in its own statement, after the shared producer of bookings says it holds none (every function
+        -- that deletes a field consults it: docs/sql/20260909000000_smoke.sql), as well as the catalogue's references.
+        IF v_rec.tbl = 'fields' THEN
+            WITH gone AS (
+                DELETE FROM public.fields x USING public.import_application_records r
+                 WHERE r.target_id = x.id AND r.import_job_id = p_import_job_id AND r.import_type = 'practice_schedule'
+                   AND r.target_table = 'fields' AND r.operation = 'inserted' AND r.rolled_back_at IS NULL
+                   AND public.game_import_row_unchanged(to_jsonb(x), r.applied_payload)
+                   AND NOT public.practice_import_referenced('public.fields'::regclass, x.id)
+                   AND NOT EXISTS (SELECT 1 FROM public.field_bookings(v_org, x.id, NULL) b)
+                RETURNING 1)
+            SELECT count(*) INTO n FROM gone;
+            v_deleted := v_deleted || jsonb_build_object('fields', n);
+            CONTINUE;
+        END IF;
         EXECUTE format($q$
             WITH gone AS (
                 DELETE FROM public.%1$I x USING public.import_application_records r

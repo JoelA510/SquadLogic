@@ -554,6 +554,17 @@ text above, each a decision of the build:
 - **B3:** `applyPracticeDivisionSettings` calls `admin_set_division_practice_settings` (the division, practices a week,
   the practice length) and nothing else; the league read no longer selects the roster rules, and
   `ROSTER_RULES` and the `roster` patch field are gone. The expansion plan's PR 11 follow-up is marked resolved.
+- **Codex round on #737 (four findings, all fixed in one push):**
+  - **C1:** the panel reads and offers controls only for a settled pair: the season list not loading and the season
+    shown being the organization's (the `usePlayersData` rule). Until then it says "Loading settings…" and renders no
+    table and no control. A read that lands for a pair left behind is dropped. The programs and divisions reads are
+    also filtered by organization.
+  - **C2:** a failed read is said on its own, with "Load the settings again", whatever a save answered. A save whose
+    read-back fails says "The save went through, but the list could not be reloaded."
+  - **C3:** the panel reads only the organization's row and the rows of the season's programs and divisions (ids in
+    chunks of 100), each read paged to completion (`fetchAllPages`).
+  - **C4:** the Programs section's writes signal `REFRESH_TOPICS.PROGRAMS` (`refreshBus.js`), and the panel reads
+    again.
 - **Not done here (S8):** the program delete and merge dialogs do not yet say that a program's values go with it; neither
   task list names it, and the stop condition forbids markup changes outside the panel. A follow-up.
 

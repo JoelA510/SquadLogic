@@ -8,6 +8,9 @@ const topics = new Map();
 
 export const REFRESH_TOPICS = {
   NAV_BADGES: 'nav-badges',
+  // A season's programs changed (a program made, renamed, deleted or merged, a division moved): the scoped settings
+  // panel reads its levels again (F11-4b).
+  PROGRAMS: 'programs',
 };
 
 export function subscribeRefresh(topic, listener) {

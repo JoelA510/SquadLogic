@@ -10,6 +10,7 @@ import { useFeatures } from '../../../hooks/useFeatures.js';
 import { useScopedSettings } from '../../../hooks/useScopedSettings.js';
 import { FEATURE_FLAGS } from '../../../constants/featureFlags.js';
 import { isAdminRole } from '../../../constants/permissions.js';
+import Button from '../../ui/Button.jsx';
 
 /**
  * The words a boolean setting is shown in: the choice ("Count") and what applies ("Counted"). The label is the
@@ -61,26 +62,48 @@ function frozenWords(n) {
  * programs and divisions are read-only (the setter refuses them); the organization's row stays editable, and the save
  * says how many completed-season divisions it held at their old value (`frozen_completed_divisions`). Every refusal is
  * said in words in the alert region.
+ *
+ * **Only for a settled organization and season.** While the season list is loading, or the season shown is not the
+ * organization's (the moment after an organization switch, before its seasons arrive), nothing is read, nothing of the
+ * previous organization is shown and nothing can be saved (the usePlayersData rule). A failed read is said with a
+ * control to read again, whatever a save just before it answered.
  */
 export default function ScopedSettingsSection() {
-  const { currentOrganization, currentSeasonSetting, orgMember } = useOrganization();
+  const { currentOrganization, currentSeasonSetting, orgMember, seasonSettingsLoading } =
+    useOrganization();
   const { isEnabled } = useFeatures();
   const isAdmin = isAdminRole(orgMember?.role);
-  const organizationId = isAdmin ? (currentOrganization?.id ?? null) : null;
-  const seasonId = currentSeasonSetting?.id ?? null;
-  const { loading, error, programs, divisions, rows, setValue } = useScopedSettings(
-    organizationId,
-    seasonId
-  );
+  const orgId = currentOrganization?.id ?? null;
+  // The season shown belongs to the organization shown, and the season list is not mid-load.
+  const settled =
+    Boolean(orgId) &&
+    !seasonSettingsLoading &&
+    (!currentSeasonSetting || String(currentSeasonSetting.organization_id) === String(orgId));
+  const organizationId = isAdmin && settled ? orgId : null;
+  const seasonId = settled ? (currentSeasonSetting?.id ?? null) : null;
+  const pairKey = `${organizationId}|${seasonId}`;
+  const {
+    loading: reading,
+    error,
+    programs,
+    divisions,
+    rows,
+    reload,
+    setValue,
+  } = useScopedSettings(organizationId, seasonId);
+  const loading = reading || !settled;
   const baseId = useId();
   const [busy, setBusy] = useState(false);
   // the choice on screen while its save is in flight (the select stays enabled, so focus stays where it is)
   const [pending, setPending] = useState(/** @type {Record<string, string>} */ ({}));
-  const [message, setMessage] = useState(
-    /** @type {{ tone: 'ok' | 'error', text: string } | null} */ (null)
+  const [said, setMessage] = useState(
+    /** @type {{ tone: 'ok' | 'error', text: string, for: string } | null} */ (null)
   );
+  const [retrying, setRetrying] = useState(false);
+  // a message of the organization or season left behind is not said under the next one
+  const message = said && said.for === pairKey ? said : null;
 
-  if (!isAdmin || !organizationId) return null;
+  if (!isAdmin || !orgId) return null;
 
   const completed = currentSeasonSetting?.status === 'completed';
   const orgName = currentOrganization?.name ?? 'this organization';
@@ -176,7 +199,8 @@ export default function ScopedSettingsSection() {
   ];
 
   const onChange = async (level, key, words, option) => {
-    if (busy) return;
+    if (busy || loading || error) return;
+    const forPair = pairKey;
     const slot = `${key}|${level.id}`;
     setBusy(true);
     setPending((p) => ({ ...p, [slot]: option }));
@@ -189,15 +213,24 @@ export default function ScopedSettingsSection() {
         scopeId: level.id,
         value: fromOption(option),
       });
+      const outcome =
+        result?.changed === false
+          ? `Nothing changed: ${level.header} was already ${chosen}.`
+          : `Saved. ${level.header}: ${chosen}.${frozenWords(Number(result?.frozen_completed_divisions ?? 0))}`;
       setMessage({
         tone: 'ok',
+        for: forPair,
         text:
-          result?.changed === false
-            ? `Nothing changed: ${level.header} was already ${chosen}.`
-            : `Saved. ${level.header}: ${chosen}.${frozenWords(Number(result?.frozen_completed_divisions ?? 0))}`,
+          result?.reloaded === false
+            ? `${outcome} The save went through, but the list could not be reloaded.`
+            : outcome,
       });
     } catch (err) {
-      setMessage({ tone: 'error', text: err?.message || 'Not saved: the change failed.' });
+      setMessage({
+        tone: 'error',
+        for: forPair,
+        text: err?.message || 'Not saved: the change failed.',
+      });
     } finally {
       setPending((p) => {
         const next = { ...p };
@@ -244,8 +277,28 @@ export default function ScopedSettingsSection() {
             {message.text}
           </p>
         )}
-        {error && !message && <p className="text-status-error-text">{error}</p>}
       </div>
+
+      {error && !loading && (
+        <div role="alert" className="flex flex-wrap items-center gap-3 text-sm">
+          <span className="text-status-error-text">{error}</span>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={retrying}
+            onClick={async () => {
+              setRetrying(true);
+              try {
+                await reload();
+              } finally {
+                setRetrying(false);
+              }
+            }}
+          >
+            Load the settings again
+          </Button>
+        </div>
+      )}
 
       {!loading &&
         !error &&

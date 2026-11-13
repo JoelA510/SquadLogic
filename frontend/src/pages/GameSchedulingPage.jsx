@@ -94,10 +94,11 @@ import {
   stagedMoveNote,
 } from '../utils/gamePublishedText.js';
 import {
+  addedGameWarnings as addedGameWarningsOf,
   describeNewSlot,
-  doubleBookings,
   planAddedGame,
   resolveAddedSlots,
+  uniqueWarnings,
 } from '../utils/gameAddByHand.js';
 
 function normalizeAssignmentSource(source) {
@@ -693,8 +694,6 @@ export default function GameSchedulingPage() {
   const [activeGame, setActiveGame] = useState(null);
   // The venues' names by id, for the bulk bar's "one venue" scope (the fields carry only their venue's id).
   const [venueNames, setVenueNames] = useState(/** @type {Record<string, string>} */ ({}));
-  // Bumped after Apply has found or made a slot for a game added by hand (PR 8), so the grid reads it.
-  const [referenceReloadKey, setReferenceReloadKey] = useState(0);
 
   const timezone = currentSeasonSetting?.timezone;
   // **"No clock yet" and "no clock at all" are different facts**, and the slot
@@ -878,7 +877,7 @@ export default function GameSchedulingPage() {
     return () => {
       isMounted = false;
     };
-  }, [currentOrganization?.id, referenceReloadKey]);
+  }, [currentOrganization?.id]);
 
   const practiceOnly = useMemo(
     () => practiceOnlyDivisionsOf(divisionRows, currentSeasonSetting?.id),
@@ -1001,10 +1000,6 @@ export default function GameSchedulingPage() {
     [displayTeamById, fieldById, game?.assignments, game?.runId, slotById]
   );
 
-  useEffect(() => {
-    setLocalAssignments(savedAssignments);
-  }, [savedAssignments, game?.generatedAt]);
-
   const displayedAssignments = reviewAssignments ?? localAssignments;
   const isReviewing = Boolean(reviewAssignments);
   const displayedAssignmentsRef = useRef(displayedAssignments);
@@ -1040,6 +1035,13 @@ export default function GameSchedulingPage() {
   const [staleAgainst, setStaleAgainst] = useState(/** @type {unknown} */ (null));
   const savedIsStale = staleAgainst !== null && staleAgainst === game?.assignments;
   const markSavedStale = useCallback(() => setStaleAgainst(savedGamesRef.current ?? null), []);
+  // The list follows the saved rows, except while they are known to be the rows from before a change (an Apply, a
+  // rollback): a re-render then (a slot read landing, the season clock) would put the list back to the schedule before
+  // the save until the saved schedule is read again (review of #731).
+  useEffect(() => {
+    if (savedIsStale) return;
+    setLocalAssignments(savedAssignments);
+  }, [savedAssignments, game?.generatedAt, savedIsStale]);
   const [listFilter, setListFilter] = useState('all');
   const [publishBusy, setPublishBusy] = useState(false);
   const publishBusyRef = useRef(false);
@@ -1324,7 +1326,13 @@ export default function GameSchedulingPage() {
   // clock. The banner already says "Loading this season's settings…" in that
   // window (see `composeSchedulerReadinessMessage`), so this makes the button
   // agree with the sentence beside it rather than inventing a new rule.
+  // A game added by hand and not yet applied would be dropped by a fresh generation (it replaces the review), so
+  // generating waits until the review is applied or discarded, and says so (PR 8).
+  const addedGamesStaged = (reviewAssignments ?? []).some(
+    (assignment) => assignment.addedByHand === true
+  );
   const schedulerDisabled =
+    addedGamesStaged ||
     loading.game ||
     !canManageSchedule ||
     schedulerStatus === 'running' ||
@@ -1683,25 +1691,37 @@ export default function GameSchedulingPage() {
     () => new Set(seasonTeams.filter((entry) => entry.isExternal).map((entry) => String(entry.id))),
     [seasonTeams]
   );
+  const isExternalTeam = useCallback((id) => externalTeamIds.has(String(id)), [externalTeamIds]);
+  // Each clash once (two added games that clash raise it from both sides): one list for the banner and the save.
   const addedGameWarnings = useMemo(
     () =>
-      (reviewAssignments ?? [])
-        .filter((assignment) => assignment.addedByHand === true)
-        .flatMap((assignment) =>
-          doubleBookings(assignment, reviewAssignments ?? [], {
-            isExternal: (id) => externalTeamIds.has(String(id)),
-            fieldName: fieldNameOf,
-          })
-        ),
-    [externalTeamIds, fieldNameOf, reviewAssignments]
+      uniqueWarnings(
+        (reviewAssignments ?? [])
+          .filter((assignment) => assignment.addedByHand === true)
+          .flatMap((assignment) =>
+            addedGameWarningsOf(assignment, reviewAssignments ?? [], {
+              isExternal: isExternalTeam,
+              fieldName: fieldNameOf,
+            })
+          )
+      ),
+    [fieldNameOf, isExternalTeam, reviewAssignments]
   );
   // The slots Apply has had from `ensure_game_slot` in this session: known to exist before the slot read catches up.
   const ensuredSlotIdsRef = useRef(new Set());
   /** An error, with the new-time slots this Apply made and left unused named after it (the plan, 5.5). */
   const withLeftSlots = useCallback(
-    (message, made) => {
+    (message, made, { unknown = false } = {}) => {
       if (!made || made.length === 0) return message;
       const named = made.map((slot) => describeNewSlot(slot, fieldNameOf(slot.fieldId), timezone));
+      // A save whose outcome is not known may have been written: the slot may hold the saved game.
+      if (unknown) {
+        return `${message} The new time ${made.length === 1 ? 'slot' : 'slots'} ${named.join('; ')} ${
+          made.length === 1 ? 'was' : 'were'
+        } made before the save; whether the game was saved into ${
+          made.length === 1 ? 'it' : 'them'
+        } is being checked.`;
+      }
       return made.length === 1
         ? `${message} The new time slot ${named[0]} was made before the save and is kept, unused: it holds no game and does no harm.`
         : `${message} The new time slots ${named.join('; ')} were made before the save and are kept, unused: they hold no game and do no harm.`;
@@ -1716,41 +1736,88 @@ export default function GameSchedulingPage() {
     setApplyError(null);
 
     // A game added by hand at a new time needs its slot first: found or made by the database, which also says
-    // whether that slot holds a Published game (refused here, before anything is saved).
+    // whether that slot holds a game (refused here, before anything is saved).
+    //
+    // The slots this Apply makes, by id, read into the grid's slots before the save. The list is not put back to the
+    // schedule before the save by that read: it keeps the applied review while the saved rows are stale (the effect
+    // guarded by `savedIsStale`; review of #731).
+    /** @type {string[]} */
+    const madeIds = [];
+    const readMadeSlots = async () => {
+      if (madeIds.length === 0) return;
+      const { data, error } = await supabase
+        .from('game_slots')
+        .select('*, divisions(id, name)')
+        .in('id', madeIds);
+      if (error) throw error;
+      const fresh = new Set((data ?? []).map((row) => String(row.id)));
+      setGameSlotRows((rows) => [
+        ...rows.filter((row) => !fresh.has(String(row.id))),
+        ...(data ?? []),
+      ]);
+    };
     /** @type {{ review: Array<Record<string, any>>, made: Array<Record<string, any>>, slotIds: Set<string> }} */
     let resolved;
     try {
-      resolved = await resolveAddedSlots(reviewAssignments, async (pending) => {
-        const { data, error } = await supabase.rpc('ensure_game_slot', {
-          p_organization_id: currentOrganization?.id,
-          p_field_id: pending.fieldId,
-          p_slot_date: pending.date,
-          p_start_time: pending.startTime,
-          p_end_time: pending.endTime,
-          p_week_index: pending.weekIndex,
-          p_start: pending.start,
-          p_end: pending.end,
-        });
-        if (error || !data?.id) {
-          throw new Error(
-            `The new time could not be made: ${error?.message ?? 'the database returned no slot'}. Nothing was saved.`
-          );
-        }
-        ensuredSlotIdsRef.current.add(String(data.id));
-        return data;
-      });
+      resolved = await resolveAddedSlots(
+        reviewAssignments,
+        async (pending) => {
+          const { data, error } = await supabase.rpc('ensure_game_slot', {
+            p_organization_id: currentOrganization?.id,
+            p_field_id: pending.fieldId,
+            p_slot_date: pending.date,
+            p_start_time: pending.startTime,
+            p_end_time: pending.endTime,
+            p_week_index: pending.weekIndex,
+            p_start: pending.start,
+            p_end: pending.end,
+          });
+          if (error || !data?.id) {
+            throw new Error(
+              `The new time could not be made: ${error?.message ?? 'the database returned no slot'}. Nothing was saved.`
+            );
+          }
+          ensuredSlotIdsRef.current.add(String(data.id));
+          if (data.created) {
+            madeIds.push(String(data.id));
+            return data;
+          }
+          // A slot it already had: its result is the id alone, so the slot is read back to be compared.
+          const { data: row, error: readError } = await supabase
+            .from('game_slots')
+            .select('id, field_id, slot_date, start_time, end_time, week_index, start, end')
+            .eq('id', data.id)
+            .maybeSingle();
+          if (readError) {
+            throw new Error(
+              `The slot the database found could not be read back: ${readError.message}. Nothing was saved.`
+            );
+          }
+          return { ...data, row: row ?? undefined };
+        },
+        { fieldName: fieldNameOf }
+      );
     } catch (err) {
       const made = /** @type {any} */ (err)?.madeSlots ?? [];
       setApplyStatus('error');
       setApplyError(withLeftSlots(err instanceof Error ? err.message : String(err), made));
-      if (made.length > 0) setReferenceReloadKey((key) => key + 1);
+      // Best effort: the grid learns of the slots made; the error above already names them.
+      await readMadeSlots().catch((readErr) => logger.warn('Made slots not read back', readErr));
       return;
     }
     const review = resolved.review;
-    if (resolved.slotIds.size > 0) {
-      // The review names the database's slots from here on, so a second Apply does not ask again.
+    try {
+      await readMadeSlots();
+    } catch (err) {
+      setApplyStatus('error');
+      setApplyError(
+        withLeftSlots(
+          `The slots this Apply made could not be read back: ${err?.message ?? err}. Nothing was saved yet: apply again.`,
+          resolved.made
+        )
+      );
       setReviewAssignments(review);
-      setReferenceReloadKey((key) => key + 1);
+      return;
     }
 
     try {
@@ -1773,6 +1840,21 @@ export default function GameSchedulingPage() {
         }))
       );
       setReviewAssignments(null);
+      // The saved run now records the added games' flags with the generator's (C3, review of #731): a generated review's
+      // snapshot is what the banner reads after Apply, so it carries them too.
+      if (addedGameWarnings.length > 0) {
+        setSchedulerResult((current) =>
+          current?.evaluation
+            ? {
+                ...current,
+                evaluation: {
+                  ...current.evaluation,
+                  warnings: [...(current.evaluation.warnings ?? []), ...addedGameWarnings],
+                },
+              }
+            : current
+        );
+      }
       setApplyStatus('applied');
       // A game moved, flipped or regenerated keeps its id, its Published state and its history (the save updates it
       // in place). A game that had a Published history and that the new schedule no longer holds stays in the old run
@@ -1790,8 +1872,12 @@ export default function GameSchedulingPage() {
     } catch (err) {
       setApplyStatus('error');
       setApplyError(
-        withLeftSlots(err.message || 'Game schedule changes could not be applied.', resolved.made)
+        withLeftSlots(err.message || 'Game schedule changes could not be applied.', resolved.made, {
+          unknown: isUnknownPersistenceOutcome(err),
+        })
       );
+      // The review names the database's slots from here on, so a second Apply does not ask for them again.
+      if (resolved.slotIds.size > 0) setReviewAssignments(review);
       rereadAfterUnknownOutcome(err);
     }
   }, [
@@ -1799,6 +1885,7 @@ export default function GameSchedulingPage() {
     canApplySchedule,
     canManageSchedule,
     currentOrganization?.id,
+    fieldNameOf,
     game?.runId,
     localAssignments,
     markSavedStale,
@@ -2054,22 +2141,38 @@ export default function GameSchedulingPage() {
         ),
       }));
   }, [gameTeams, practiceOnly, seasonTeams]);
+  const addTeamNames = useMemo(
+    () =>
+      new Map(
+        addDivisions.flatMap((division) =>
+          division.teams.map((entry) => [String(entry.id), String(entry.name)])
+        )
+      ),
+    [addDivisions]
+  );
   const planAddChoice = useCallback(
     (choice) =>
       planAddedGame(choice, {
         review: displayedAssignmentsRef.current,
         slots: gameSlots,
-        fields,
-        teams: new Map(
-          addDivisions.flatMap((division) =>
-            division.teams.map((entry) => [String(entry.id), entry])
-          )
-        ),
+        teamName: (id) => addTeamNames.get(String(id)) ?? String(id),
+        isExternal: isExternalTeam,
+        fieldName: fieldNameOf,
+        divisionName: (id) =>
+          divisionRows.find((row) => String(row.id) === String(id))?.name ?? null,
         timezone,
         seasonStart: currentSeasonSetting?.season_start ?? null,
         key: addKeyRef.current,
       }),
-    [addDivisions, currentSeasonSetting?.season_start, fields, gameSlots, timezone]
+    [
+      addTeamNames,
+      currentSeasonSetting?.season_start,
+      divisionRows,
+      fieldNameOf,
+      gameSlots,
+      isExternalTeam,
+      timezone,
+    ]
   );
   const openAddGame = useCallback(() => {
     addKeyRef.current += 1;
@@ -2105,7 +2208,9 @@ export default function GameSchedulingPage() {
               ? 'This season has no time zone, so a game cannot be placed on its clock.'
               : applyStatus === 'applying' || applyStatus === 'rollingBack'
                 ? 'Saving…'
-                : null;
+                : schedulerStatus === 'running'
+                  ? 'The scheduler is running: add a game once it has finished.'
+                  : null;
   const addGameReasonId = useId();
 
   const gridSensors = useGameGridSensors();
@@ -2452,6 +2557,12 @@ export default function GameSchedulingPage() {
         </div>
 
         <div className="lg:col-span-1 space-y-6">
+          {addedGamesStaged && canManageSchedule && (
+            <p className="text-sm text-text-muted" data-testid="generate-waits-for-added">
+              Generating is off while a game added by hand is staged: a new schedule would drop it.
+              Apply or discard the review first.
+            </p>
+          )}
           <AutoSchedulerPanel
             title="Game Auto-Scheduler"
             description="Generate round-robin matchups from current teams and game slots"

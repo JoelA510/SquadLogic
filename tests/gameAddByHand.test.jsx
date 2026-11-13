@@ -35,6 +35,8 @@ import { seedMockDb } from './helpers/seedMockDb.js';
 const ORG = '00000000-0000-4000-8000-0000000000a8';
 const SEASON = '00000000-0000-4000-8000-0000000000b8';
 const DIVISION = '00000000-0000-4000-8000-0000000000c8';
+/** A second division, with no teams: gs-4 is reserved for it (a slot of another division is flagged). */
+const OTHER_DIVISION = '00000000-0000-4000-8000-0000000000c9';
 const SAVED_RUN = '00000000-0000-4000-8000-0000000000d8';
 const G1 = '00000000-0000-4000-8000-00000000e001';
 const G2 = '00000000-0000-4000-8000-00000000e002';
@@ -124,7 +126,8 @@ vi.mock('../frontend/src/utils/gamePersistenceClient.js', () => ({
 
 const { default: GameSchedulingPage } =
   await import('../frontend/src/pages/GameSchedulingPage.jsx');
-const { planAddedGame, heldGameAt } = await import('../frontend/src/utils/gameAddByHand.js');
+const { planAddedGame, occupantAt, duplicateTupleRefusal } =
+  await import('../frontend/src/utils/gameAddByHand.js');
 
 const at = (date, hhmm) => {
   // 2026-10 is EDT (UTC-4).
@@ -139,6 +142,7 @@ const SLOTS = [
 ].map(([id, field, date, week]) => ({
   id,
   organization_id: ORG,
+  division_id: id === 'gs-4' ? OTHER_DIVISION : null,
   field_id: field,
   slot_date: date,
   start_time: '09:00:00',
@@ -190,7 +194,10 @@ function seed() {
         season_end: '2026-12-31',
       },
     ],
-    divisions: [{ id: DIVISION, organization_id: ORG, season_settings_id: SEASON, name: 'U10' }],
+    divisions: [
+      { id: DIVISION, organization_id: ORG, season_settings_id: SEASON, name: 'U10' },
+      { id: OTHER_DIVISION, organization_id: ORG, season_settings_id: SEASON, name: 'U12' },
+    ],
     teams: [
       ...ROSTER.map((team) => ({
         id: team.id,
@@ -561,19 +568,6 @@ describe('a double booking is flagged, not blocked', () => {
     expect(warnings).toEqual(['field-overlap', 'team-double-booked', 'team-double-booked']);
   });
 
-  it('a new time in the very slot of a game that is not Published is a double booking: flagged, not blocked', async () => {
-    await mount();
-    const dialog = await fillDialog({
-      home: 'team-1',
-      away: 'team-3',
-      where: { field: 'f-south', date: '2026-10-03', start: '09:00', end: '10:00' },
-    });
-    expect(within(dialog).getByTestId('add-game-warnings')).toHaveTextContent(
-      'South Field already has Synthetic Meteors vs Synthetic Planets'
-    );
-    expect(addButton(dialog)).toBeEnabled();
-  });
-
   it('control: a free time on a free field flags nothing', async () => {
     await mount();
     const dialog = await fillDialog({
@@ -632,7 +626,7 @@ describe('a Published slot is never added over', () => {
     expect(screen.queryByText(/staged for review/)).not.toBeInTheDocument();
   });
 
-  it('the pure rule: an open-slot choice of a Published game cell is refused; the cell of a game that is not, flagged', () => {
+  it('the pure rule: an open-slot choice of a Published game cell is refused, and so is the cell of a game that is not', () => {
     const review = [
       {
         id: G1,
@@ -672,13 +666,22 @@ describe('a Published slot is never added over', () => {
     expect(refused).toEqual({
       refusal: expect.stringContaining('Synthetic Comets vs Synthetic Rockets is Published'),
     });
-    const flagged = planAddedGame(choice('f-south:gs-2'), context({ review }));
-    if (!('game' in flagged))
-      throw new Error('the cell of a game that is not Published was refused');
-    expect(flagged.warnings.map((w) => w.type)).toContain('field-overlap');
-    // A game with a score is held as a Published one is.
-    expect(heldGameAt('gs-2', [{ ...review[1], scored: true }])).not.toBeNull();
-    expect(heldGameAt('gs-2', review)).toBeNull();
+    // A slot that holds a game that is not Published is refused too: one game per slot (the grid draws one per cell).
+    expect(planAddedGame(choice('f-south:gs-2'), context({ review }))).toEqual({
+      refusal: expect.stringContaining(
+        'Synthetic Meteors vs Synthetic Planets is already in that slot'
+      ),
+    });
+    // A game with a score is held as a Published one is, and said so.
+    expect(
+      planAddedGame(
+        choice('f-south:gs-2'),
+        context({ review: [review[0], { ...review[1], scored: true }] })
+      )
+    ).toEqual({ refusal: expect.stringContaining('has a score in that slot') });
+    // The held game is the occupant named first.
+    expect(occupantAt('gs-1', review)?.id).toBe(G1);
+    expect(occupantAt('gs-3', review)).toBeNull();
   });
 
   it('a slot the database finds on Apply that holds a Published game: refused before the save, nothing saved', async () => {
@@ -731,31 +734,6 @@ describe('a failed save names the slot it left', () => {
     );
     expect(orgSlots().filter((s) => s.slot_date === '2026-10-17')).toHaveLength(1);
     expect(orgGames()).toHaveLength(2);
-  });
-
-  it('control: a slot that already existed, then a refused save: no slot is said to be left', async () => {
-    const real = mockSupabase.rpc.bind(mockSupabase);
-    vi.spyOn(mockSupabase, 'rpc').mockImplementation(async (name, params) =>
-      name === 'ensure_game_slot'
-        ? { data: { id: 'gs-4', created: false }, error: null }
-        : real(name, params)
-    );
-    SAVE.impl = async () => {
-      throw new Error('The save was refused.');
-    };
-    await mount();
-    fireEvent.click(
-      addButton(
-        await fillDialog({
-          home: 'team-2',
-          away: 'team-4',
-          where: { field: 'f-south', date: '2026-10-31', start: '13:00', end: '14:00' },
-        })
-      )
-    );
-    await apply();
-    const error = await screen.findByText(/The save was refused\./);
-    expect(error).not.toHaveTextContent(/was made before the save/);
   });
 
   it('a slot the database will not make: said, and nothing is saved', async () => {
@@ -834,29 +812,6 @@ describe('the keyboard path', () => {
     expect(addButton(dialog)).toBeDisabled();
   });
 
-  it('the same pair in the slot it already holds is refused (one place holds one game of a pair); the reverse pair is flagged', async () => {
-    await mount();
-    let dialog = await fillDialog({
-      home: 'team-3',
-      away: 'team-4',
-      where: { field: 'f-south', date: '2026-10-03', start: '09:00', end: '10:00' },
-    });
-    expect(within(dialog).getByRole('alert')).toHaveTextContent(
-      'Synthetic Meteors vs Synthetic Planets is already in that slot'
-    );
-    expect(addButton(dialog)).toBeDisabled();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    dialog = await fillDialog({
-      home: 'team-4',
-      away: 'team-3',
-      where: { field: 'f-south', date: '2026-10-03', start: '09:00', end: '10:00' },
-    });
-    expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument();
-    expect(within(dialog).getByTestId('add-game-warnings')).toBeInTheDocument();
-    expect(addButton(dialog)).toBeEnabled();
-  });
-
   it('a date before the season starts is refused (no week can be given to it)', async () => {
     await mount();
     const dialog = await fillDialog({
@@ -869,8 +824,319 @@ describe('the keyboard path', () => {
   });
 });
 
+/** Fill the dialog, add the game, and wait until the review holds it. */
+async function stage(args) {
+  const dialog = await fillDialog(args);
+  fireEvent.click(addButton(dialog));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+}
+
+describe('review of #731: one game per slot, and a new time is the slot it names', () => {
+  it('a new time in the slot of a game that is not Published is refused, naming the game in it (item 4)', async () => {
+    await mount();
+    let dialog = await fillDialog({
+      home: 'team-1',
+      away: 'team-3',
+      where: { field: 'f-south', date: '2026-10-03', start: '09:00', end: '10:00' },
+    });
+    expect(within(dialog).getByRole('alert')).toHaveTextContent(
+      'Synthetic Meteors vs Synthetic Planets is already in that slot. A slot holds one game: move that game first, or choose another slot or time.'
+    );
+    expect(addButton(dialog)).toBeDisabled();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    // The same pair in its own slot is said as such.
+    dialog = await fillDialog({
+      home: 'team-3',
+      away: 'team-4',
+      where: { field: 'f-south', date: '2026-10-03', start: '09:00', end: '10:00' },
+    });
+    expect(within(dialog).getByRole('alert')).toHaveTextContent(
+      'Synthetic Meteors vs Synthetic Planets is already in that slot, so it is not added again.'
+    );
+  });
+
+  it('a slot that holds a game added by hand is no longer offered as open, and its time is refused (item 4)', async () => {
+    await mount();
+    await stage({ home: 'team-1', away: 'team-3', where: { slot: 'North Field' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add a game' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Add a game' });
+    const labels = within(within(dialog).getByLabelText('Open slot'))
+      .getAllByRole('option')
+      .map((o) => o.textContent ?? '');
+    expect(labels.filter((label) => label.startsWith('North Field'))).toHaveLength(0);
+    expect(labels.filter((label) => label.startsWith('South Field'))).toHaveLength(1);
+  });
+
+  it('the same time twice before Apply: the second is refused, the same pair in its words (item 1)', async () => {
+    await mount();
+    const at17 = { field: 'f-north', date: '2026-10-17', start: '11:00', end: '12:00' };
+    await stage({ home: 'team-2', away: 'team-4', where: at17 });
+    let dialog = await fillDialog({ home: 'team-2', away: 'team-4', where: at17 });
+    expect(within(dialog).getByRole('alert')).toHaveTextContent(
+      'Synthetic Rockets vs Synthetic Planets is already in that slot, so it is not added again.'
+    );
+    expect(addButton(dialog)).toBeDisabled();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    dialog = await fillDialog({ home: 'team-1', away: 'team-3', where: at17 });
+    expect(within(dialog).getByRole('alert')).toHaveTextContent(
+      'Synthetic Rockets vs Synthetic Planets is already in that slot. A slot holds one game'
+    );
+  });
+
+  it('two games of one pair at one place are refused before the save, in the same words (item 1, the pure check)', () => {
+    const one = {
+      id: 'a',
+      homeTeamId: 'team-1',
+      awayTeamId: 'team-3',
+      slotId: 'gs-9',
+      weekIndex: 3,
+    };
+    expect(duplicateTupleRefusal([one, { ...one, id: 'b' }])).toContain(
+      'is already in that slot, so it is not added again.'
+    );
+    // Control: another week, or the reverse pair, is no duplicate of the key.
+    expect(duplicateTupleRefusal([one, { ...one, id: 'b', weekIndex: 4 }])).toBeNull();
+    expect(
+      duplicateTupleRefusal([one, { ...one, id: 'b', homeTeamId: 'team-3', awayTeamId: 'team-1' }])
+    ).toBeNull();
+  });
+
+  it('a new time at an existing slot with another end is refused, naming the slot’s end; the same end is that slot (item 2)', async () => {
+    await mount();
+    let dialog = await fillDialog({
+      home: 'team-1',
+      away: 'team-3',
+      where: { field: 'f-north', date: '2026-10-10', start: '09:00', end: '10:30' },
+    });
+    expect(within(dialog).getByRole('alert')).toHaveTextContent(
+      'That time is an existing slot on North Field, and it ends at 10:00, not 10:30. Pick it as an open slot, or choose another time.'
+    );
+    expect(addButton(dialog)).toBeDisabled();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    // Control: the same end is that slot, taken as it is (no new time made on Apply).
+    dialog = await fillDialog({
+      home: 'team-1',
+      away: 'team-3',
+      where: { field: 'f-north', date: '2026-10-10', start: '09:00', end: '10:00' },
+    });
+    expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument();
+    fireEvent.click(addButton(dialog));
+    await waitFor(() => expect(screen.getByText(/added to the review/)).toBeInTheDocument());
+    expect(screen.getByText(/added to the review/)).not.toHaveTextContent('is made when you apply');
+  });
+
+  it('a slot the database already had that differs from the new time refuses Apply, says why, and saves nothing (item 3)', async () => {
+    const real = mockSupabase.rpc.bind(mockSupabase);
+    vi.spyOn(mockSupabase, 'rpc').mockImplementation(async (name, params) =>
+      name === 'ensure_game_slot'
+        ? { data: { id: 'gs-3', created: false }, error: null }
+        : real(name, params)
+    );
+    await mount();
+    await stage({
+      home: 'team-2',
+      away: 'team-4',
+      where: { field: 'f-north', date: '2026-10-31', start: '13:00', end: '14:00' },
+    });
+    await apply();
+    const error = await screen.findByText(/The database already has a slot on North Field/);
+    expect(error).toHaveTextContent('it is in week 2, not week 5');
+    expect(error).toHaveTextContent('it ends at 10:00, not 14:00');
+    expect(error).toHaveTextContent('Nothing was saved');
+    expect(SAVE.calls).toHaveLength(0);
+    expect(orgGames()).toHaveLength(2);
+  });
+
+  it('control: a slot the database already had that matches is used, and a failed save then names no slot left (items 3 and 9)', async () => {
+    const real = mockSupabase.rpc.bind(mockSupabase);
+    // Another admin made the very slot a moment ago: the database finds it rather than making it.
+    vi.spyOn(mockSupabase, 'rpc').mockImplementation(async (name, params) => {
+      const result = await real(name, params);
+      return name === 'ensure_game_slot' && result.data
+        ? { ...result, data: { ...result.data, created: false } }
+        : result;
+    });
+    SAVE.impl = async () => {
+      throw new Error('The save was refused.');
+    };
+    await mount();
+    await stage({
+      home: 'team-2',
+      away: 'team-4',
+      where: { field: 'f-south', date: '2026-10-31', start: '13:00', end: '14:00' },
+    });
+    await apply();
+    const error = await screen.findByText(/The save was refused\./);
+    expect(error).not.toHaveTextContent(/made before the save/);
+    expect(SAVE.calls).toHaveLength(1);
+  });
+
+  it('a save whose outcome is unknown does not say the slot holds no game: it says it is being checked (item 9)', async () => {
+    SAVE.impl = async () => {
+      throw Object.assign(new Error('The save did not answer in time.'), {
+        code: 'PERSISTENCE_TIMEOUT',
+      });
+    };
+    await mount();
+    await stage({
+      home: 'team-2',
+      away: 'team-4',
+      where: { field: 'f-south', date: '2026-10-17', start: '13:00', end: '14:00' },
+    });
+    await apply();
+    const error = await screen.findByText(/The save did not answer in time\./);
+    expect(error).toHaveTextContent('is being checked');
+    expect(error).not.toHaveTextContent('holds no game');
+  });
+});
+
+describe('review of #731: flags, the banner and the scheduler', () => {
+  it('a slot reserved for another division is flagged, not refused, and recorded with the run (item 10)', async () => {
+    await mount();
+    const dialog = await fillDialog({
+      home: 'team-1',
+      away: 'team-3',
+      where: { slot: 'South Field' },
+    });
+    expect(within(dialog).getByTestId('add-game-warnings')).toHaveTextContent(
+      'Synthetic Comets vs Synthetic Meteors is in a slot reserved for U12.'
+    );
+    expect(addButton(dialog)).toBeEnabled();
+    fireEvent.click(addButton(dialog));
+    await screen.findByText(/3 game assignments staged for review/);
+    expect(
+      within(screen.getByTestId('game-conflict-banner')).getByTestId(
+        'conflict-item-slot-other-division'
+      )
+    ).toBeInTheDocument();
+    await apply();
+    await screen.findByText(/Game schedule applied through the persistence workflow\./);
+    expect(SAVE.calls[0].runMetadata.results.warnings.map((w) => w.type)).toEqual([
+      'slot-other-division',
+    ]);
+  });
+
+  it('two added games that clash are reported once, in the banner and in the run (item 8)', async () => {
+    await mount();
+    await stage({
+      home: 'team-2',
+      away: 'team-4',
+      where: { field: 'f-north', date: '2026-10-17', start: '11:00', end: '12:00' },
+    });
+    await stage({
+      home: 'team-2',
+      away: 'team-3',
+      where: { field: 'f-south', date: '2026-10-17', start: '11:30', end: '12:30' },
+    });
+    const banner = screen.getByTestId('game-conflict-banner');
+    expect(within(banner).getAllByTestId('conflict-item-team-double-booked')).toHaveLength(1);
+    await apply();
+    await screen.findByText(/Game schedule applied through the persistence workflow\./);
+    expect(SAVE.calls[0].runMetadata.results.warnings.map((w) => w.type)).toEqual([
+      'team-double-booked',
+    ]);
+  });
+
+  it('generating is off while an added game is staged, with the reason; discarding turns it back on (item 7)', async () => {
+    await mount();
+    const generate = await screen.findByRole('button', {
+      name: 'Auto-Generate: run auto-scheduler optimization',
+    });
+    await waitFor(() => expect(generate).toBeEnabled());
+    await stage({ home: 'team-1', away: 'team-3', where: { slot: 'North Field' } });
+    expect(generate).toBeDisabled();
+    expect(screen.getByTestId('generate-waits-for-added')).toHaveTextContent(
+      'Generating is off while a game added by hand is staged'
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Discard Review' }));
+    await waitFor(() => expect(generate).toBeEnabled());
+    expect(screen.queryByTestId('generate-waits-for-added')).not.toBeInTheDocument();
+  });
+
+  it('generate, add a double-booked game, Apply: the banner still shows the flag (item 5)', async () => {
+    await mount();
+    const generate = await screen.findByRole('button', {
+      name: 'Auto-Generate: run auto-scheduler optimization',
+    });
+    await waitFor(() => expect(generate).toBeEnabled());
+    fireEvent.click(generate);
+    await screen.findByRole('button', { name: /apply schedule/i });
+    // Comets play the Published G1 at 09:00-10:00 on 2026-10-03.
+    await stage({
+      home: 'team-1',
+      away: 'team-3',
+      where: { field: 'f-south', date: '2026-10-03', start: '09:30', end: '10:30' },
+    });
+    expect(
+      within(screen.getByTestId('game-conflict-banner')).getAllByTestId(
+        'conflict-item-team-double-booked'
+      ).length
+    ).toBeGreaterThan(0);
+    await apply();
+    await screen.findByText(/Game schedule applied through the persistence workflow\./);
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId('game-conflict-banner'))
+          .getAllByTestId('conflict-item-team-double-booked')
+          .some((item) => /Synthetic Comets already plays/.test(item.textContent ?? ''))
+      ).toBe(true)
+    );
+  });
+
+  it('a slow read of the new slot cannot put the list back to the schedule before the save (item 6)', async () => {
+    const realFrom = mockSupabase.from.bind(mockSupabase);
+    const armed = { on: false };
+    const slow = (builder, ms) => {
+      const select = builder.select;
+      builder.select = (...args) => {
+        const query = select(...args);
+        const then = query.then;
+        query.then = (ok, ko) =>
+          new Promise((resolve) => setTimeout(resolve, ms)).then(() => then(ok, ko));
+        return query;
+      };
+      return builder;
+    };
+    vi.spyOn(mockSupabase, 'from').mockImplementation((table) => {
+      const builder = realFrom(table);
+      if (!armed.on) return builder;
+      if (table === 'game_slots') return slow(builder, 150);
+      if (table === 'game_assignments' || table === 'current_game_runs') return slow(builder, 900);
+      return builder;
+    });
+    await mount();
+    await stage({
+      home: 'team-2',
+      away: 'team-4',
+      where: { field: 'f-north', date: '2026-10-17', start: '11:00', end: '12:00' },
+    });
+    armed.on = true;
+    await apply();
+    await screen.findByText(/Game schedule applied through the persistence workflow\./);
+    // Well after a slot read would have landed, and before the saved schedule is read again: the list is the save.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(
+      listRows().filter((row) => row.startsWith('Synthetic Rockets vs Synthetic Planets'))
+    ).toHaveLength(1);
+    armed.on = false;
+  });
+});
+
 /** The page's context for the pure rule, over the league above. */
 function context({ review }) {
+  const names = new Map([
+    ['team-1', 'Synthetic Comets'],
+    ['team-3', 'Synthetic Meteors'],
+    ['team-4', 'Synthetic Planets'],
+    ['club-x', 'Visiting Owls'],
+  ]);
+  const fields = new Map([
+    ['f-north', 'North Field'],
+    ['f-south', 'South Field'],
+  ]);
   return {
     review,
     slots: SLOTS.map((s) => ({
@@ -879,16 +1145,10 @@ function context({ review }) {
       weekIndex: s.week_index,
       label: s.slot_date,
     })),
-    fields: [
-      { id: 'f-north', name: 'North Field' },
-      { id: 'f-south', name: 'South Field' },
-    ],
-    teams: new Map([
-      ['team-1', { name: 'Synthetic Comets', isExternal: false }],
-      ['team-3', { name: 'Synthetic Meteors', isExternal: false }],
-      ['team-4', { name: 'Synthetic Planets', isExternal: false }],
-      ['club-x', { name: 'Visiting Owls', isExternal: true }],
-    ]),
+    teamName: (id) => names.get(id) ?? id,
+    divisionName: (id) => (id === OTHER_DIVISION ? 'U12' : id === DIVISION ? 'U10' : null),
+    isExternal: (id) => id === 'club-x',
+    fieldName: (id) => fields.get(id) ?? id,
     timezone: TZ,
     seasonStart: '2026-09-28',
     key: 1,

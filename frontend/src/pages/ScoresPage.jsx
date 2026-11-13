@@ -48,7 +48,8 @@ export default function ScoresPage() {
   const [games, setGames] = useState([]);
   const [notSaved, setNotSaved] = useState(/** @type {string | null} */ (null));
   const [loadFailed, setLoadFailed] = useState(false);
-  const [outsideSchedule, setOutsideSchedule] = useState(0);
+  // How many results are outside the saved schedule; null when that count could not be read.
+  const [outsideSchedule, setOutsideSchedule] = useState(/** @type {number | null} */ (0));
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const orgId = currentOrganization?.id;
@@ -120,7 +121,16 @@ export default function ScoresPage() {
         const played = saved
           .filter((game) => hasStarted(game, now))
           .sort((a, b) => Date.parse(b.start) - Date.parse(a.start));
-        const outside = seasonId ? await countScoresOutsideSchedule(orgId, seasonId, runIds) : 0;
+        // A side count: when it cannot be read the games still show, and the note says so (null).
+        let outside = 0;
+        if (seasonId) {
+          try {
+            outside = await countScoresOutsideSchedule(orgId, seasonId, runIds);
+          } catch (countErr) {
+            logger.error('[ScoresPage] count of earlier results failed:', countErr);
+            outside = null;
+          }
+        }
         if (cancelled) return;
         setGames(played);
         setOutsideSchedule(outside);
@@ -262,15 +272,17 @@ export default function ScoresPage() {
           The games could not be loaded. Reload the page to try again.
         </p>
       )}
-      {outsideSchedule > 0 && (
+      {(outsideSchedule === null || outsideSchedule > 0) && (
         <p
           role="note"
           data-testid="scores-outside-schedule"
           className="mx-4 mt-3 rounded-lg border border-border-subtle bg-bg-surface px-4 py-2 text-sm text-text-secondary"
         >
-          {outsideSchedule === 1
-            ? '1 earlier result is not listed here: its game is no longer in the saved schedule. It still counts in the standings.'
-            : `${outsideSchedule} earlier results are not listed here: their games are no longer in the saved schedule. They still count in the standings.`}
+          {outsideSchedule === null
+            ? 'Earlier results that are no longer in the saved schedule could not be counted, so some may not be listed here.'
+            : outsideSchedule === 1
+              ? '1 earlier result is not listed here: its game is no longer in the saved schedule. It still counts in the standings.'
+              : `${outsideSchedule} earlier results are not listed here: their games are no longer in the saved schedule. They still count in the standings.`}
         </p>
       )}
       {hasReadOnlyGames && (

@@ -102,6 +102,8 @@ const gameOf = (home: string, away: string) => {
   if (!found) throw new Error(`no seeded game ${home} vs ${away}`);
   return found;
 };
+const laWall = (utcHhmm: string) =>
+  `${String(Number(utcHhmm.slice(0, 2)) - 7).padStart(2, '0')}:${utcHhmm.slice(3, 5)}`;
 const hourAfter = (hhmm: string) => `${String(Number(hhmm.slice(0, 2)) + 1).padStart(2, '0')}:00`;
 
 Given('a club with a saved game schedule in two divisions', async ({ page }) => {
@@ -113,6 +115,11 @@ Given('a club with a saved game schedule in two divisions', async ({ page }) => 
     week_index: week,
     start: `${date}T${start}:00Z`,
     end: `${date}T${hourAfter(start)}:00Z`,
+    // The wall reading the database holds beside the instants (`slot_date` is NOT NULL there), in Los Angeles (UTC-7
+    // in October): `ensure_game_slot` finds a slot by these, so adding a game at a new time matches them (PR 8).
+    slot_date: date,
+    start_time: `${laWall(start)}:00`,
+    end_time: `${laWall(hourAfter(start))}:00`,
     capacity: 1,
   }));
   const games = GAMES.map((g) => {
@@ -730,4 +737,85 @@ Then('the Published games are where they were', async ({ page }) => {
     await expect(cells.nth(2)).toHaveText(spot.kickoff);
     await expect(row.getByTestId('published-state')).toHaveText('Published');
   }
+});
+
+// ---- PR 8: add one game by hand --------------------------------------------------------------------------------
+
+const addDialog = (page: Page) => page.getByRole('dialog', { name: 'Add a game' });
+
+async function openAddGame(page: Page, division: string, home: string, away: string) {
+  const open = page.getByRole('button', { name: 'Add a game' });
+  await expect(open).toBeEnabled({ timeout: 20_000 });
+  await open.click();
+  const dialog = addDialog(page);
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel('Division', { exact: true }).selectOption(division);
+  await dialog.getByLabel('Home team', { exact: true }).selectOption({ label: home });
+  await dialog.getByLabel('Away team', { exact: true }).selectOption({ label: away });
+  return dialog;
+}
+
+When(
+  'I add the game {string} vs {string} in {string} in the open slot on {string}',
+  async ({ page }, home: string, away: string, division: string, field: string) => {
+    const dialog = await openAddGame(page, division, home, away);
+    await dialog.getByLabel('An open slot').check();
+    const select = dialog.getByLabel('Open slot', { exact: true });
+    // The option's label is "<field>, <the slot's time>": the one empty slot on that field.
+    const option = select.locator('option', { hasText: new RegExp(`^${field},`) });
+    await expect(option).toHaveCount(1);
+    await select.selectOption((await option.getAttribute('value')) ?? '');
+    await dialog.getByRole('button', { name: 'Add to the review' }).click();
+    await expect(dialog).toBeHidden();
+    await expect(page.getByText(/staged for review/)).toBeVisible();
+  }
+);
+
+When(
+  'I fill in the game {string} vs {string} in {string} at {string} on {string} from {string} to {string}',
+  async (
+    { page },
+    home: string,
+    away: string,
+    division: string,
+    field: string,
+    date: string,
+    start: string,
+    end: string
+  ) => {
+    if (!page.url().endsWith('/schedule/game')) await openGamesPage(page);
+    const dialog = await openAddGame(page, division, home, away);
+    await dialog.getByLabel('A new time').check();
+    await dialog.getByLabel('Field', { exact: true }).selectOption({ label: field });
+    await dialog.getByLabel('Date', { exact: true }).fill(date);
+    await dialog.getByLabel('Starts', { exact: true }).fill(start);
+    await dialog.getByLabel('Ends', { exact: true }).fill(end);
+  }
+);
+
+Then('the Add a game dialog flags {string}', async ({ page }, text: string) => {
+  await expect(addDialog(page).getByTestId('add-game-warnings')).toContainText(text);
+  // Flagged, not blocked.
+  await expect(addDialog(page).getByRole('button', { name: 'Add to the review' })).toBeEnabled();
+});
+
+When('I add the game to the review', async ({ page }) => {
+  await addDialog(page).getByRole('button', { name: 'Add to the review' }).click();
+  await expect(addDialog(page)).toBeHidden();
+  await expect(page.getByText(/staged for review/)).toBeVisible();
+});
+
+Then('the conflict banner lists a double booking', async ({ page }) => {
+  const banner = page.getByTestId('game-conflict-banner');
+  await expect(banner.getByTestId('conflict-item-team-double-booked').first()).toBeVisible();
+  await expect(banner.getByTestId('conflict-item-field-overlap')).toBeVisible();
+});
+
+Then('the Add a game dialog refuses with {string}', async ({ page }, text: string) => {
+  await expect(addDialog(page).getByRole('alert')).toContainText(text);
+});
+
+Then('the game cannot be added to the review', async ({ page }) => {
+  await expect(addDialog(page).getByRole('button', { name: 'Add to the review' })).toBeDisabled();
+  await expect(page.getByText(/staged for review/)).toHaveCount(0);
 });

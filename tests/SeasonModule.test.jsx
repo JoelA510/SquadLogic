@@ -37,13 +37,17 @@ vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   }),
 }));
 
-// The Programs section (Phase E2) and the Seasons section (E3b) read and write through their own
-// hooks and have their own tests (tests/programsSection.test.jsx, tests/seasonsSection.test.jsx);
-// this suite is about the season's format and clock.
+// The Programs section (Phase E2), the Seasons section (E3b) and the scoped settings panel (F11-4b)
+// read and write through their own hooks and have their own tests (tests/programsSection.test.jsx,
+// tests/seasonsSection.test.jsx, tests/scopedSettingsSection.test.jsx); this suite is about the
+// season's format and clock.
 vi.mock('../frontend/src/components/settings/modules/ProgramsSection.jsx', () => ({
   default: () => null,
 }));
 vi.mock('../frontend/src/components/settings/modules/SeasonsSection.jsx', () => ({
+  default: () => null,
+}));
+vi.mock('../frontend/src/components/settings/modules/ScopedSettingsSection.jsx', () => ({
   default: () => null,
 }));
 

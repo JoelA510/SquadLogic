@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabaseClient.js';
 import { logger } from '../lib/logger.js';
+import { REFRESH_TOPICS, emitRefresh } from '../lib/refreshBus.js';
 import {
   CreateProgramSchema,
   DeleteProgramSchema,
@@ -109,6 +110,8 @@ export function usePrograms(seasonId) {
         throw failure;
       }
       await load();
+      // the scoped settings panel lists the same programs and divisions (F11-4b): it reads them again
+      emitRefresh(REFRESH_TOPICS.PROGRAMS);
       return data;
     },
     [load]

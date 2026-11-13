@@ -242,8 +242,7 @@ export default function PracticeImportSteps(props) {
       .map((patch) => {
         const p = settings.find((x) => x.divisionId === patch.divisionId);
         const stored = league.divisions.find((d) => d.id === patch.divisionId);
-        // the division's other rules as this import read them: the save refuses if they have changed since
-        return { ...patch, name: stored?.name ?? p?.label ?? '', roster: stored?.roster ?? null };
+        return { ...patch, name: stored?.name ?? p?.label ?? '' };
       });
   }, [offered, settings, practice.settingsTicks, league]);
 

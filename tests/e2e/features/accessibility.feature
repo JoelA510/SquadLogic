@@ -354,13 +354,15 @@ Feature: Every top-level route passes an automated accessibility scan
     Then the scan sees "Override a saved practice" on the page
     And axe finds no serious or critical violations on "/schedule/practice" in the "dark" theme
 
-  Scenario: Settings, Season and Calendar with a program in it passes axe in both themes
+  Scenario: Settings, Season and Calendar with a program in it, and the scoped settings panel, passes axe in both themes
     Given I am logged into SquadLogic as an admin
     And the season has a program "Junior" holding the division "U8 Coed"
     When I open "/settings" and see its "Settings" heading
     And I open the Season and Calendar settings
     Then the scan sees "Programs are optional" on the page
+    And the scan sees "Settings by program and division" on the page
     And axe finds no serious or critical violations on "/settings" in the "light" theme
     When I switch to the dark theme on this page
     Then the scan sees "Programs are optional" on the page
+    And the scan sees "Settings by program and division" on the page
     And axe finds no serious or critical violations on "/settings" in the "dark" theme

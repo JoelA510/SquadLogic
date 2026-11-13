@@ -90,6 +90,8 @@ async function staged(rows) {
 
 afterEach(() => {
   vi.useRealTimers();
+  // a spy left by a test that failed before its own restore would wrap the next test's spy
+  vi.restoreAllMocks();
 });
 beforeEach(() => {
   // the TIME TBD rebuild reads the date: pinned, so the answer does not change as the real date passes
@@ -299,37 +301,70 @@ describe('re-staging (review item 9)', () => {
   });
 });
 
-describe('division settings: the roster rules are sent back only when unchanged (review item 6)', () => {
-  it('refuses, in words, when the division’s rules changed after the import read them, and writes nothing', async () => {
+describe('division settings: only the practice settings are written (F11-4b B3, admin_set_division_practice_settings)', () => {
+  it('another admin changed the roster rules after the preview: the practice settings save, the roster rules stay theirs', async () => {
+    // what the import read: U10 Boys' rules as seeded (max roster 12)
+    const league = await C.readPracticeImportLeague(client, {
+      organizationId: ORG,
+      seasonSettingsId: SEASON,
+    });
+    const before = league.divisions.find((d) => d.id === DIVISIONS.u10);
+    expect(before, 'the import read U10 Boys').toBeTruthy();
+    // then another admin sets the max roster to 13 and the target size to 9
+    const db =
+      /** @type {any} */ (window).__MOCK_DB__ ?? JSON.parse(sessionStorage.getItem('__MOCK_DB__'));
+    const stored = db.divisions.find((d) => d.id === DIVISIONS.u10);
+    expect(stored.max_roster_size, 'CONTROL: the seeded max roster').toBe(12);
+    stored.max_roster_size = 13;
+    stored.target_team_size = 9;
+    /** @type {any} */ (window).__saveMockDB__(db);
     const rpc = vi.spyOn(client, 'rpc');
+    const from = vi.spyOn(client, 'from');
+    const out = await C.applyPracticeDivisionSettings(client, {
+      organizationId: ORG,
+      seasonSettingsId: SEASON,
+      patches: [{ divisionId: DIVISIONS.u10, name: 'U10 Boys', practiceMinutes: 60 }],
+    });
+    expect(out.failed).toEqual([]);
+    expect(out.saved).toEqual([{ name: 'U10 Boys' }]);
+    // one call to the practice-only setter, with only the practice settings (null keeps practices a week)
+    const writes = rpc.mock.calls.filter(([name]) =>
+      ['admin_set_division_practice_settings', 'admin_upsert_division_settings'].includes(
+        String(name)
+      )
+    );
+    expect(writes).toEqual([
+      [
+        'admin_set_division_practice_settings',
+        { p_division_id: DIVISIONS.u10, p_practices_per_week: null, p_practice_minutes: 60 },
+      ],
+    ]);
+    // no read of the division before the write: nothing can be overwritten, so nothing is compared
+    expect(from.mock.calls.filter(([table]) => table === 'divisions')).toEqual([]);
+    const after = /** @type {any} */ (window).__MOCK_DB__.divisions.find(
+      (d) => d.id === DIVISIONS.u10
+    );
+    expect(after).toMatchObject({ practice_minutes: 60, max_roster_size: 13, target_team_size: 9 });
+    vi.restoreAllMocks();
+  });
+
+  it('"any length" is sent as 0 and a refusal is said in words, per division, without stopping the others', async () => {
     const out = await C.applyPracticeDivisionSettings(client, {
       organizationId: ORG,
       seasonSettingsId: SEASON,
       patches: [
-        {
-          divisionId: DIVISIONS.u10,
-          name: 'U10 Boys',
-          practiceMinutes: 60,
-          // what the import read: another admin has since set the max roster to 12
-          roster: {
-            max_roster_size: 14,
-            min_roster_size: 8,
-            target_team_size: 10,
-            team_count_override: null,
-            min_teams: 2,
-            max_teams: 6,
-          },
-        },
+        { divisionId: DIVISIONS.u10, name: 'U10 Boys', practicesPerWeek: 9 },
+        { divisionId: DIVISIONS.u12, name: 'U12 Girls', practiceMinutes: 'any' },
       ],
     });
-    expect(out.saved).toEqual([]);
-    expect(out.failed[0].message).toMatch(
-      /team rules \(max roster size\) changed after this import read them/
+    expect(out.failed).toEqual([
+      { name: 'U10 Boys', message: 'practices per week must be from 0 to 7, not 9' },
+    ]);
+    expect(out.saved).toEqual([{ name: 'U12 Girls' }]);
+    const u12 = /** @type {any} */ (window).__MOCK_DB__.divisions.find(
+      (d) => d.id === DIVISIONS.u12
     );
-    expect(rpc.mock.calls.filter(([name]) => name === 'admin_upsert_division_settings')).toEqual(
-      []
-    );
-    vi.restoreAllMocks();
+    expect(u12.practice_minutes).toBe(null);
   });
 
   it('saves when they are unchanged, and reads the TIME TBD list back as counted with the new settings', async () => {
@@ -364,20 +399,13 @@ describe('division settings: the roster rules are sent back only when unchanged 
     expect(preview.time_tbd.teams.map((t) => t.team_id)).toEqual(
       expect.arrayContaining([TEAMS['U12G-02'], TEAMS['U12G-03']])
     );
-    const league = await C.readPracticeImportLeague(client, {
-      organizationId: ORG,
-      seasonSettingsId: SEASON,
-    });
-    const u12 = league.divisions.find((d) => d.id === DIVISIONS.u12);
     const applied = await C.confirmPracticeImport(client, {
       organizationId: ORG,
       seasonSettingsId: SEASON,
       jobId,
       confirmed: C.practiceImportConfirmCounts(preview),
       extra: {
-        settings: [
-          { divisionId: DIVISIONS.u12, name: 'U12 Girls', practicesPerWeek: 1, roster: u12.roster },
-        ],
+        settings: [{ divisionId: DIVISIONS.u12, name: 'U12 Girls', practicesPerWeek: 1 }],
       },
     });
     expect(applied.settings.saved).toEqual([{ name: 'U12 Girls' }]);

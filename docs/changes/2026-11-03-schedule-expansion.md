@@ -1988,6 +1988,9 @@ requirements of the PR 10 review and by this PR:
    no setting (a setting would make the rollback keep it as changed): the screen says to set it on the Team Analysis page
    after the confirm. The confirm list and the rollback say that a rollback does not undo a saved setting. **Follow-up:**
    an RPC that sets a division's practice settings alone, without the roster rules, would end the read-then-write.
+   **Resolved (2026-11-13, F11-4b of `docs/changes/2026-11-13-settings-scope.md`):** the import saves through
+   `admin_set_division_practice_settings` (migration `20261124010000`), which changes only the two practice columns; the
+   read before the write and its `division_rules_changed` refusal are gone.
 7. **The confirm list** names every record to be created and counts the practice slots, and the confirm is refused until
    it is ticked; venues and fields created have no coordinates, said beside the list.
 8. **Every reason in words**: the reason's sentence and the database's own message with record ids taken out

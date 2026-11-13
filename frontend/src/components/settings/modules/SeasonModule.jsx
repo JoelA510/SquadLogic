@@ -1,9 +1,12 @@
-import React, { useState } from 'react';
+import React, { Suspense, lazy, useState } from 'react';
 import { useOrganization } from '../../../contexts/OrganizationContext.jsx';
 import { useSeasonReadOnly } from '../../../hooks/useSeasonReadOnly.js';
 import { supabase } from '../../../lib/supabaseClient.js';
 import ProgramsSection from './ProgramsSection.jsx';
 import SeasonsSection from './SeasonsSection.jsx';
+
+// Its own chunk: admins only, and it pulls in the scoped settings twin (F11-4b).
+const ScopedSettingsSection = lazy(() => import('./ScopedSettingsSection.jsx'));
 
 /**
  * The zones this control offers by name.
@@ -211,6 +214,10 @@ export default function SeasonModule() {
       <SeasonsSection seasonFormat={seasonFormat} />
 
       <ProgramsSection />
+
+      <Suspense fallback={null}>
+        <ScopedSettingsSection />
+      </Suspense>
     </div>
   );
 }

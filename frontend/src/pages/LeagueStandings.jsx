@@ -184,7 +184,8 @@ export default function LeagueStandings() {
           {outsideResultsNotCounted === 1
             ? '1 result against an outside club is not counted.'
             : `${outsideResultsNotCounted} results against outside clubs are not counted.`}{' '}
-          Whether they count is a league setting; the settings screen for it is coming.
+          Whether they count is a league setting, set for the organization, a program or a division
+          in Settings, General, Season &amp; Calendar, under “Settings by program and division”.
         </p>
       )}
 

@@ -277,7 +277,7 @@ describe('every reason in words, never colour alone', () => {
 });
 
 describe('division settings from the file: one tick each, and only a ticked one is sent', () => {
-  it('saves the ticked division’s settings with its other rules as stored, and leaves the others alone', async () => {
+  it('saves the ticked division’s practice settings alone, its other rules untouched, and leaves the others alone', async () => {
     const rpc = vi.spyOn(mockSupabase, 'rpc');
     render(<ScheduleImportPanel kind="practices" />);
     await toMapping();
@@ -300,18 +300,11 @@ describe('division settings from the file: one tick each, and only a ticked one 
         /Saved: U10 Boys/
       )
     );
-    const sent = callsOf(rpc, 'admin_upsert_division_settings');
-    expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({
-      p_division_id: DIVISIONS.u10,
-      p_practice_minutes: 60,
-      // the division's other rules, sent as they are stored (the RPC sets every one it is given)
-      p_max_roster_size: 12,
-      p_min_roster_size: 8,
-      p_target_team_size: 10,
-      p_min_teams: 2,
-      p_max_teams: 6,
-    });
+    // the practice-only setter (F11-4b B3): the practice settings and nothing else, so the roster rules are not sent
+    expect(callsOf(rpc, 'admin_upsert_division_settings')).toEqual([]);
+    expect(callsOf(rpc, 'admin_set_division_practice_settings')).toEqual([
+      { p_division_id: DIVISIONS.u10, p_practices_per_week: null, p_practice_minutes: 60 },
+    ]);
     const u10 = (await table('divisions')).find((d) => d.id === DIVISIONS.u10);
     expect(u10).toMatchObject({ practice_minutes: 60, practices_per_week: 1, max_roster_size: 12 });
     const u12 = (await table('divisions')).find((d) => d.id === DIVISIONS.u12);

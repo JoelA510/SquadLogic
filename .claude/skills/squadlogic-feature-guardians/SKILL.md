@@ -58,7 +58,10 @@ How to add, gate, and retire an organization-level feature flag safely.
    in `packages/core/src/scopedSettings.js` (`tests/scopedSettingsParity.test.js` holds them
    equal), written only by `admin_set_scoped_setting` and read in SQL with
    `scoped_setting_value(division, key)`. `standings_count_outside_results` moved there from the
-   flags; its `FEATURE_FLAGS` key stays, retired, so stored flags still parse.
+   flags; its `FEATURE_FLAGS` key stays, retired, so stored flags still parse. Admins set it in
+   Settings, General, Season & Calendar, "Settings by program and division"
+   (`ScopedSettingsSection.jsx`, F11-4b): a boolean key is listed there with no code change; give
+   it its words in that file's `BOOLEAN_WORDS`, or it shows the generic "On"/"Off".
 
 ## Practices
 

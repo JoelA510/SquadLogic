@@ -15,7 +15,8 @@
 -- them; they stay readable in the audit trail, one settings.updated row per change), the rows that held a completed
 -- season at its value among them, so after the revert a completed season follows the organization's flag again. A NOTICE names how many. The
 -- practice import, if it already calls `admin_set_division_practice_settings`, fails until the client before F11-4b is
--- deployed again.
+-- deployed again; so does the Settings panel F11-4b added ("Settings by program and division", which reads
+-- `scoped_settings`): revert F11-4b's commit first.
 --
 -- Order matters: the seam goes back to org_flag before the resolver it calls is dropped.
 --

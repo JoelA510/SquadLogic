@@ -22,8 +22,10 @@ How to read the settings audit trail and spot configuration anomalies.
   old: <flags before>, new: <flags after> }`.
 - A scoped setting change (`admin_set_scoped_setting`, 20261124010000) is a `settings.updated` row
   with `resource_type = 'scoped_setting'` and `metadata = { setting: 'scoped_setting', field: <key>,
-  scope, scope_id, scope_name, season_settings_id, old, new }`; a null `old` or `new` means
-  "inherited" (no value at that level).
+  scope, scope_id, scope_name, season_settings_id, old, new, frozen_completed_divisions }`; a
+  null `old` or `new` means "inherited" (no value at that level), and the page shows it as
+  "Inherited" (F11-4b). The page shows the key (`field`), not its label, and not the scope's name
+  or the frozen count: those are in the metadata, which the page's search covers.
 
 ## Inspecting
 

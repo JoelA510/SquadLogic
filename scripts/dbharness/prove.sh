@@ -285,6 +285,11 @@ R71="$REPO/docs/sql/20261122010000_revert.sql"
 # aimed at one of those bodies in $M70 or $M71 is re-aimed here (lesson 70). Its smoke holds the plants of its own,
 # below; the pgTAP file (supabase/tests/practice_import_apply_rollback.sql) is CI's.
 M80="$REPO/supabase/migrations/20261123010000_practice_import.sql"
+# 20261124010000: the settings cascade (F11-4a, docs/changes/2026-11-13-settings-scope.md). It replaces
+# standings_counts_outside (from $M71) and admin_create_season_from (from $M59) whole, so the plants that aimed at those
+# two bodies are re-aimed here (lesson 70). Its smoke holds the plants of its own, below; the pgTAP file
+# (supabase/tests/scoped_settings.sql) is CI's.
+M81="$REPO/supabase/migrations/20261124010000_settings_scope.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -5063,7 +5068,8 @@ plant "M59 the finalizer refuses a draft season again" "$M59" \
     -- a new row here. So the active season and a draft season both take an import (20261111010000:" \
   "smoke 20261111010000"
 
-plant "M59 the rollover takes no season lock" "$M59" \
+# Re-aimed at $M81 (20261124010000 replaces admin_create_season_from whole; the lock is copied unchanged).
+plant "M59 the rollover takes no season lock" "$M81" \
   "    PERFORM pg_advisory_xact_lock(hashtextextended('season:' || v_org::text, 0));
     PERFORM 1 FROM public.season_settings s WHERE s.organization_id = v_org ORDER BY s.id FOR UPDATE;
 
@@ -5765,17 +5771,19 @@ plant "M71 the standings count an outside opponent" "$M71" \
 # not execute org_flag, so every member's read of the standings failed once a result against an outside club existed.
 # The migration's own end-state check refuses to commit when the helper is an invoker again (so the plant stops at the
 # apply); without that check the smoke, which reads the view as the role `authenticated`, fails with 42501 (run by hand).
-plant "M71 the standings helper runs as its caller" "$M71" \
+# Re-aimed at $M81 (20261124010000 replaces standings_counts_outside whole; it stays a definer for the same reason, and
+# that migration's end-state check refuses to commit when it is not).
+plant "M71 the standings helper runs as its caller" "$M81" \
   "STABLE
 SECURITY DEFINER
 SET search_path = public
 AS \$\$
-    SELECT COALESCE((SELECT public.org_flag(d.organization_id, 'standings_count_outside_results', false)" \
+    SELECT COALESCE((SELECT public.scoped_setting_value(d.id, 'standings_count_outside_results') = 'true'::jsonb" \
   "STABLE
 SET search_path = public
 AS \$\$
-    SELECT COALESCE((SELECT public.org_flag(d.organization_id, 'standings_count_outside_results', false)" \
-  "applying 20261122010000_game_scores.sql"
+    SELECT COALESCE((SELECT public.scoped_setting_value(d.id, 'standings_count_outside_results') = 'true'::jsonb" \
+  "applying 20261124010000_settings_scope.sql"
 
 # The revert (docs/sql/20261122010000_revert.sql) refuses while a score is recorded. The harness plants one, requires the
 # first run to refuse in its words and change nothing, removes the score, and runs it again.
@@ -5854,6 +5862,45 @@ plant "M80 the rollback reads no reference" "$M80" \
   "                   AND NOT (x.id = ANY (v_refd))" \
   "                   AND true" \
   "smoke 20261123010000"
+
+# 20261124010000: the settings cascade. The plan's three plants (F11-4a) and two of the review round, each executed against the smoke and against the
+# pgTAP file on the local stand-in (which is NOT pgTAP):
+#   - the resolver treats an explicit false as unset, so an inherited true wins (the smoke's precedence check);
+#   - the rollover's division block is removed, so a division's value does not reach its copy (the smoke's rollover,
+#     which the function's own count check refuses first);
+#   - the standings seam still reads org_flag (the migration's own end-state check refuses to commit; without it the
+#     smoke's seam check fails).
+plant "M81 the resolver treats an explicit false as unset" "$M81" \
+  "     WHERE s.division_id = p_division_id AND s.key = p_key;" \
+  "     WHERE s.division_id = p_division_id AND s.key = p_key AND s.value <> 'false'::jsonb;" \
+  "smoke 20261124010000"
+
+plant "M81 the rollover does not copy division values" "$M81" \
+  "      JOIN public.divisions nd ON nd.season_settings_id = v_new_id AND nd.name = sd.name
+     WHERE NOT s.frozen_from_organization;" \
+  "      JOIN public.divisions nd ON nd.season_settings_id = v_new_id AND nd.name = sd.name AND false
+     WHERE NOT s.frozen_from_organization;" \
+  "smoke 20261124010000"
+
+# The review round of #733 (two more): an organization change that does not hold a completed season's inheriting
+# divisions at their value (the smoke's freeze check: the completed division follows the organization), and the tenancy
+# trigger left out (the smoke's insert naming another organization's division goes through).
+plant "M81 an organization change rewrites a completed season (no freeze)" "$M81" \
+  "        IF v_old_effective IS DISTINCT FROM COALESCE(v_value, v_key.default_value) THEN" \
+  "        IF false THEN" \
+  "smoke 20261124010000"
+
+plant "M81 no tenancy trigger on scoped_settings" "$M81" \
+  "CREATE TRIGGER scoped_settings_enforce_tenancy
+    BEFORE INSERT OR UPDATE ON public.scoped_settings
+    FOR EACH ROW EXECUTE FUNCTION public.scoped_settings_enforce_tenancy();" \
+  "SELECT 1;" \
+  "smoke 20261124010000"
+
+plant "M81 the standings seam still reads org_flag" "$M81" \
+  "    SELECT COALESCE((SELECT public.scoped_setting_value(d.id, 'standings_count_outside_results') = 'true'::jsonb" \
+  "    SELECT COALESCE((SELECT public.org_flag(d.organization_id, 'standings_count_outside_results', false)" \
+  "applying 20261124010000_settings_scope.sql"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye

@@ -25,6 +25,7 @@ import { selectLatestTeamRunsPerDivision } from '../utils/schedulerRunFilters.js
 import { handleCoachPreferenceRpc } from './mockCoachPreferences.js';
 import { handleLightingOverrideRpc } from './mockLightingOverrides.js';
 import { defaultProgramOf, handleProgramRpc, normalizePrograms } from './mockPrograms.js';
+import { handleScopedSettingRpc } from './mockScopedSettings.js';
 import {
   ageRuleChangedRefusal,
   completedSeasonRefusal,
@@ -2559,6 +2560,12 @@ export const mockSupabase = {
       if (seasons) {
         if (!seasons.error) saveDB(db);
         return seasons;
+      }
+      // The settings cascade (migration 20261124010000): the scoped setter and the division practice setter.
+      const scoped = handleScopedSettingRpc(db, name, params, { currentUserId, isOrgAdmin });
+      if (scoped) {
+        if (!scoped.error) saveDB(db);
+        return scoped;
       }
       // Field and venue permits (migration 20261102010000): the five RPCs, refusals included.
       const permits = handleFacilityPermitRpc(db, name, params, {

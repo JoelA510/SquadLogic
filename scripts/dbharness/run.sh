@@ -1357,7 +1357,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000 20261105010000 20261106010000 20261108010000 20261108020000 20261110010000 20261111010000 20261112010000 20261113010000 20261114010000 20261115010000 20261116010000 20261117010000 20261118010000 20261119010000 20261120010000 20261121010000 20261122010000 20261123010000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000 20261105010000 20261106010000 20261108010000 20261108020000 20261110010000 20261111010000 20261112010000 20261113010000 20261114010000 20261115010000 20261116010000 20261117010000 20261118010000 20261119010000 20261120010000 20261121010000 20261122010000 20261123010000 20261124010000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2684,6 +2684,28 @@ NEEDLES
     fi
     if ! psql_cmd "DELETE FROM public.game_scores WHERE game_id = '1f000000-0000-4000-8000-0000000000c1';" >$SCRATCH/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the planted score could not be removed before the second revert run"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+  fi
+
+  # **20261124010000's revert writes the organization values back into feature_flags and drops the others, counted.**
+  # Planted: an organization whose row says true and whose flags lack the key, an organization whose flags still say true
+  # but which has no row (an admin unset it after the move), and one division value. After the revert org_flag must
+  # read what the resolver read at the organization level (true, false), and the revert must say it dropped one value.
+  if [ "$id" = "20261124010000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug, feature_flags) VALUES
+                ('5d000000-0000-4000-8000-00000000000a','Scope Revert Row','scope-revert-row', jsonb_build_object('score_entry', true)),
+                ('5d000000-0000-4000-8000-00000000000b','Scope Revert Unset','scope-revert-unset', jsonb_build_object('standings_count_outside_results', true));
+              INSERT INTO public.season_settings (id, organization_id, name) VALUES
+                ('5d000000-0000-4000-8000-0000000000a1','5d000000-0000-4000-8000-00000000000a','Scope Revert Season');
+              INSERT INTO public.divisions (id, organization_id, season_settings_id, name) VALUES
+                ('5d000000-0000-4000-8000-0000000000a2','5d000000-0000-4000-8000-00000000000a','5d000000-0000-4000-8000-0000000000a1','Scope Revert U10');
+              INSERT INTO public.scoped_settings (organization_id, key, value) VALUES
+                ('5d000000-0000-4000-8000-00000000000a','standings_count_outside_results','true'::jsonb);
+              INSERT INTO public.scoped_settings (organization_id, division_id, key, value) VALUES
+                ('5d000000-0000-4000-8000-00000000000a','5d000000-0000-4000-8000-0000000000a2','standings_count_outside_results','false'::jsonb);" \
+         >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the settings the revert check requires were never inserted"
       dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
@@ -4200,6 +4222,30 @@ PROBE
         dump 10 $SCRATCH/harness_idrevert; STATUS=1
       fi
     fi
+    if [ "$id" = "20261124010000" ]; then
+      # What the revert must leave: the organization level back in feature_flags (the row's true written, the key of an
+      # organization with no row removed, so org_flag reads true and false as the resolver did), the one division value
+      # counted as dropped, and no object of the migration. The revert checks the md5 of the two restored bodies itself.
+      if ! grep -qF 'settings scope revert: 1 program or division value(s) dropped' $SCRATCH/harness_rev; then
+        echo "FAIL revert ${id}: planted 1 division value, and the revert did not say it dropped 1"
+        STATUS=1
+      fi
+      if psql_cmd "SELECT 'SCOPEREVERT-VERDICT:' || CASE
+               WHEN public.org_flag('5d000000-0000-4000-8000-00000000000a', 'standings_count_outside_results', false) IS NOT TRUE THEN 'row-not-written-back'
+               WHEN (SELECT feature_flags ? 'standings_count_outside_results' FROM public.organizations WHERE id = '5d000000-0000-4000-8000-00000000000b') THEN 'unset-key-left'
+               WHEN to_regclass('public.scoped_settings') IS NOT NULL OR to_regclass('public.scoped_setting_keys') IS NOT NULL THEN 'table-left'
+               WHEN to_regprocedure('public.scoped_setting_value(uuid,text)') IS NOT NULL OR to_regprocedure('public.admin_set_scoped_setting(text,text,uuid,jsonb)') IS NOT NULL
+                    OR to_regprocedure('public.admin_set_division_practice_settings(uuid,integer,integer)') IS NOT NULL
+                    OR to_regprocedure('public.scoped_settings_enforce_tenancy()') IS NOT NULL THEN 'function-left'
+               WHEN (SELECT p.prosrc FROM pg_proc p WHERE p.oid = to_regprocedure('public.standings_counts_outside(uuid)')) !~ 'org_flag' THEN 'seam-not-restored'
+               ELSE 'restored' END;" \
+         >$SCRATCH/harness_ssrevert 2>&1 && grep -q 'SCOPEREVERT-VERDICT:restored' $SCRATCH/harness_ssrevert; then
+        echo "  revert ${id}: the organization values are back in feature_flags (a row's true written, an unset key removed), the division value dropped and counted, no object of the migration left, the seam reading org_flag again"
+      else
+        echo "FAIL revert ${id}: the revert did not leave feature_flags and the catalogue as the model says"
+        dump 10 $SCRATCH/harness_ssrevert; STATUS=1
+      fi
+    fi
     if [ "$id" = "20261123010000" ]; then
       # What the revert must leave: the practice (a rollback kept it, or an earlier writer made it: it is an ordinary row
       # now), the job, its staged row and its record gone, no function of the migration, and practice_schedule out of the
@@ -5109,6 +5155,70 @@ else
     echo "FAIL legacy scores ${LS_ID}: the refused migration left part of itself behind"; STATUS=1
   else
     echo "PASS legacy scores ${LS_ID}: a scored legacy row that matches no saved game refuses the migration by name, and nothing of it is applied"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# The settings cascade: organizations' standings flags planted, then 20261124010000 applied onto them
+# ---------------------------------------------------------------------------
+#
+# 20261124010000 moves the organization's standings value out of `feature_flags` (decision S2 of
+# docs/changes/2026-11-13-settings-scope.md): one organization row for each organization whose flags hold the key as a
+# boolean, none for any other, so every division resolves exactly as org_flag(org, key, false) answered before. A build
+# from scratch has no organization with the key, so the move would run over nothing and prove only that it parses
+# (lesson 67). So the harness builds to the migration before it and plants four organizations, the key true, false,
+# absent and a string, each with a division; it reads org_flag for each, applies the migration, and requires each
+# division's resolved value to equal what org_flag said, with exactly two organization rows.
+echo "=== settings scope: the organization flags carried over (planted, then 20261124010000 applied) ==="
+SS_ID=20261124010000
+SS_FILE="$(ls "$REPO"/supabase/migrations/${SS_ID}_*.sql 2>/dev/null | head -n 1)"
+SS_PREV="$(ls "$REPO"/supabase/migrations/*.sql | sort | grep -B1 "/${SS_ID}_" | head -n 1 | xargs -r basename | cut -c1-14)"
+SS_SEED="INSERT INTO public.organizations (id, name, slug, feature_flags) VALUES
+            ('5c000000-0000-4000-8000-00000000000a','Scope True','scope-carry-true', jsonb_build_object('standings_count_outside_results', true, 'score_entry', true)),
+            ('5c000000-0000-4000-8000-00000000000b','Scope False','scope-carry-false', jsonb_build_object('standings_count_outside_results', false)),
+            ('5c000000-0000-4000-8000-00000000000c','Scope Absent','scope-carry-absent', jsonb_build_object('score_entry', true)),
+            ('5c000000-0000-4000-8000-00000000000d','Scope String','scope-carry-string', jsonb_build_object('standings_count_outside_results', 'true'));
+          DELETE FROM public.season_settings WHERE organization_id::text LIKE '5c000000-%';
+          INSERT INTO public.season_settings (id, organization_id, name) VALUES
+            ('5c000000-0000-4000-8000-0000000000a1','5c000000-0000-4000-8000-00000000000a','Carry A'),
+            ('5c000000-0000-4000-8000-0000000000b1','5c000000-0000-4000-8000-00000000000b','Carry B'),
+            ('5c000000-0000-4000-8000-0000000000c1','5c000000-0000-4000-8000-00000000000c','Carry C'),
+            ('5c000000-0000-4000-8000-0000000000d1','5c000000-0000-4000-8000-00000000000d','Carry D');
+          INSERT INTO public.divisions (id, organization_id, season_settings_id, name) VALUES
+            ('5c000000-0000-4000-8000-0000000000a2','5c000000-0000-4000-8000-00000000000a','5c000000-0000-4000-8000-0000000000a1','Carry U10'),
+            ('5c000000-0000-4000-8000-0000000000b2','5c000000-0000-4000-8000-00000000000b','5c000000-0000-4000-8000-0000000000b1','Carry U10'),
+            ('5c000000-0000-4000-8000-0000000000c2','5c000000-0000-4000-8000-00000000000c','5c000000-0000-4000-8000-0000000000c1','Carry U10'),
+            ('5c000000-0000-4000-8000-0000000000d2','5c000000-0000-4000-8000-00000000000d','5c000000-0000-4000-8000-0000000000d1','Carry U10');"
+SS_BEFORE_Q="SELECT string_agg(o.name || '=' || public.org_flag(o.id, 'standings_count_outside_results', false)::text, ',' ORDER BY o.name)
+               FROM public.organizations o WHERE o.id::text LIKE '5c000000-%';"
+SS_AFTER_Q="SELECT string_agg(o.name || '=' || (public.scoped_setting_value(d.id, 'standings_count_outside_results') = 'true'::jsonb)::text, ',' ORDER BY o.name)
+              FROM public.organizations o JOIN public.divisions d ON d.organization_id = o.id WHERE o.id::text LIKE '5c000000-%';"
+if [ -z "$SS_FILE" ] || [ -z "$SS_PREV" ] || [ "$SS_PREV" = "$SS_ID" ]; then
+  echo "FAIL settings scope ${SS_ID}: could not find the migration or the one before it (${SS_FILE:-none} / ${SS_PREV:-none})"; STATUS=1
+elif ! fresh_db; then
+  echo "FAIL settings scope ${SS_ID}: could not build a fresh database"; STATUS=1
+elif ! apply_all "$SS_PREV"; then
+  echo "FAIL settings scope ${SS_ID}: could not build up to ${SS_PREV}"; STATUS=1
+elif ! psql_cmd "$SS_SEED" >$SCRATCH/harness_ss_seed 2>&1; then
+  echo "FAIL settings scope ${SS_ID}: the organizations could not be planted"; dump 10 $SCRATCH/harness_ss_seed; STATUS=1
+else
+  v_ss_before="$(psql_cmd "$SS_BEFORE_Q" 2>/dev/null)"
+  if [ "$v_ss_before" != "Scope Absent=false,Scope False=false,Scope String=false,Scope True=true" ]; then
+    echo "FAIL settings scope ${SS_ID}: before the migration org_flag read the planted organizations as '${v_ss_before}'"; STATUS=1
+  elif ! psql_file "$SS_FILE" >$SCRATCH/harness_ss 2>&1; then
+    echo "FAIL settings scope ${SS_ID}: the migration did not apply onto organizations with the flag true, false, absent and a string"
+    dump 10 $SCRATCH/harness_ss; STATUS=1
+  else
+    v_ss_after="$(psql_cmd "$SS_AFTER_Q" 2>/dev/null)"
+    v_ss_rows="$(psql_cmd "SELECT string_agg(o.name || '=' || s.value::text, ',' ORDER BY o.name) FROM public.scoped_settings s JOIN public.organizations o ON o.id = s.organization_id
+                           WHERE o.id::text LIKE '5c000000-%' AND s.program_id IS NULL AND s.division_id IS NULL;" 2>/dev/null)"
+    if [ "$v_ss_after" != "$v_ss_before" ]; then
+      echo "FAIL settings scope ${SS_ID}: after the migration the divisions resolve as '${v_ss_after}', not as org_flag did ('${v_ss_before}')"; STATUS=1
+    elif [ "$v_ss_rows" != "Scope False=false,Scope True=true" ]; then
+      echo "FAIL settings scope ${SS_ID}: the organization rows carried are '${v_ss_rows}', not one per boolean flag (Scope False=false,Scope True=true)"; STATUS=1
+    else
+      echo "PASS settings scope ${SS_ID}: four organizations (the flag true, false, absent, a string) resolve after the move exactly as org_flag read them before (${v_ss_after}); the two boolean flags became organization rows, the others none"
+    fi
   fi
 fi
 

@@ -941,7 +941,12 @@ DECLARE
     --   teams<-games, game_slots<-games   the legacy `games` table: the F11 plan forbids this import to read, write or
     --                                 reference it, and nothing in the repository writes it (the product only reads it), so
     --                                 no row of it can name a team or a slot this import made.
-    v_allowed constant text[] := ARRAY['teams<-team_calendar_tokens', 'teams<-games', 'game_slots<-games'];
+    --   divisions<-scoped_settings   (20261124010000) a division's own settings go with the division, as a program's go
+    --                                 with the program (decision S8 of docs/changes/2026-11-13-settings-scope.md): a
+    --                                 division this import made and its rollback removes takes any value an admin set on
+    --                                 it since. Declared, not guarded: a guard here waits for the next replacement of
+    --                                 rollback_game_import_job (recorded in that plan).
+    v_allowed constant text[] := ARRAY['teams<-team_calendar_tokens', 'teams<-games', 'game_slots<-games', 'divisions<-scoped_settings'];
     v_bookings text := (SELECT p.prosrc FROM pg_proc p WHERE p.proname = 'field_bookings' AND p.pronamespace = 'public'::regnamespace LIMIT 1);
 BEGIN
     FOR r IN SELECT DISTINCT par.relname AS parent, ch.relname AS child

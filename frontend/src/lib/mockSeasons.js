@@ -26,6 +26,7 @@
  */
 
 import { defaultProgramOf, normalizePrograms } from './mockPrograms.js';
+import { copyScopedSettingsForRollover } from './mockScopedSettings.js';
 
 export const SEASON_RPCS = Object.freeze([
   'admin_create_season_from',
@@ -406,6 +407,12 @@ function createSeasonFrom(db, p, c) {
   for (const column of ROLLOVER_SEASON_COPIED) {
     season[column] = source[column] === undefined ? null : structuredClone(source[column]);
   }
+  // What a refusal below puts back, as the SQL's transaction does (20261124010000: the scoped settings' count check).
+  const undo = {
+    season_settings: [...db.season_settings],
+    programs: [...(db.programs || [])],
+    divisions: [...(db.divisions || [])],
+  };
   db.season_settings.push(season);
   normalizePrograms(db); // the trigger-made default program of the new season
 
@@ -449,6 +456,13 @@ function createSeasonFrom(db, p, c) {
     db.divisions.push(copy);
     divisions += 1;
   }
+  // 20261124010000: each program's and each division's scoped settings go with their copies.
+  const scoped = copyScopedSettingsForRollover(db, source.id, season.id, c);
+  if (scoped.error) {
+    Object.assign(db, undo);
+    return { data: null, error: scoped.error };
+  }
+  const scopedSettings = scoped.copied;
 
   audit(db, c, source.organization_id, 'season.created_from', 'season_settings', season.id, {
     source_season_id: source.id,
@@ -457,6 +471,7 @@ function createSeasonFrom(db, p, c) {
     divisions_copied: divisions,
     programs_copied: programs,
     window_shift_years: shift,
+    scoped_settings_copied: scopedSettings,
   });
   return {
     data: {
@@ -468,6 +483,7 @@ function createSeasonFrom(db, p, c) {
       source_season_id: source.id,
       divisions_copied: divisions,
       programs_copied: programs,
+      scoped_settings_copied: scopedSettings,
     },
     error: null,
   };

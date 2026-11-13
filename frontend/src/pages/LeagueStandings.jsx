@@ -177,13 +177,14 @@ export default function LeagueStandings() {
       )}
 
       {/* What the numbers below leave out (lesson 92: say what a number is a count of). The view counts a result
-          against an outside club only when the organization says so, and says per team how many it left out. */}
+          against an outside club only when the team's division says so (its own setting, else its program's, else the
+          organization's: 20261124010000), and says per team how many it left out. */}
       {outsideResultsNotCounted > 0 && (
         <p className="text-sm text-text-secondary" data-testid="standings-outside-not-counted">
           {outsideResultsNotCounted === 1
             ? '1 result against an outside club is not counted.'
             : `${outsideResultsNotCounted} results against outside clubs are not counted.`}{' '}
-          An admin can count them in Settings, under Features.
+          Whether they count is a league setting; the settings screen for it is coming.
         </p>
       )}
 

@@ -4,7 +4,7 @@
  *
  * For tests that hold a client read to the database's real shape: the mock client answers a read of a column that
  * does not exist (it filters and sorts whatever keys a row has), and PostgREST refuses it. The table parser reads
- * `CREATE TABLE`, `ALTER TABLE ... ADD/DROP/RENAME COLUMN`, `ALTER TABLE ... RENAME TO` and `DROP TABLE`; it is
+ * `CREATE TABLE`, `ALTER TABLE ... ADD/DROP/RENAME COLUMN`, `ALTER TABLE ... RENAME TO` and `DROP TABLE` (a list of tables too); it is
  * held to the snapshot's view of the world by its own test (a table every reader knows has the columns it has).
  */
 import { readFileSync, readdirSync } from 'node:fs';
@@ -46,7 +46,7 @@ export function tableColumnsFromMigrations() {
     // Comments out, so a commented statement is not read as one.
     const sql = readFileSync(path.join(DIR, file), 'utf8').replace(/--[^\n]*/g, '');
     const statements =
-      /\b(create\s+table\s+(?:if\s+not\s+exists\s+)?([\w."]+)\s*\(|alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?([\w."]+)\s+([^;]*);|drop\s+table\s+(?:if\s+exists\s+)?([\w."]+))/gi;
+      /\b(create\s+table\s+(?:if\s+not\s+exists\s+)?([\w."]+)\s*\(|alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?([\w."]+)\s+([^;]*);|drop\s+table\s+(?:if\s+exists\s+)?([\w."\s,]+?)\s*(?:cascade|restrict|;))/gi;
     let match;
     while ((match = statements.exec(sql))) {
       if (match[2]) {
@@ -88,7 +88,8 @@ export function tableColumnsFromMigrations() {
           columns.add(ident(col[2]));
         }
       } else if (match[5]) {
-        tables.delete(ident(match[5]));
+        // One statement can drop a list of tables (`DROP TABLE IF EXISTS a, b CASCADE`).
+        for (const name of match[5].split(',')) tables.delete(ident(name.trim()));
       }
     }
   }

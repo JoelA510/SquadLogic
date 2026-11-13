@@ -72,6 +72,8 @@ export default function GridCell({
             type={col.type === 'number' ? 'number' : 'text'}
             min={col.min}
             max={col.max}
+            step={col.step}
+            inputMode={col.inputMode}
             value={editVal}
             onChange={(event) => setEditVal(event.target.value)}
             onBlur={() => onCommit()}

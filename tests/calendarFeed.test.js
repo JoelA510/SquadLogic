@@ -37,10 +37,13 @@ import {
 } from '../supabase/functions/_shared/calendar/icsFeed.ts';
 import { composeTeamFeed } from '../supabase/functions/_shared/calendar/teamFeed.ts';
 import {
+  CURRENT_RUNS,
   exerciseOf,
   fakeClient,
   feedProblems,
   parseIcs,
+  SAVED_GAMES,
+  savedGameIdsOf,
   SEED,
   seedRange,
   seedWeekdays,
@@ -689,9 +692,9 @@ describe('calendar feed: a failed read is visible in the feed', () => {
     expect(practicesBranch, 'practicesError branch').not.toBeNull();
     expect(practicesBranch[1]).toContain("readFailures.push('practices')");
 
-    const gamesBranch = /if \(gamesError\) \{([\s\S]*?)\n {2}\}/.exec(HANDLER);
-    expect(gamesBranch, 'gamesError branch').not.toBeNull();
-    expect(gamesBranch[1]).toContain("readFailures.push('games')");
+    // The games reads are exercised against the fake client below ("calendar feed reads the saved schedule"): a
+    // failed read of either relation is said and logged.
+    expect(HANDLER.match(/readFailures\.push\('games'\)/g).length).toBeGreaterThanOrEqual(3);
 
     const render = /renderIcsCalendar\(\{([\s\S]*?)\}\)/.exec(HANDLER);
     expect(render, 'renderIcsCalendar call').not.toBeNull();
@@ -853,5 +856,103 @@ describe('calendar feed applies saved practice exceptions (8.6 3b PR 12b)', () =
     );
     expect(feedProblems(ics, { ...SEED, exceptions: [] })).toEqual([]);
     expect(logged.some((m) => m.includes('practice_exceptions read failed'))).toBe(true);
+  });
+});
+
+/**
+ * F11-3 task C2 and E2 (docs/changes/2026-11-06-games-table-source-of-truth.md): the feed reads the SAVED schedule.
+ * It asks `current_game_runs` for the team's organization and season, then reads the team's `game_assignments` of
+ * those runs, and places each game at its own start and end. The Vitest arm of the Deno cases in
+ * `_shared/tests/ics-feed_test.ts`, over the same seed and fake client; the expected games are computed from the
+ * seed, never from the feed's output.
+ */
+describe('calendar feed reads the saved schedule (F11-3 C2, E2)', () => {
+  const GAMES_SEED = {
+    ...SEED,
+    practices: [],
+    exceptions: [],
+    games: SAVED_GAMES,
+    currentRuns: CURRENT_RUNS,
+  };
+  const compose = async (seed = GAMES_SEED, opts = {}) => {
+    const logged = [];
+    const client = fakeClient(seed, opts);
+    const result = await composeTeamFeed({
+      client,
+      team: seed.team,
+      orgName: 'Test Org',
+      now: NOW,
+      log: (message) => logged.push(message),
+    });
+    return { ...result, client, logged };
+  };
+  const gameUids = (events) => events.map((event) => event.uid).sort();
+
+  it('the seed reaches every case: an older run, another team, another organization, a long game', () => {
+    expect(savedGameIdsOf(GAMES_SEED).sort()).toEqual(['game-away-long', 'game-home']);
+    expect(SAVED_GAMES.length).toBe(5);
+  });
+
+  it("shows the team's games of its season's current run and no other", async () => {
+    const { events, readFailures, client } = await compose();
+    expect(readFailures).toEqual([]);
+    expect(gameUids(events)).toEqual(savedGameIdsOf(GAMES_SEED).sort());
+    // What was read, and how it was scoped (the service role has no row policy to scope it).
+    const tables = client.calls.map((call) => call.table);
+    expect(tables).not.toContain('games');
+    const runs = client.calls.find((call) => call.table === 'current_game_runs');
+    expect(runs.eq).toEqual([
+      ['organization_id', 'org-o1'],
+      ['season_settings_id', 'season-1'],
+    ]);
+    const games = client.calls.find((call) => call.table === 'game_assignments');
+    expect(games.eq).toEqual([['organization_id', 'org-o1']]);
+    expect(games.in).toEqual([['run_id', ['run-current']]]);
+    expect(games.or).toEqual(['home_team_id.eq.team-t1,away_team_id.eq.team-t1']);
+    expect(games.select).toContain('game_slots!game_slot_id');
+  });
+
+  it('E2: a game is placed at its own start and end, not its slot’s', async () => {
+    const { ics } = await compose();
+    const unfolded = ics.replace(/\r\n /g, '');
+    // game-away-long: the slot ends 10:00 local (17:00Z), the game at 17:30Z.
+    expect(unfolded).toContain('DTSTART:20261010T160000Z');
+    expect(unfolded).toContain('DTEND:20261010T173000Z');
+    expect(unfolded).not.toContain('DTEND:20261010T170000Z');
+  });
+
+  it('a team with no season named reads every current run of its organization, never another organization’s', async () => {
+    const seed = { ...GAMES_SEED, team: { ...GAMES_SEED.team, season_settings_id: null } };
+    const { events, client } = await compose(seed);
+    expect(gameUids(events)).toEqual(savedGameIdsOf(seed).sort());
+    const games = client.calls.find((call) => call.table === 'game_assignments');
+    expect(games.in).toEqual([['run_id', ['run-current', 'run-last-season']]]);
+  });
+
+  it('a season with no saved schedule reads no game and says nothing is wrong', async () => {
+    const { events, readFailures, client } = await compose({ ...GAMES_SEED, currentRuns: [] });
+    expect(events).toEqual([]);
+    expect(readFailures).toEqual([]);
+    expect(client.calls.map((call) => call.table)).not.toContain('game_assignments');
+  });
+
+  it.each(['current_game_runs', 'game_assignments'])(
+    'a failed read of %s is said in the feed and logged, never swallowed',
+    async (table) => {
+      const { ics, readFailures, logged, events } = await compose(GAMES_SEED, { fail: [table] });
+      expect(readFailures).toEqual(['games']);
+      expect(events).toEqual([]);
+      expect(ics.replace(/\r\n /g, '')).toMatch(
+        /X-WR-CALDESC:INCOMPLETE: the games schedule could not be read/
+      );
+      expect(logged.some((message) => /games read failed/.test(message))).toBe(true);
+    }
+  );
+
+  it('a team with no organization cannot be scoped: its games are not read, and that is said', async () => {
+    const seed = { ...GAMES_SEED, team: { ...GAMES_SEED.team, organization_id: null } };
+    const { readFailures, client } = await compose(seed);
+    expect(readFailures).toContain('games');
+    expect(client.calls.map((call) => call.table)).not.toContain('game_assignments');
   });
 });

@@ -15,9 +15,8 @@ import { SCHEDULE_EXPORT_COLUMNS } from '../../../packages/core/src/outputGenera
  * The schedule downloads (plan docs/changes/2026-10-22-admin-focus.md, R7).
  * Each download is caught with Playwright's `download` event and read from
  * disk: the files are checked, not the page. Seeding is `admin_navigation.ts`'s
- * "Team A has an upcoming game and a weekly practice" (a game at home to
- * Team B at 10:00, four Thursday practices at 17:30), plus the base seed's
- * two Team A games with no slot.
+ * "Team A has an upcoming game and a weekly practice" (a saved game at home to
+ * Team B, 10:00 to 11:00, and four Thursday practices at 17:30).
  */
 
 const { Given, When, Then } = createBdd();
@@ -79,7 +78,7 @@ When('I download {string} from the generated files', async ({ page }, button: st
 });
 
 Then(
-  'the CSV {string} lists the game against {string}, {int} practices and the games with no slot',
+  'the CSV {string} lists the game against {string} and {int} practices',
   async ({ page: _page }, name: string, opponent: string, practices: number) => {
     const rows = parseCsv(fileNamed(name).toString('utf8'));
     expect(rows[0]).toEqual([...TEAM_SCHEDULE_COLUMNS]);
@@ -93,6 +92,7 @@ Then(
         r[H.EVENT_TYPE] === 'Game' &&
         r[H.OPPONENT] === opponent &&
         r[H.START] === '10:00' &&
+        r[H.END] === '11:00' &&
         r[H.STATUS] === 'Scheduled'
     );
     expect(timedGame).toHaveLength(1);
@@ -101,13 +101,9 @@ Then(
         (r) => r[H.EVENT_TYPE] === 'Practice' && r[H.START] === '17:30' && r[H.END] === '18:30'
       )
     ).toHaveLength(practices);
-    // The base seed's two Team A games with no slot: in the file, with the reason.
-    const slotless = body.filter((r) => r[H.REASON_CODE] === 'GAME_SLOT_MISSING');
-    expect(slotless).toHaveLength(2);
-    for (const r of slotless) {
-      expect(r[H.STATUS]).toBe('Date and time TBD');
-      expect(r[H.REASON]).toBe('the game has no scheduled slot yet');
-    }
+    // The saved game is the team's only game: no row of a legacy table, and none without a day.
+    expect(body.filter((r) => r[H.EVENT_TYPE] === 'Game')).toHaveLength(1);
+    expect(body.filter((r) => r[H.REASON_CODE] === 'GAME_SLOT_MISSING')).toHaveLength(0);
     lastCsvRows = rows;
   }
 );
@@ -131,9 +127,8 @@ Then(
     const summaries = events.map((e) => e.SUMMARY.value);
     expect(summaries.filter((s) => s === `Game: ${team}`)).toHaveLength(1);
     expect(summaries.filter((s) => s === `Practice - ${team}`)).toHaveLength(practices);
-    // The two games with no slot have no day: no entry, and counted in the description.
-    expect(calendar['X-WR-CALDESC']).toMatch(/^2 of \d+ events have no confirmed time/);
-    expect(calendar['X-WR-CALDESC']).toContain('None has a known day');
+    // Every event has its time: the description counts nothing as unconfirmed.
+    expect(String(calendar['X-WR-CALDESC'] ?? '')).not.toMatch(/no confirmed time/);
   }
 );
 

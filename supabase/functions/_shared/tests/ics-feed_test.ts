@@ -23,12 +23,16 @@ import {
   type PracticeRow,
 } from '../calendar/icsFeed.ts';
 import { composeTeamFeed, PRACTICE_EXCEPTIONS_READ_CAP } from '../calendar/teamFeed.ts';
+import { GAME_END_CASES, GAME_END_TIMEZONE } from './game-end-cases.ts';
 import {
+  CURRENT_RUNS,
   exerciseOf,
   expectedFeed,
   fakeClient,
   feedProblems,
   parseIcs,
+  SAVED_GAMES,
+  savedGameIdsOf,
   SEED,
   seedRange,
   seedWeekdays,
@@ -388,7 +392,8 @@ Deno.test('practice exceptions (R4) - the read is scoped by team and organizatio
     now: NOW,
     log: () => {},
   });
-  assertEquals(noOrg.readFailures, ['practice changes']);
+  // Neither its games (F11-3) nor its practice changes can be scoped, and both are said.
+  assertEquals(noOrg.readFailures, ['games', 'practice changes']);
   assert(!noOrg.ics.includes('Practice (moved)'), 'unscoped exceptions were applied');
 });
 
@@ -421,5 +426,83 @@ Deno.test(
     const tbd = byUid.get('asg-a1_2026-10-06') as { kind: string; code?: string };
     assertEquals(tbd.kind, 'unplaceable');
     assertEquals(tbd.code, 'past-sunset');
+  }
+);
+
+// ---------------------------------------------------------------------------
+// F11-3 task C2 and E2 (docs/changes/2026-11-06-games-table-source-of-truth.md): the feed reads the SAVED schedule
+// (`current_game_runs`, then the team's `game_assignments` of those runs) and places a game at its own start and
+// end. The Vitest arm is "calendar feed reads the saved schedule" in `tests/calendarFeed.test.js`, over the same
+// seed and fake client.
+// ---------------------------------------------------------------------------
+
+const GAMES_SEED = {
+  ...SEED,
+  practices: [],
+  exceptions: [],
+  games: SAVED_GAMES,
+  currentRuns: CURRENT_RUNS,
+};
+
+Deno.test(
+  'saved schedule - the feed shows the games of the current run, at their own times',
+  async () => {
+    const { events, readFailures, client, ics } = await seededFeed(GAMES_SEED);
+    assertEquals(readFailures, []);
+    assertEquals(events.map((event) => event.uid).sort(), savedGameIdsOf(GAMES_SEED).sort());
+    assertEquals(savedGameIdsOf(GAMES_SEED).sort(), ['game-away-long', 'game-home']);
+    assert(!client.calls.some((call) => call.table === 'games'), 'the legacy games table was read');
+    const runs = client.calls.find((call) => call.table === 'current_game_runs');
+    assertEquals(runs?.eq, [
+      ['organization_id', 'org-o1'],
+      ['season_settings_id', 'season-1'],
+    ]);
+    const games = client.calls.find((call) => call.table === 'game_assignments');
+    assertEquals(games?.eq, [['organization_id', 'org-o1']]);
+    assertEquals(games?.in, [['run_id', ['run-current']]]);
+    assertEquals(games?.or, ['home_team_id.eq.team-t1,away_team_id.eq.team-t1']);
+    // E2: the slot ends 10:00 local (17:00Z); the game itself ends at 17:30Z.
+    const unfolded = ics.replace(/\r\n /g, '');
+    assertStringIncludes(unfolded, 'DTSTART:20261010T160000Z');
+    assertStringIncludes(unfolded, 'DTEND:20261010T173000Z');
+    assert(!unfolded.includes('DTEND:20261010T170000Z'), "the slot's end was used");
+  }
+);
+
+Deno.test('saved schedule - a failed read is said and logged, never swallowed', async () => {
+  for (const table of ['current_game_runs', 'game_assignments']) {
+    const { readFailures, logged, ics, events } = await seededFeed(GAMES_SEED, { fail: [table] });
+    assertEquals(readFailures, ['games'], table);
+    assertEquals(events, [], table);
+    assertStringIncludes(
+      ics.replace(/\r\n /g, ''),
+      'X-WR-CALDESC:INCOMPLETE: the games schedule could not be read'
+    );
+    assert(
+      logged.some((message) => /games read failed/.test(message)),
+      `${table}: not logged`
+    );
+  }
+  // A season with no saved schedule reads no game and nothing failed.
+  const none = await seededFeed({ ...GAMES_SEED, currentRuns: [] });
+  assertEquals(none.readFailures, []);
+  assert(!none.client.calls.some((call) => call.table === 'game_assignments'));
+});
+
+// F11-3 review R6: when a saved game ends, over the table the team page's test reads too (`game-end-cases.ts`).
+Deno.test(
+  'saved schedule - a game ends at its own end, else the slot length from its start, never before it',
+  () => {
+    for (const { name, game, feedStart, feedEnd } of GAME_END_CASES) {
+      const [event] = buildFeedEvents({
+        teamName: 'Tigers',
+        timezone: GAME_END_TIMEZONE,
+        games: [game as GameRow],
+      });
+      assertEquals(event.kind, 'timed', name);
+      const timed = event as { dtstart: string; dtend: string };
+      assertEquals([timed.dtstart, timed.dtend], [feedStart, feedEnd], name);
+      assert(timed.dtend >= timed.dtstart, `${name}: DTEND before DTSTART`);
+    }
   }
 );

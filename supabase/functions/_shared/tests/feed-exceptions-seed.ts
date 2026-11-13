@@ -46,7 +46,86 @@ export interface FeedSeed {
   timezone: string | null;
   practices: Rec[];
   exceptions: Rec[];
+  /** Rows of `game_assignments` as the feed's select returns them, with the columns its filters read (F11-3). */
+  games?: Rec[];
+  /** Rows of `current_game_runs`: per organization and season, the run whose games are the schedule. */
+  currentRuns?: Rec[];
 }
+
+/**
+ * A saved schedule for the feed (F11-3): the team plays two games in its season's current run, one of which ends
+ * half an hour after its slot does (an imported game); a third game was left in an OLDER run by a later save, a
+ * fourth is another team's, and a fifth is another organization's in a run of that organization. Only the first two
+ * are the team's schedule.
+ */
+const savedGame = (id: string, overrides: Rec = {}): Rec => ({
+  id,
+  organization_id: TEAM.organization_id,
+  run_id: 'run-current',
+  home_team_id: TEAM.id,
+  away_team_id: 'team-t2',
+  start: '2026-10-03T16:00:00+00:00',
+  end: '2026-10-03T17:00:00+00:00',
+  game_slots: {
+    slot_date: '2026-10-03',
+    start_time: '09:00:00',
+    end_time: '10:00:00',
+    fields: field('Pitch 1', 'Example Park'),
+  },
+  ...overrides,
+});
+export const SAVED_GAMES: Rec[] = [
+  savedGame('game-home'),
+  savedGame('game-away-long', {
+    home_team_id: 'team-t3',
+    away_team_id: TEAM.id,
+    start: '2026-10-10T16:00:00+00:00',
+    // The slot ends at 10:00 local (17:00Z); the game itself ends at 17:30Z.
+    end: '2026-10-10T17:30:00+00:00',
+    game_slots: {
+      slot_date: '2026-10-10',
+      start_time: '09:00:00',
+      end_time: '10:00:00',
+      fields: field('Pitch 2', 'Example Park'),
+    },
+  }),
+  savedGame('game-older-run', {
+    run_id: 'run-older',
+    start: '2026-10-17T16:00:00+00:00',
+    end: '2026-10-17T17:00:00+00:00',
+  }),
+  savedGame('game-other-teams', { home_team_id: 'team-t2', away_team_id: 'team-t3' }),
+  savedGame('game-other-org', { organization_id: 'org-o2', run_id: 'run-other-org' }),
+];
+export const CURRENT_RUNS: Rec[] = [
+  { organization_id: TEAM.organization_id, season_settings_id: 'season-1', run_id: 'run-current' },
+  {
+    organization_id: TEAM.organization_id,
+    season_settings_id: 'season-0',
+    run_id: 'run-last-season',
+  },
+  { organization_id: 'org-o2', season_settings_id: 'season-9', run_id: 'run-other-org' },
+];
+/** The ids of {@link SAVED_GAMES} that are the team's schedule, from the seed alone. */
+export const savedGameIdsOf = (seed: FeedSeed): string[] => {
+  const runs = new Set(
+    (seed.currentRuns ?? [])
+      .filter(
+        (r) =>
+          r.organization_id === seed.team.organization_id &&
+          (!seed.team.season_settings_id || r.season_settings_id === seed.team.season_settings_id)
+      )
+      .map((r) => r.run_id)
+  );
+  return (seed.games ?? [])
+    .filter(
+      (g) =>
+        g.organization_id === seed.team.organization_id &&
+        runs.has(g.run_id) &&
+        (g.home_team_id === seed.team.id || g.away_team_id === seed.team.id)
+    )
+    .map((g) => g.id);
+};
 
 /** Three rows, each positioned for its exceptions below. */
 const PRACTICES: Rec[] = [
@@ -482,7 +561,8 @@ export function fakeClient(
         status: opts.seasonStatus ?? 'active',
       },
     ],
-    games: [],
+    current_game_runs: seed.currentRuns ?? [],
+    game_assignments: seed.games ?? [],
     practice_assignments: seed.practices,
     practice_exceptions: seed.exceptions,
   };
@@ -491,13 +571,15 @@ export function fakeClient(
     select: string;
     eq: Array<[string, unknown]>;
     is: Array<[string, unknown]>;
+    in: Array<[string, unknown[]]>;
+    or: string[];
     limit: number | null;
   }
   const calls: Call[] = [];
   return {
     calls,
     from(table: string) {
-      const call: Call = { table, select: '', eq: [], is: [], limit: null };
+      const call: Call = { table, select: '', eq: [], is: [], in: [], or: [], limit: null };
       calls.push(call);
       const result = (single: boolean) => {
         if (opts.fail?.includes(table)) {
@@ -507,6 +589,16 @@ export function fakeClient(
           .filter((r) => call.eq.every(([c, v]) => r[c] === v))
           // PostgREST `is.null` matches SQL NULL; an absent key reads as NULL.
           .filter((r) => call.is.every(([c, v]) => (v === null ? r[c] == null : r[c] === v)))
+          .filter((r) => call.in.every(([c, values]) => values.includes(r[c])))
+          // `a.eq.x,b.eq.y`: any clause matches (the only shape the feed sends).
+          .filter((r) =>
+            call.or.every((condition) =>
+              condition.split(',').some((clause) => {
+                const [column, operator, ...value] = clause.split('.');
+                return operator === 'eq' && String(r[column]) === value.join('.');
+              })
+            )
+          )
           .slice(0, call.limit ?? undefined);
         return single ? { data: rows[0] ?? null, error: null } : { data: rows, error: null };
       };
@@ -523,7 +615,12 @@ export function fakeClient(
           call.is.push([column, value]);
           return builder;
         },
-        or() {
+        in(column: string, values: unknown[]) {
+          call.in.push([column, values]);
+          return builder;
+        },
+        or(condition: string) {
+          call.or.push(condition);
           return builder;
         },
         order() {

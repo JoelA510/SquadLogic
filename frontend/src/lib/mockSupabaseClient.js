@@ -61,7 +61,6 @@ import { mockPersistGameSchedule } from './mockGameIdentity.js';
 import {
   deriveCurrentGameRuns,
   deriveLeagueStandings,
-  isSavedGame,
   mockUpdateSavedGameScore,
 } from './mockGameScores.js';
 import { handleServerSideReadRpc } from './mockServerSideReads.js';
@@ -70,6 +69,7 @@ import { handleAdminWriteRpc, unmockedRpcError } from './mockAdminWrites.js';
 import { handlePracticeEnactRpc } from './mockPracticeEnact.js';
 import { handleDemoRpc, makeAnonymousSession } from './mockDemo.js';
 import { MOCK_ORG_ID, MOCK_SEASON_ID } from './mockSeedIds.js';
+import { embedsOfSavedGames, resolveSavedGameEmbeds } from './mockSavedGames.js';
 import { ADMIN_ROLES, ASSIGNABLE_ROLES } from '../constants/permissions.js';
 
 const mockId = (prefix = '') =>
@@ -451,32 +451,8 @@ const initialMockData = {
     },
   ],
   game_assignments: [],
-  games: [
-    {
-      id: 'g1',
-      organization_id: MOCK_ORG_ID,
-      season_id: MOCK_SEASON_ID,
-      home_team_id: 't1',
-      away_team_id: 't2',
-      start_time: new Date(Date.now() - 86400000).toISOString(),
-      venue_id: 'v1',
-      has_conflict: true,
-      conflict_reason: 'Double-booked Field',
-      score_home: 2,
-      score_away: 1,
-    },
-    {
-      id: 'game-2',
-      organization_id: MOCK_ORG_ID,
-      season_id: MOCK_SEASON_ID,
-      home_team_id: 't1',
-      away_team_id: 't2',
-      start_time: new Date(Date.now() - 3600000).toISOString(),
-      venue_id: 'v1',
-      score_home: null,
-      score_away: null,
-    },
-  ],
+  // The legacy table: kept, unread by any page since F11-3, and seeded with nothing (F11-5 drops it).
+  games: [],
   scheduler_runs: [
     {
       id: 'run-practice-1',
@@ -590,38 +566,6 @@ const initialMockData = {
   field_equipment_requirements: [],
   field_availability_scenarios: [],
   field_availability_scenario_members: [],
-  view_league_standings: [
-    {
-      organization_id: MOCK_ORG_ID,
-      team_id: 't1',
-      team_name: 'Team A',
-      division: 'U8 Coed',
-      season_settings_id: MOCK_SEASON_ID,
-      wins: 1,
-      losses: 0,
-      draws: 0,
-      games_played: 1,
-      goals_for: 2,
-      goals_against: 1,
-      goal_differential: 1,
-      points: 3,
-    },
-    {
-      organization_id: MOCK_ORG_ID,
-      team_id: 't2',
-      team_name: 'Team B',
-      division: 'U8 Coed',
-      season_settings_id: MOCK_SEASON_ID,
-      wins: 0,
-      losses: 1,
-      draws: 0,
-      games_played: 1,
-      goals_for: 1,
-      goals_against: 2,
-      goal_differential: -1,
-      points: 0,
-    },
-  ],
   view_org_metrics: [
     {
       organization_id: MOCK_ORG_ID,
@@ -700,7 +644,6 @@ const mergeSource = (db, source) => {
           if (key === 'game_scores') return String(r.game_id) === String(record.game_id);
           if (key === 'view_org_metrics')
             return String(r.organization_id) === String(record.organization_id);
-          if (key === 'view_league_standings') return String(r.team_id) === String(record.team_id);
           return false;
         });
         if (idx >= 0) {
@@ -1714,6 +1657,9 @@ const createMockQuery = (table, data = null) => {
   // cap, as PostgREST counts), and with `head` no rows at all.
   let wantsCount = false;
   let headOnly = false;
+  // Set by `select()` for a read whose embeds name their columns: applied to the rows that are returned, after the
+  // filters and orders, which see every column of the table as PostgREST's do.
+  let projectRow = null;
 
   const proxy = {
     select: (query, options) => {
@@ -1755,6 +1701,17 @@ const createMockQuery = (table, data = null) => {
             };
           }
           exceptionSlotEmbed = { key: key || 'practice_slots' };
+        }
+      }
+      // A saved game's embeds (its slot, sides, ground and score) are resolved through the schema's foreign keys, and
+      // refused as PostgREST refuses them, whether or not a row matches (mockSavedGames.js).
+      projectRow = null;
+      if (table === 'game_assignments' && embedsOfSavedGames(query)) {
+        const resolved = resolveSavedGameEmbeds(query, results || [], getMockData);
+        if ('error' in resolved) embedError = resolved.error;
+        else {
+          results = resolved.rows;
+          projectRow = resolved.project;
         }
       }
       if (results && results.length > 0 && queryContent) {
@@ -1837,56 +1794,6 @@ const createMockQuery = (table, data = null) => {
               : null;
             return { ...item, division: division ? { ...division, season: season || null } : null };
           });
-        }
-        if (table === 'game_assignments' && /\bgame_scores\s*\(/.test(queryContent)) {
-          // `game_scores(game_id)`, as `useGameAssignments` reads a run's games with their score (20261122010000). The
-          // foreign key is from the score's four columns to the game, and they are not a unique key of `game_scores`
-          // by themselves, so PostgREST answers the embed as a to-many list: one row for a scored game, none otherwise.
-          const scores = getMockData('game_scores');
-          results = results.map((item) => ({
-            ...item,
-            game_scores: scores
-              .filter((score) => String(score.game_id) === String(item.id))
-              .map((score) => ({ game_id: score.game_id })),
-          }));
-        }
-        if (table === 'games' && queryContent.includes('game_slot:game_slots')) {
-          // `game_slot:game_slots (slot_date, ..., field:fields (name, location:locations (name)))`,
-          // as the team page and the coach home read a game's slot (admin focus R6): the
-          // slot by `game_slot_id`, with its field and that field's venue; null without one.
-          const slots = getMockData('game_slots');
-          const fields = getMockData('fields');
-          const locations = getMockData('locations');
-          results = results.map((item) => {
-            const slot = slots.find((g) => String(g.id) === String(item.game_slot_id)) || null;
-            const field = slot ? fields.find((f) => String(f.id) === String(slot.field_id)) : null;
-            const location = field
-              ? locations.find((l) => String(l.id) === String(field.location_id)) || null
-              : null;
-            return {
-              ...item,
-              game_slot: slot ? { ...slot, field: field ? { ...field, location } : null } : null,
-            };
-          });
-        }
-        if (
-          table === 'games' &&
-          (queryContent.includes('home_team') || queryContent.includes('away_team'))
-        ) {
-          const teams = getMockData('teams');
-          results = results.map((item) => ({
-            ...item,
-            home_team: teams.find((t) => String(t.id) === String(item.home_team_id)) || {
-              id: item.home_team_id,
-              name: 'Home Team',
-              division: 'U10',
-            },
-            away_team: teams.find((t) => String(t.id) === String(item.away_team_id)) || {
-              id: item.away_team_id,
-              name: 'Away Team',
-              division: 'U10',
-            },
-          }));
         }
         if (table === 'practice_assignments' && (slotEmbed || queryContent.includes('teams'))) {
           const slots = getMockData('practice_slots');
@@ -1994,9 +1901,6 @@ const createMockQuery = (table, data = null) => {
         const itemDate = new Date(item[col]).getTime();
         const valDate = new Date(val).getTime();
         if (!isNaN(itemDate) && !isNaN(valDate)) {
-          if (col === 'start_time' && item.id && item.id.startsWith('game-')) {
-            return true;
-          }
           return itemDate <= valDate;
         }
         return item[col] <= val;
@@ -2005,6 +1909,16 @@ const createMockQuery = (table, data = null) => {
     },
     neq: (col, val) => {
       results = results.filter((item) => String(item[col]) !== String(val));
+      return proxy;
+    },
+    // PostgREST `gte`, by instant when both sides are dates (the Dashboard's upcoming games), else by value.
+    gte: (col, val) => {
+      results = results.filter((item) => {
+        if (item[col] === undefined || item[col] === null) return false;
+        const a = new Date(item[col]).getTime();
+        const b = new Date(val).getTime();
+        return !isNaN(a) && !isNaN(b) ? a >= b : item[col] >= val;
+      });
       return proxy;
     },
     // PostgREST `is`: `null` matches a NULL (or, in the mock, absent) column.
@@ -2094,20 +2008,21 @@ const createMockQuery = (table, data = null) => {
         !isSingle && !isMaybeSingle && matched > MOCK_MAX_ROWS
           ? results.slice(0, MOCK_MAX_ROWS)
           : results;
-      let finalData = embedError ? null : JSON.parse(JSON.stringify(served));
+      const shaped = projectRow && !embedError ? served.map(projectRow) : served;
+      let finalData = embedError ? null : JSON.parse(JSON.stringify(shaped));
       let error = embedError;
 
       if (error) {
         // An embed PostgREST refuses returns no data, single or not.
       } else if (isSingle) {
         if (results.length > 0) {
-          finalData = results[0];
+          finalData = projectRow ? finalData[0] : results[0];
         } else {
           finalData = null;
           error = { code: 'PGRST116', message: 'No rows found' };
         }
       } else if (isMaybeSingle) {
-        finalData = results.length > 0 ? results[0] : null;
+        finalData = results.length === 0 ? null : projectRow ? finalData[0] : results[0];
       }
 
       if (headOnly) finalData = null;
@@ -2464,51 +2379,6 @@ export const mockSupabase = {
                 if (String(item[col]) === String(val)) {
                   updatedItem = { ...item, ...updates };
                   if (table === 'fields') applyFieldRetirementTrigger(updatedItem);
-
-                  if (table === 'games' && updates.score_home !== undefined) {
-                    db.view_league_standings = db.view_league_standings || [];
-                    const home = db.view_league_standings.find(
-                      (s) => String(s.team_id) === String(item.home_team_id)
-                    );
-                    const away = db.view_league_standings.find(
-                      (s) => String(s.team_id) === String(item.away_team_id)
-                    );
-                    if (home && away) {
-                      const sh = Number(updates.score_home);
-                      const sa = Number(updates.score_away);
-                      if (
-                        !(
-                          isNaN(sh) ||
-                          isNaN(sa) ||
-                          updates.score_home === null ||
-                          updates.score_away === null
-                        )
-                      ) {
-                        if (sh > sa) {
-                          home.wins++;
-                          away.losses++;
-                          home.points += 3;
-                        } else if (sa > sh) {
-                          away.wins++;
-                          home.losses++;
-                          away.points += 3;
-                        } else {
-                          home.draws++;
-                          away.draws++;
-                          home.points += 1;
-                          away.points += 1;
-                        }
-                        home.games_played++;
-                        away.games_played++;
-                        home.goals_for += sh;
-                        home.goals_against += sa;
-                        away.goals_for += sa;
-                        away.goals_against += sh;
-                        home.goal_differential += sh - sa;
-                        away.goal_differential += sa - sh;
-                      }
-                    }
-                  }
 
                   if (table === 'fields' && updates.supports_halves !== undefined) {
                     if (updates.supports_halves) {
@@ -4556,77 +4426,22 @@ export const mockSupabase = {
     }
 
     if (MOCK_CAPABLE_BUILD && name === 'update_game_score') {
-      // 20261122010000 (F11-2): an id that names a SAVED game is the database's arm, in mockGameScores.js. What follows
-      // it is the mock's own legacy arm, for an id that names only a row of the legacy `games` table (the database
-      // answers "Game not found" for it): the Scores page reads that table until F11-3 repoints it, and this arm goes
-      // then (declared in mockGameScores.js and pinned by tests/mockGameScores.test.js).
-      if (isSavedGame(db, params?.p_game_id)) {
-        const scored = mockUpdateSavedGameScore(db, params, {
-          currentUserId: storedSession ? currentUserId : null,
-          isOrgAdmin,
-          isOrgMember: (org) =>
-            (db.organization_members || []).some(
-              (item) =>
-                String(item.organization_id) === String(org) &&
-                String(item.profile_id) === String(currentUserId)
-            ),
-          seasonRefusal: (rows) => scheduleWriteRefusal(db, 'game_scores', rows),
-          newId: () => mockId('audit-score-'),
-        });
-        if (!scored.error) saveDB(db);
-        return scored;
-      }
-      // As 20261028010000 (admin focus R6): an admin or staff member only,
-      // and only while the organization's `score_entry` setting is a boolean
-      // true (`org_flag(org, 'score_entry', false)`); 55000 while it is off.
-      const game = (db.games || []).find((g) => String(g.id) === String(params?.p_game_id));
-      if (
-        !game ||
-        String(game.organization_id ?? MOCK_ORG_ID) !== String(params?.p_organization_id)
-      ) {
-        return {
-          data: null,
-          error: {
-            message: `Game not found in organization ${params?.p_organization_id}`,
-            code: '42501',
-          },
-        };
-      }
-      if (!isOrgAdmin(params?.p_organization_id)) {
-        return {
-          data: null,
-          error: {
-            message: 'Access denied: only an organization admin enters scores',
-            code: '42501',
-          },
-        };
-      }
-      const scoringOrg = (db.organizations || []).find(
-        (org) => String(org.id) === String(params?.p_organization_id)
-      );
-      if (scoringOrg?.feature_flags?.score_entry !== true) {
-        return {
-          data: null,
-          error: {
-            message: `Score entry is off for organization ${params?.p_organization_id}: an admin turns it on in Settings`,
-            code: '55000',
-          },
-        };
-      }
-      // 20261111010000: a completed season's scores are history (the games trigger).
-      const scoreSeasonRefused = scheduleWriteRefusal(db, 'games', [game]);
-      if (scoreSeasonRefused) return scoreSeasonRefused;
-      await mockSupabase
-        .from('games')
-        .update({ score_home: params?.p_score_home, score_away: params?.p_score_away })
-        .eq('id', params?.p_game_id);
-      return {
-        data: {
-          score_home: params?.p_score_home,
-          score_away: params?.p_score_away,
-        },
-        error: null,
-      };
+      // 20261122010000: a score names a SAVED game (mockGameScores.js). An id that names anything else, a row of the
+      // legacy `games` table included, is "Game not found", as the database answers.
+      const scored = mockUpdateSavedGameScore(db, params, {
+        currentUserId: storedSession ? currentUserId : null,
+        isOrgAdmin,
+        isOrgMember: (org) =>
+          (db.organization_members || []).some(
+            (item) =>
+              String(item.organization_id) === String(org) &&
+              String(item.profile_id) === String(currentUserId)
+          ),
+        seasonRefusal: (rows) => scheduleWriteRefusal(db, 'game_scores', rows),
+        newId: () => mockId('audit-score-'),
+      });
+      if (!scored.error) saveDB(db);
+      return scored;
     }
 
     if (name === 'record_audit_event') {

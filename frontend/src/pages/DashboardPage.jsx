@@ -23,6 +23,7 @@ import Avatar from '../components/ui/Avatar.jsx';
 import LoadingScreen from '../components/LoadingScreen.jsx';
 import { supabase } from '../lib/supabaseClient.js';
 import { fetchAllPages } from '../lib/pagedFetch.js';
+import { countCurrentGames, fetchGameCards } from '../utils/savedGamesClient.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { usePermission } from '../hooks/usePermission.js';
@@ -61,7 +62,7 @@ const HOME_NOT_LOADED = Object.freeze({
   players: [],
   teams: [],
   divisions: [],
-  games: [],
+  games: { count: 0, upcoming: [] },
   practices: [],
   audit: [],
   loaded: false,
@@ -104,14 +105,20 @@ function useHomeData() {
                   .eq('season_settings_id', seasonId)
               )
             : [],
-          fetchAllPages(() =>
-            supabase
-              .from('games')
-              .select(
-                `id, start_time, home_team:home_team_id (id, name, division:divisions (name)), away_team:away_team_id (id, name)`
-              )
-              .eq('organization_id', orgId)
-          ),
+          // The season's saved schedule (F11-3), read as the page shows it (review R9): how many games its current
+          // run holds, counted by the server, and the five still to come.
+          seasonId
+            ? Promise.all([
+                countCurrentGames({ organizationId: orgId, seasonId }),
+                fetchGameCards({
+                  organizationId: orgId,
+                  seasonId,
+                  now: new Date().toISOString(),
+                  limit: 5,
+                  played: false,
+                }),
+              ]).then(([count, upcoming]) => ({ count, upcoming }))
+            : { count: 0, upcoming: [] },
           fetchAllPages(() =>
             supabase.from('practice_slots').select('id').eq('organization_id', orgId)
           ),
@@ -169,14 +176,8 @@ function AdminHome() {
   const unassigned = activePlayers.filter((p) => !p.team_id).length;
   const waitlisted = players.filter((p) => p.status === 'waitlist').length;
 
-  const upcoming = useMemo(
-    () =>
-      games
-        .filter((g) => g.start_time && new Date(g.start_time) >= new Date())
-        .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
-        .slice(0, 5),
-    [games]
-  );
+  // The five still to come, soonest first, as the server answered them (review R9).
+  const upcoming = games.upcoming;
 
   const capacityByDivision = useMemo(() => {
     return divisions
@@ -286,7 +287,7 @@ function AdminHome() {
           sub={`${divisions.length} divisions`}
         />
         <KPI icon={Calendar} tone="accent-teal" label="Practice slots" value={practices.length} />
-        <KPI icon={Flag} tone="accent-amber" label="Games scheduled" value={games.length} />
+        <KPI icon={Flag} tone="accent-amber" label="Games scheduled" value={games.count} />
       </div>
 
       <div
@@ -422,7 +423,7 @@ function AdminHome() {
                 </div>
               )}
               {upcoming.map((game, index) => {
-                const date = new Date(game.start_time);
+                const date = new Date(game.start);
                 return (
                   <div
                     key={game.id}

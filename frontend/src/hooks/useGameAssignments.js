@@ -13,47 +13,20 @@ import { logger } from '../lib/logger.js';
 const GAMES_WITH_SCORE = '*, game_scores(game_id)';
 
 /**
- * What PostgREST answers when there is no `game_scores` to embed: no relationship (PGRST200), no table in its schema
- * cache (PGRST205), or the database's own "relation does not exist" (42P01).
- */
-const NO_SCORE_RELATION = new Set(['PGRST200', 'PGRST205', '42P01']);
-let saidNoScoreRelation = false;
-/** For tests: forget that the notice below was given. */
-export function resetScoreRelationNotice() {
-  saidNoScoreRelation = false;
-}
-
-/**
  * The games of a run, each with its score if it has one, in ONE read (one snapshot, and bounded to the run: not a
- * second read of every score the organization ever recorded).
- *
- * **Before migration 20261122010000 is applied there is no `game_scores`.** The client is deployed at merge and the
- * migration is applied some minutes later (or not at all, if a guard stops it); in that window the embed is refused.
- * That refusal, and only that one, reads as "no game is scored": the schedule loads as it did before the migration,
- * and it is logged once. Any other failure throws. To remove once the migration is deployed everywhere
- * (docs/changes/2026-11-06-games-table-source-of-truth.md, "As built" under F11-2).
+ * second read of every score the organization ever recorded). A failed page throws, a missing `game_scores` included:
+ * a schedule read without its scores would show every scored game as free to move.
  *
  * @param {string} runId
  * @returns {Promise<any[]>}
  */
-async function fetchRunGames(runId) {
-  try {
-    // Paged: an unranged select is cut at the server's row cap (1000), and a run of a
-    // large league holds more games than that. A page that fails throws, so a partial
-    // set is an error and never the schedule.
-    return await fetchAllPages(() =>
-      supabase.from('game_assignments').select(GAMES_WITH_SCORE).eq('run_id', runId)
-    );
-  } catch (err) {
-    if (!NO_SCORE_RELATION.has(String(/** @type {any} */ (err)?.code))) throw err;
-    if (!saidNoScoreRelation) {
-      saidNoScoreRelation = true;
-      logger.warn(
-        'game_scores is not in this database yet (migration 20261122010000 not applied): the schedule is read without scores, and no game is held by one.'
-      );
-    }
-    return fetchAllPages(() => supabase.from('game_assignments').select('*').eq('run_id', runId));
-  }
+function fetchRunGames(runId) {
+  // Paged: an unranged select is cut at the server's row cap (1000), and a run of a
+  // large league holds more games than that. A page that fails throws, so a partial
+  // set is an error and never the schedule.
+  return fetchAllPages(() =>
+    supabase.from('game_assignments').select(GAMES_WITH_SCORE).eq('run_id', runId)
+  );
 }
 
 export function useGameAssignments(runId) {

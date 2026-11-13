@@ -181,7 +181,7 @@ export const ScheduleTbdRowSchema = z.object({
   week_index: z.number().int().nullish(),
   missing_count: z.number().int().nullish(),
   reason: z.string(),
-  // The table's own column, joined on by the client (`scheduleTbdClient.js`): `get_schedule_tbd` does not return it.
+  // The date a schedule import gave the game; `get_schedule_tbd` returns it since 20261122010000.
   game_date: z.string().nullish(),
 });
 

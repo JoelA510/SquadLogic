@@ -110,7 +110,13 @@ const feedSlot = (slot) => (slot ? { ...slot, fields: feedFields(slot.field) } :
  */
 export function feedRowsOf(rows) {
   return {
-    games: (rows?.games ?? []).map((g) => ({ id: g.id, game_slots: feedSlot(g.game_slot) })),
+    // A saved game's own instants go with it: the feed places them before its slot's wall reading.
+    games: (rows?.games ?? []).map((g) => ({
+      id: g.id,
+      start: g.start ?? null,
+      end: g.end ?? null,
+      game_slots: feedSlot(g.game_slot),
+    })),
     practices: (rows?.practices ?? []).map((p) => ({
       id: p.id,
       effective_date_range: p.effective_date_range,

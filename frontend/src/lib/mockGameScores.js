@@ -16,23 +16,12 @@
  * Whether a game is HELD is not decided here: `mockGamePublished.js`'s `isRowHeld` reads `db.game_scores`, and every
  * refusal asks it.
  *
- * ## What the mock still does that the database does not (declared; F11-3 removes it)
- *
- * The Scores and Standings pages still read the legacy `games` table until F11-3 repoints them, and the mock's demo
- * data and the pages' tests seed that table. So (1) `update_game_score` for an id that names a row of the legacy
- * `games` table and NO saved game keeps its earlier arm in `mockSupabaseClient.js` (the database answers "Game not
- * found" for such an id), and (2) a team's STORED `view_league_standings` row (the seed, and what that legacy arm
- * counts into) is returned as it is unless the team has a result in `game_scores`, and an own team with neither has no
- * row here (the database gives it a row of zeros). `tests/mockGameScores.test.js` pins both, so neither can widen.
+ * Since F11-3 the mock has no arm of its own here: an id that names no saved game is "Game not found" (a row of the
+ * legacy `games` table included), and the standings are computed on every read, never stored.
  */
 
 const same = (a, b) => String(a ?? '').toLowerCase() === String(b ?? '').toLowerCase();
 const fail = (code, message, details = null) => ({ data: null, error: { code, message, details } });
-
-/** Whether an id names a saved game (the arm of `update_game_score` the database has). */
-export function isSavedGame(db, gameId) {
-  return (db.game_assignments || []).some((row) => same(row.id, gameId));
-}
 
 /**
  * `update_game_score` for a saved game, in the database's order.
@@ -231,23 +220,38 @@ export function computeScoredStandings(db) {
 }
 
 /**
- * What a read of `view_league_standings` returns in the mock: the computed row of every team with a result in
- * `game_scores`, and the stored row (the seed and the legacy arm, see the file comment) of every other team, never an
- * outside club's.
+ * What a read of `view_league_standings` returns: a row for EVERY own team (zeros for a team with no counted result,
+ * as the view's LEFT JOIN gives), never one for an outside club, in the view's column order.
  *
  * @param {any} db
  */
 export function deriveLeagueStandings(db) {
   const computed = computeScoredStandings(db);
   const scoredTeams = new Set(computed.map((row) => String(row.team_id).toLowerCase()));
-  const external = new Set(
-    (db.teams || []).filter((t) => t.is_external === true).map((t) => String(t.id).toLowerCase())
-  );
-  const stored = (db.view_league_standings || [])
-    .filter((row) => !scoredTeams.has(String(row.team_id).toLowerCase()))
-    .filter((row) => !external.has(String(row.team_id).toLowerCase()))
-    .map((row) => ({ results_not_counted: 0, ...row }));
-  return [...stored, ...computed];
+  const unscored = (db.teams || [])
+    .filter((team) => team.is_external !== true)
+    .filter((team) => !scoredTeams.has(String(team.id).toLowerCase()))
+    .map((team) => {
+      const division = (db.divisions || []).find((d) => same(d.id, team.division_id));
+      return {
+        team_id: team.id,
+        organization_id: team.organization_id,
+        team_name: team.name,
+        division_id: team.division_id ?? null,
+        games_played: 0,
+        wins: 0,
+        losses: 0,
+        draws: 0,
+        goals_for: 0,
+        goals_against: 0,
+        goal_differential: 0,
+        points: 0,
+        division: division?.name ?? null,
+        season_settings_id: division?.season_settings_id ?? null,
+        results_not_counted: 0,
+      };
+    });
+  return [...computed, ...unscored];
 }
 
 /**

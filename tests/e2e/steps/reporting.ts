@@ -162,14 +162,13 @@ Then('the admin sees the league standings', async ({ page }) => {
 When(
   'I input a score of {string} to {string} for a completed game',
   async ({ page }, scoreHome: string, scoreAway: string) => {
-    // initialMockData has game-2 (unscored, Team A vs Team B).
-    // The mock JOIN resolver populates home_team.name = 'Team A'.
-    // Find the unscored game card (the one without existing scores).
-    // Both game cards show Team A vs Team B, so we target the one with empty score inputs.
+    // The saved schedule has two played games, Team A at home to Team B (seeded by "the saved schedule has two
+    // played games, one already scored"): yesterday's is scored 2 to 1, the one an hour ago is not. The list is
+    // newest first, so the first card is the unscored one.
     const gameCards = page.locator('[data-testid="game-score-card"]');
     await expect(gameCards.first()).toBeVisible({ timeout: 15000 });
+    await expect(gameCards.first().getByLabel('Home Score')).toHaveValue('');
 
-    // Find the card that has an empty Home Score input (game-2 has score_home: null)
     const unscoredCard = gameCards
       .filter({
         has: page.getByLabel('Home Score').first(),
@@ -182,12 +181,11 @@ When(
     await expect(unscoredCard).toBeVisible({ timeout: 10000 });
 
     await unscoredCard.getByLabel('Home Score').first().fill(scoreHome);
-    // Wait for React to process the first handleScoreUpdate + setGames state update
-    // before filling the away score, so the second onChange receives the updated score_home.
-    await page.waitForTimeout(500);
+    // One score is held on the page and nothing is sent: the card says a second is needed.
+    await expect(unscoredCard.getByTestId('score-needs-both')).toBeVisible({ timeout: 10000 });
     await unscoredCard.getByLabel('Away Score').first().fill(scoreAway);
-    // Wait for the final standings update to complete
-    await page.waitForTimeout(1500);
+    // Both are sent together; the hint goes when the save has answered.
+    await expect(unscoredCard.getByTestId('score-needs-both')).toHaveCount(0, { timeout: 10000 });
   }
 );
 

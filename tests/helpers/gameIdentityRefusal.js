@@ -10,10 +10,7 @@
  * import this, so the comparison is never a function with itself. The database's own table is
  * `supabase/tests/game_identity.sql`.
  */
-import {
-  changesPublishedPlacement,
-  publishedOmissions,
-} from '../../packages/core/src/gamePublished.js';
+import { changesPublishedPlacement, publishedOmissions } from './publishedOmissions.js';
 import { isHeld } from '../../packages/core/src/gameIdentity.js';
 
 const read = (game, camel, snake) => game?.[camel] ?? game?.[snake];

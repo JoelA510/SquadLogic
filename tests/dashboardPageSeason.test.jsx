@@ -12,12 +12,15 @@ const SPRING = 'season-spring';
 const mocks = vi.hoisted(() => ({
   tables: /** @type {Record<string, any[]>} */ ({}),
   reads: /** @type {Array<{ table: string, eqs: Array<[string, unknown]> }>} */ ([]),
+  chains: /** @type {Array<{ table: string, calls: any[] }>} */ ([]),
 }));
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
     from: (table) => {
       const eqs = [];
+      const calls = [];
+      mocks.chains.push({ table, calls });
       const builder = new Proxy(
         {},
         {
@@ -25,14 +28,40 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
             if (method === 'then') {
               return (resolve, reject) => {
                 mocks.reads.push({ table, eqs: [...eqs] });
-                const data = (mocks.tables[table] || []).filter((row) =>
+                // The filters, order and limit a read asks the server for, applied as the server applies them.
+                let data = (mocks.tables[table] || []).filter((row) =>
                   eqs.every(([column, value]) => String(row[column]) === String(value))
                 );
-                return Promise.resolve({ data, error: null }).then(resolve, reject);
+                for (const [method, column, value] of calls) {
+                  if (method === 'in') data = data.filter((row) => value.includes(row[column]));
+                  if (method === 'gte') data = data.filter((row) => row[column] >= value);
+                  if (method === 'lte') data = data.filter((row) => row[column] <= value);
+                  if (method === 'order') {
+                    const up = value?.ascending !== false;
+                    data = [...data].sort((a, b) =>
+                      a[column] < b[column]
+                        ? up
+                          ? -1
+                          : 1
+                        : a[column] > b[column]
+                          ? up
+                            ? 1
+                            : -1
+                          : 0
+                    );
+                  }
+                  if (method === 'limit') data = data.slice(0, column);
+                }
+                // A `select(columns, { count, head })` read answers its count, and no rows with `head`.
+                const options = calls.find(([m]) => m === 'select')?.[2];
+                const answer = options?.count
+                  ? { data: options.head ? null : data, count: data.length, error: null }
+                  : { data, error: null };
+                return Promise.resolve(answer).then(resolve, reject);
               };
             }
             if (method === 'eq') return (column, value) => (eqs.push([column, value]), builder);
-            return () => builder;
+            return (...args) => (calls.push([method, ...args]), builder);
           },
         }
       );
@@ -93,7 +122,8 @@ describe('DashboardPage (the admin home)', () => {
         { id: 't2', organization_id: 'org-1', division_id: 'd-spring', name: 'Spring Team' },
         { id: 't3', organization_id: 'org-1', division_id: 'd-spring-2', name: 'Other' },
       ],
-      games: [],
+      current_game_runs: [],
+      game_assignments: [],
       practice_slots: [],
       audit_log: [],
     };
@@ -114,5 +144,92 @@ describe('DashboardPage (the admin home)', () => {
     expect(kpi.querySelector('.kpi-val')).toHaveTextContent(/^1$/);
     const players = screen.getByText('Players').closest('.kpi');
     expect(players.querySelector('.kpi-val')).toHaveTextContent(/^2$/);
+  });
+  it('counts and lists the games of the saved schedule of the season (F11-3 C3), not the legacy games table', async () => {
+    const game = (id, start, home, away) => ({
+      id,
+      organization_id: 'org-1',
+      run_id: 'run-fall',
+      season_settings_id: FALL,
+      start,
+      end: start,
+      home_team: { id: `${id}-h`, name: home, division: { name: 'U8' } },
+      away_team: { id: `${id}-a`, name: away, division: { name: 'U8' } },
+      game_scores: [],
+    });
+    mocks.tables = {
+      players: [],
+      divisions: [],
+      teams: [],
+      // A row of the legacy table: read by nothing, so it is neither counted nor listed.
+      games: [{ id: 'legacy', organization_id: 'org-1', start_time: '2099-01-01T00:00:00Z' }],
+      current_game_runs: [
+        { organization_id: 'org-1', season_settings_id: FALL, run_id: 'run-fall' },
+        { organization_id: 'org-1', season_settings_id: SPRING, run_id: 'run-spring' },
+      ],
+      game_assignments: [
+        game('g-past', '2020-03-01T15:00:00Z', 'Past Home', 'Past Away'),
+        game('g-soon', '2099-03-01T15:00:00Z', 'Soon Home', 'Soon Away'),
+        game('g-later', '2099-04-01T15:00:00Z', 'Later Home', 'Later Away'),
+      ],
+      practice_slots: [],
+      audit_log: [],
+    };
+    mocks.reads = [];
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>
+    );
+    const kpi = (await screen.findByText('Games scheduled')).closest('.kpi');
+    await waitFor(() => expect(kpi.querySelector('.kpi-val')).toHaveTextContent(/^3$/));
+    // Upcoming: the two that have not started, soonest first; the played one is not listed.
+    const soon = screen.getByText(/Soon Home/);
+    const later = screen.getByText(/Later Home/);
+    expect(soon.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText(/Past Home/)).toBeNull();
+    // What was read: the season's current run, then its games; never the legacy table.
+    expect(mocks.reads.map((read) => read.table)).not.toContain('games');
+    expect(mocks.reads.find((read) => read.table === 'current_game_runs').eqs).toEqual([
+      ['organization_id', 'org-1'],
+      ['season_settings_id', FALL],
+    ]);
+    expect(mocks.reads.some((read) => read.table === 'game_assignments')).toBe(true);
+  });
+
+  it('reads the season’s game count as a count and its upcoming games as five, from the server (review R9)', async () => {
+    mocks.tables = {
+      players: [],
+      divisions: [],
+      teams: [],
+      current_game_runs: [
+        { organization_id: 'org-1', season_settings_id: FALL, run_id: 'run-fall' },
+      ],
+      game_assignments: [],
+      practice_slots: [],
+      audit_log: [],
+    };
+    mocks.reads = [];
+    mocks.chains = [];
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>
+    );
+    await screen.findByText('Games scheduled');
+    await waitFor(() =>
+      expect(mocks.chains.filter((c) => c.table === 'game_assignments').length).toBe(2)
+    );
+    const [count, upcoming] = mocks.chains
+      .filter((c) => c.table === 'game_assignments')
+      .sort((a) => (a.calls.some(([m, , o]) => m === 'select' && o?.head) ? -1 : 1));
+    expect(count.calls.find(([m]) => m === 'select')[2]).toEqual({ count: 'exact', head: true });
+    expect(upcoming.calls.find(([m]) => m === 'gte')?.[1]).toBe('start');
+    expect(upcoming.calls.find(([m]) => m === 'order')).toEqual([
+      'order',
+      'start',
+      { ascending: true },
+    ]);
+    expect(upcoming.calls.find(([m]) => m === 'limit')).toEqual(['limit', 5]);
   });
 });

@@ -1,41 +1,4 @@
 import { scheduleTbdItemsFromRows } from '@squadlogic/core/scheduleTbd.js';
-import { fetchAllPages } from '../lib/pagedFetch.js';
-
-/**
- * The RPC's rows with the date a schedule import gave a TIME TBD game (`schedule_tbd.game_date`) and its Game ID.
- * Since migration 20261122010000 `get_schedule_tbd` returns both, and the rows are used as they come. The function
- * before it did not return them: a database that still runs that body (the client can be deployed before the
- * migration is applied) answers game rows WITHOUT the `game_date` key, and for those the two columns are read from the
- * table (RLS: admins select) and joined on by row id, as before. A list that cannot be read is an error, never a list
- * with its dates missing. The fallback goes once no deployed database runs the older body.
- *
- * @param {any} client
- * @param {string} seasonSettingsId
- * @param {any} rows - the RPC's `data`
- * @returns {Promise<any>} the rows (an array), or the RPC's own answer untouched when it is not one
- */
-async function withGameDates(client, seasonSettingsId, rows) {
-  if (!Array.isArray(rows) || !rows.some((row) => row?.kind === 'game')) return rows;
-  // Every game row carries the key (null for an undated game): the RPC is the 20261122010000 body.
-  if (rows.every((row) => row?.kind !== 'game' || Object.hasOwn(row, 'game_date'))) return rows;
-  if (typeof client?.from !== 'function') {
-    throw new Error('there is no database connection to read the TIME TBD dates with');
-  }
-  const dated = await fetchAllPages(() =>
-    client
-      .from('schedule_tbd')
-      .select('id, game_date, external_ref')
-      .eq('season_settings_id', seasonSettingsId)
-      .eq('kind', 'game')
-  );
-  const byId = new Map(dated.map((row) => [String(row.id), row]));
-  return rows.map((row) => {
-    const found = row?.kind === 'game' ? byId.get(String(row.id)) : undefined;
-    return found
-      ? { ...row, game_date: found.game_date ?? null, external_ref: found.external_ref ?? null }
-      : row;
-  });
-}
 
 /**
  * Read the season's TIME TBD list (`get_schedule_tbd`, admin only) for the master export.
@@ -62,8 +25,8 @@ export async function readScheduleTbd(client, seasonSettingsId) {
       code: error.code ?? null,
     });
   }
-  const rows = await withGameDates(client, seasonSettingsId, data);
-  return { rows, items: scheduleTbdItemsFromRows(rows) };
+  // Since 20261122010000 every game row carries its `game_date` and `external_ref` (null when it has none).
+  return { rows: data, items: scheduleTbdItemsFromRows(data) };
 }
 
 /**

@@ -4,8 +4,8 @@ Feature: Schedule exports
   So that I can share it, print it and put it in a calendar app
 
   Admin focus R7 (docs/changes/2026-10-22-admin-focus.md): every event the
-  schedule shows is in the files, a game with no slot as "Date and time TBD"
-  with its reason, and no export carries a contact column. Admins only
+  schedule shows is in the files (the games are the saved schedule's, each at
+  its own start and end), and no export carries a contact column. Admins only
   (docs/changes/2026-10-27-admin-only.md): no coach signs in.
 
   Scenario: An admin downloads a team's schedule from its team page
@@ -15,7 +15,7 @@ Feature: Schedule exports
     And I download "Calendar (.ics)" from the team page
     Then the calendar "Team_A_Schedule.ics" holds the game and 4 practices of "Team A"
     When I download "CSV" from the team page
-    Then the CSV "Team_A_Schedule.csv" lists the game against "Team B", 4 practices and the games with no slot
+    Then the CSV "Team_A_Schedule.csv" lists the game against "Team B" and 4 practices
     And the CSV has no contact column
     When I download "Excel (.xlsx)" from the team page
     Then the workbook "Team_A_Schedule.xlsx" holds the CSV's rows

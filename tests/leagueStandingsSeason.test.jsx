@@ -43,25 +43,41 @@ vi.mock('../frontend/src/lib/logger.js', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
 
-const row = (team_id, team_name, organization_id, season_settings_id) => ({
-  organization_id,
-  team_id,
-  team_name,
-  division: 'U10 Boys',
-  season_settings_id,
-  wins: 0,
-  losses: 0,
-  draws: 0,
-  games_played: 0,
-  goals_for: 0,
-  goals_against: 0,
-  goal_differential: 0,
-  points: 0,
-});
-
-const THIS_SEASON = row('team-now', 'Now Tigers', ORG, SEASON_NOW);
-const EARLIER_SEASON = row('team-old', 'Old Lions', ORG, SEASON_OLD);
-const OTHER_ORG = row('team-other', 'Other Bears', 'org-elsewhere', SEASON_NOW);
+// The standings are computed from the teams (a row for every own team, as the view gives), so the seed is the teams,
+// their divisions and seasons: an own team of this season, one of an earlier season, one of another organization.
+const THIS_SEASON = { team_id: 'team-now', team_name: 'Now Tigers' };
+const EARLIER_SEASON = { team_id: 'team-old', team_name: 'Old Lions' };
+const OTHER_ORG = { team_id: 'team-other', team_name: 'Other Bears' };
+const SEED = {
+  season_settings: [
+    { id: SEASON_NOW, organization_id: ORG, status: 'active' },
+    { id: SEASON_OLD, organization_id: ORG, status: 'completed' },
+    { id: 'season-elsewhere', organization_id: 'org-elsewhere', status: 'active' },
+  ],
+  divisions: [
+    { id: 'div-now', organization_id: ORG, season_settings_id: SEASON_NOW, name: 'U10 Boys' },
+    { id: 'div-old', organization_id: ORG, season_settings_id: SEASON_OLD, name: 'U10 Boys' },
+    {
+      id: 'div-other',
+      organization_id: 'org-elsewhere',
+      season_settings_id: SEASON_NOW,
+      name: 'U10 Boys',
+    },
+  ],
+  teams: [
+    { id: 'team-now', organization_id: ORG, division_id: 'div-now', name: 'Now Tigers' },
+    { id: 'team-old', organization_id: ORG, division_id: 'div-old', name: 'Old Lions' },
+    {
+      id: 'team-other',
+      organization_id: 'org-elsewhere',
+      division_id: 'div-other',
+      name: 'Other Bears',
+    },
+  ],
+  scheduler_runs: [],
+  game_assignments: [],
+  game_scores: [],
+};
 
 async function renderPage() {
   const { default: LeagueStandings } = await import('../frontend/src/pages/LeagueStandings.jsx');
@@ -71,7 +87,8 @@ async function renderPage() {
 describe('LeagueStandings :: one season at a time', () => {
   beforeEach(() => {
     sessionStorage.clear();
-    seedMockDb({ view_league_standings: [THIS_SEASON, EARLIER_SEASON, OTHER_ORG] });
+    delete window.__MOCK_DB__;
+    seedMockDb(SEED);
   });
 
   it("ranks the selected season's teams and leaves an earlier season's out", async () => {

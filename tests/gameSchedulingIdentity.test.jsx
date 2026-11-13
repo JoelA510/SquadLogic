@@ -390,3 +390,281 @@ describe('regenerate and Apply: a game keeps its id', () => {
     expect(visible().some((row) => row.published_at === '2026-10-01T00:00:00Z')).toBe(false);
   });
 });
+
+describe('a save refused for a game identity (409 GAME_IDENTITY) reads the saved schedule again (F11-3 C6)', () => {
+  /** Press Generate and Apply; the save is refused as the Edge function refuses it. */
+  async function applyRefused(code) {
+    seed();
+    SAVE.impl = async () => {
+      throw Object.assign(new Error('game ga-x is named more than once in this save'), {
+        code,
+        status: 409,
+      });
+    };
+    await mount();
+    const run = await screen.findByRole('button', {
+      name: 'Auto-Generate: run auto-scheduler optimization',
+    });
+    await waitFor(() => expect(run).toBeEnabled());
+    fireEvent.click(run);
+    const apply = await screen.findByRole('button', { name: /apply schedule/i });
+    await waitFor(() => expect(apply).toBeEnabled());
+    const from = vi.spyOn(mockSupabase, 'from');
+    fireEvent.click(apply);
+    await screen.findByText(/named more than once/);
+    // Settle: any read the refusal starts has started by now.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    return from.mock.calls.filter(([table]) => table === 'game_assignments').length;
+  }
+
+  it('the saved games are read once more after the refusal', async () => {
+    expect(await applyRefused('GAME_IDENTITY')).toBeGreaterThanOrEqual(1);
+  });
+
+  it('CONTROL: another refusal does not read them again (the read is for this one)', async () => {
+    expect(await applyRefused('GAME_PUBLISHED')).toBe(0);
+  });
+});
+
+describe('after a 409 GAME_IDENTITY the staged review is matched to the saved schedule again (F11-3 review R1)', () => {
+  /** The real save, refusing an identity as the Edge function does (409 `GAME_IDENTITY`). */
+  function installEdgeLikeSave() {
+    SAVE.sent = [];
+    SAVE.impl = async ({ assignments, runMetadata }) => {
+      const rows = prepareGamePersistenceSnapshot({ assignments, runMetadata }).payload
+        .assignmentRows;
+      SAVE.sent.push(rows);
+      const { data, error } = await mockSupabase.rpc('persist_game_schedule', {
+        run_data: {
+          organization_id: ORG,
+          season_settings_id: SEASON,
+          run_type: 'game',
+          status: 'completed',
+          results: {},
+        },
+        assignments: rows,
+      });
+      if (error && /^game_(identity|not_found)/.test(String(error.details ?? ''))) {
+        throw Object.assign(new Error(error.message), { code: 'GAME_IDENTITY', status: 409 });
+      }
+      if (error) throw Object.assign(new Error(error.message), { code: error.code });
+      return { runId: data };
+    };
+  }
+  async function generate() {
+    const run = await screen.findByRole('button', {
+      name: 'Auto-Generate: run auto-scheduler optimization',
+    });
+    await waitFor(() => expect(run).toBeEnabled());
+    fireEvent.click(run);
+  }
+  async function apply() {
+    const button = await screen.findByRole('button', { name: /apply schedule/i });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+  }
+
+  it('a game removed elsewhere: the second Apply sends the matched ids and is saved', async () => {
+    seed();
+    installEdgeLikeSave();
+    await mount();
+    await generate();
+    // Another tab replaces game 1 with a new row of the same pair while the review is open.
+    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__'));
+    const old = db.game_assignments.find((row) => row.id === GAME(1));
+    db.game_assignments = db.game_assignments.filter((row) => row.id !== GAME(1));
+    db.game_assignments.push({ ...old, id: GAME(99) });
+    window.__saveMockDB__(db);
+
+    await apply();
+    await screen.findByText(/does not exist in this organization/);
+    expect(SAVE.sent).toHaveLength(1);
+    expect(SAVE.sent[0].map((row) => row.id)).toContain(GAME(1));
+    // The saved schedule is read again and the review matched to it: said, and Apply offered again.
+    expect(
+      await screen.findByText(/matched again to the saved schedule as it is now/)
+    ).toBeInTheDocument();
+    await apply();
+    await screen.findByText(/Game schedule applied through the persistence workflow\./);
+    expect(SAVE.sent).toHaveLength(2);
+    expect(SAVE.sent[1].map((row) => row.id)).not.toContain(GAME(1));
+    expect(SAVE.sent[1].map((row) => row.id)).toContain(GAME(99));
+  });
+
+  it('a refusal the saved schedule does not explain: the review is discarded in words, never refused twice', async () => {
+    seed();
+    SAVE.sent = [];
+    SAVE.impl = async ({ assignments, runMetadata }) => {
+      SAVE.sent.push(
+        prepareGamePersistenceSnapshot({ assignments, runMetadata }).payload.assignmentRows
+      );
+      throw Object.assign(new Error('game ga-x is named more than once in this save'), {
+        code: 'GAME_IDENTITY',
+        status: 409,
+      });
+    };
+    await mount();
+    await generate();
+    await apply();
+    expect(
+      await screen.findByText(
+        /This review was discarded: the saved schedule was read again and matches the review as it was/
+      )
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /apply schedule/i })).toBeNull()
+    );
+    expect(SAVE.sent).toHaveLength(1);
+  });
+});
+
+describe('the re-key waits for the CURRENT run’s games, not any new answer (F11-3 fix round 2, Codex P2)', () => {
+  /** The real save of the mock, as the database takes it. */
+  async function realSave(rows) {
+    const { data, error } = await mockSupabase.rpc('persist_game_schedule', {
+      run_data: {
+        organization_id: ORG,
+        season_settings_id: SEASON,
+        run_type: 'game',
+        status: 'completed',
+        results: {},
+        completed_at: '2026-06-01T12:00:00Z',
+      },
+      assignments: rows,
+    });
+    if (error) throw Object.assign(new Error(error.message), { code: error.code });
+    return data;
+  }
+
+  it('the old run answering before the latest-run lookup does not consume the re-key', async () => {
+    seed();
+    // The latest-run lookup is held from the refusal on; the old run's games read answers at once.
+    const realFrom = mockSupabase.from.bind(mockSupabase);
+    let holding = false;
+    /** @type {(value?: unknown) => void} */
+    let releaseLookup = () => {};
+    const lookupHeld = new Promise((resolve) => (releaseLookup = resolve));
+    vi.spyOn(mockSupabase, 'from').mockImplementation((table) => {
+      const builder = realFrom(table);
+      if (table !== 'scheduler_runs' || !holding) return builder;
+      const realSelect = builder.select.bind(builder);
+      builder.select = (...args) => {
+        const query = realSelect(...args);
+        query.abortSignal = () => ({
+          then: (resolve, reject) => lookupHeld.then(() => query.then(resolve, reject)),
+        });
+        return query;
+      };
+      return builder;
+    });
+
+    SAVE.sent = [];
+    let calls = 0;
+    SAVE.impl = async ({ assignments, runMetadata }) => {
+      const rows = prepareGamePersistenceSnapshot({ assignments, runMetadata }).payload
+        .assignmentRows;
+      SAVE.sent.push(rows);
+      calls += 1;
+      if (calls === 1) {
+        // Meanwhile another tab saved a new run: five games carried by id, game 1's pair placed again as a new game.
+        const carried = savedGames()
+          .filter((row) => row.id !== GAME(1))
+          .map(
+            ({ run_id: _run, published: _p, published_at: _pa, published_by: _pb, ...row }) => row
+          );
+        const [
+          { id: _gone, run_id: _r, published: _q, published_at: _qa, published_by: _qb, ...again },
+        ] = savedGames().filter((row) => row.id === GAME(1));
+        // At another slot of its week, so it is a new row (the same place would update game 1 in place).
+        await realSave([
+          ...carried,
+          {
+            ...again,
+            game_slot_id: slotId(1, 0),
+            slot_id: slotId(1, 0),
+            start: `${SATURDAYS[0]}T13:00:00+00:00`,
+            end: `${SATURDAYS[0]}T14:00:00+00:00`,
+          },
+        ]);
+        holding = true;
+        throw Object.assign(new Error('game is of another schedule'), {
+          code: 'GAME_IDENTITY',
+          status: 409,
+        });
+      }
+      const runId = await realSave(rows);
+      return { runId };
+    };
+
+    await mount();
+    const run = await screen.findByRole('button', {
+      name: 'Auto-Generate: run auto-scheduler optimization',
+    });
+    await waitFor(() => expect(run).toBeEnabled());
+    fireEvent.click(run);
+    const apply = await screen.findByRole('button', { name: /apply schedule/i });
+    await waitFor(() => expect(apply).toBeEnabled());
+    fireEvent.click(apply);
+    await screen.findByText(/game is of another schedule/);
+    // The old run's games have answered by now; the lookup has not.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(screen.queryByText(/matched again to the saved schedule as it is now/)).toBeNull();
+    holding = false;
+    releaseLookup();
+
+    expect(
+      await screen.findByText(/matched again to the saved schedule as it is now/)
+    ).toBeInTheDocument();
+    const again = await screen.findByRole('button', { name: /apply schedule/i });
+    await waitFor(() => expect(again).toBeEnabled());
+    fireEvent.click(again);
+    await screen.findByText(/Game schedule applied through the persistence workflow\./);
+    const sentIds = SAVE.sent[1].map((row) => row.id);
+    // The carried games keep their ids (an update in place), and game 1's pair takes the new game's id.
+    for (const n of [2, 3, 4, 5, 6]) expect(sentIds).toContain(GAME(n));
+    expect(sentIds.filter(Boolean)).toHaveLength(6);
+    // Nothing was inserted: six in the current run, and game 1 left behind in the first.
+    expect(orgGames()).toHaveLength(7);
+  });
+
+  it('a re-read that fails leaves the review as it was, armed, and says so', async () => {
+    seed();
+    const realFrom = mockSupabase.from.bind(mockSupabase);
+    let failing = false;
+    vi.spyOn(mockSupabase, 'from').mockImplementation((table) => {
+      const builder = realFrom(table);
+      if (table !== 'game_assignments' || !failing) return builder;
+      const realSelect = builder.select.bind(builder);
+      builder.select = (...args) => {
+        const query = realSelect(...args);
+        query.range = () => Promise.resolve({ data: null, error: { message: 'boom' } });
+        return query;
+      };
+      return builder;
+    });
+    SAVE.sent = [];
+    SAVE.impl = async () => {
+      failing = true;
+      throw Object.assign(new Error('game is of another schedule'), {
+        code: 'GAME_IDENTITY',
+        status: 409,
+      });
+    };
+    await mount();
+    const run = await screen.findByRole('button', {
+      name: 'Auto-Generate: run auto-scheduler optimization',
+    });
+    await waitFor(() => expect(run).toBeEnabled());
+    fireEvent.click(run);
+    const apply = await screen.findByRole('button', { name: /apply schedule/i });
+    await waitFor(() => expect(apply).toBeEnabled());
+    fireEvent.click(apply);
+    expect(
+      await screen.findByText(
+        /The saved schedule could not be read again, so this review was not matched to it/
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/This review was discarded/)).toBeNull();
+    expect(screen.getByRole('button', { name: /apply schedule/i })).toBeInTheDocument();
+  });
+});

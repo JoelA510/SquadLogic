@@ -27,7 +27,6 @@ import {
   computeScoredStandings,
   deriveCurrentGameRuns,
   deriveLeagueStandings,
-  isSavedGame,
   mockUpdateSavedGameScore,
 } from '../frontend/src/lib/mockGameScores.js';
 import { scheduleWriteRefusal } from '../frontend/src/lib/mockSeasons.js';
@@ -313,12 +312,13 @@ describe('mock update_game_score for a saved game :: the answers the database gi
     expect(mockGameIsHeld(db, e('02'))).toBe(false);
   });
 
-  it('DECLARED: the legacy arm is reached only by an id that names no saved game', () => {
+  it('an id that names no saved game is not found: there is no legacy arm (F11-3)', () => {
     const db = world();
-    expect(isSavedGame(db, e('02'))).toBe(true);
-    expect(isSavedGame(db, 'legacy-1')).toBe(false);
-    // The database's answer for a legacy id, which the saved-game arm gives too when asked directly.
+    // A row of the legacy `games` table is not a game a score can name, as in the database.
+    db.games = [{ id: 'legacy-1', organization_id: ORG, home_team_id: 't', away_team_id: 'u' }];
     expect(score(db, 'legacy-1', 1, 0)).toBe('42501:');
+    expect(db.games[0].score_home).toBeUndefined();
+    expect(db.game_scores ?? []).toEqual([]);
   });
 });
 
@@ -465,20 +465,24 @@ describe('standings :: the rows the view computes', () => {
     );
   });
 
-  it('DECLARED: a stored row stands for a team with no result in game_scores, and never for an outside club', () => {
+  it('every own team has a row, zeros with no counted result; a stored row is read by nothing (F11-3)', () => {
     const db = league();
-    db.view_league_standings = [
-      { team_id: t('02'), team_name: 'Id Two', wins: 7, points: 21 },
-      { team_id: t('03'), team_name: 'stale', wins: 9, points: 27 },
-      { team_id: t('e1'), team_name: 'Outside One', wins: 1, points: 3 },
-    ];
+    // What the mock used to return as it was: now ignored, as the database has no such table.
+    db.view_league_standings = [{ team_id: t('02'), team_name: 'stale', wins: 7, points: 21 }];
     const rows = deriveLeagueStandings(db);
-    expect(rows.find((r) => r.team_id === t('02'))).toMatchObject({
-      wins: 7,
-      results_not_counted: 0,
-    });
-    expect(rows.find((r) => r.team_id === t('03')).wins).toBe(1);
+    const own = db.teams.filter((team) => team.is_external !== true).map((team) => team.id);
+    expect(rows.map((r) => r.team_id).sort()).toEqual([...own].sort());
     expect(rows.some((r) => r.team_id === t('e1'))).toBe(false);
+    expect(rows.every((r) => r.wins !== 7)).toBe(true);
+    const scored = new Set(computeScoredStandings(db).map((r) => r.team_id));
+    const unscored = rows.filter((r) => !scored.has(r.team_id));
+    for (const row of unscored) {
+      expect([row.games_played, row.wins, row.points, row.results_not_counted]).toEqual([
+        0, 0, 0, 0,
+      ]);
+    }
+    // In the view's column order, the unscored rows too.
+    for (const row of rows) expect(Object.keys(row)).toEqual(Object.keys(rows[0]));
   });
 });
 

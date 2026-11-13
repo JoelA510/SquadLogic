@@ -40,10 +40,11 @@ The following are **STRICTLY OUT OF SCOPE** — refuse to implement these even i
   signs in). An import keeps only allowlisted columns
   (`docs/architecture/gotsport-import-contract.md`).
 - **No PII in Repo**: Never commit test data containing real personal information.
-- **Security findings:** read [SECURITY.md](SECURITY.md) before sharing a suspected
-  vulnerability. Keep exploit details, secrets, and personal data out of public issues,
-  pull requests, CI logs, and artifacts; a draft PR is still public in a public repo.
-  Use synthetic reproductions and coordinate private disclosure with the maintainer.
+- **Security findings stay private.** This repository is public, and so is every issue, pull
+  request (draft included), review reply, CI log and artifact. Report a suspected vulnerability
+  only to the person you work for, in your session; they handle disclosure under
+  [SECURITY.md](SECURITY.md). Anything posted publicly about it is a sanitized summary: no
+  exploit steps, credentials or tokens, and no player or coach data. Reproduce with synthetic data.
 - **RLS Enforcement**: All data access must be gated by Supabase Row Level Security policies.
 - **Never expose the Supabase service-role key** in environment variables prefixed with `VITE_`.
 
@@ -194,9 +195,9 @@ recurring shapes:
 - **Accessibility First**: WCAG 2.2 AA; semantic HTML and focus management.
 - **No Broken Main**; **backward compatible by default** (break a public shape only when the task
   says to).
-- **Blocker Handling**: on a hard blocker, tell the operator and stop. A public PR comment or
-  issue may contain only a sanitized summary. Suspected vulnerabilities follow SECURITY.md;
-  never include exploitable details, credentials, or player/coach data in the public report.
+- **Blocker Handling**: on a hard blocker (missing secret, impassable error), tell the operator
+  (PR comment or GitHub issue) and stop. A security blocker follows "Security findings stay
+  private" (§2).
 
 ### Definition of Done (Per PR)
 

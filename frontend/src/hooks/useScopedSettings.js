@@ -61,13 +61,22 @@ export async function readScopedSettingRows(
   { organizationId, programIds, divisionIds },
   { pageSize, chunkSize = ID_CHUNK } = {}
 ) {
-  const paged = (build) => fetchAllPages(build, pageSize ? { pageSize } : undefined);
-  const base = () =>
-    client.from('scoped_settings').select(SETTING_COLUMNS).eq('organization_id', organizationId);
+  /** One paged read of the organization's rows, narrowed by `narrow` (ordered by `id`, the helper's default). */
+  const paged = (narrow) =>
+    fetchAllPages(
+      () =>
+        narrow(
+          client
+            .from('scoped_settings')
+            .select(SETTING_COLUMNS)
+            .eq('organization_id', organizationId)
+        ),
+      pageSize ? { pageSize } : undefined
+    );
   const reads = [
-    paged(() => base().is('program_id', null).is('division_id', null)),
-    ...chunks(programIds, chunkSize).map((ids) => paged(() => base().in('program_id', ids))),
-    ...chunks(divisionIds, chunkSize).map((ids) => paged(() => base().in('division_id', ids))),
+    paged((q) => q.is('program_id', null).is('division_id', null)),
+    ...chunks(programIds, chunkSize).map((ids) => paged((q) => q.in('program_id', ids))),
+    ...chunks(divisionIds, chunkSize).map((ids) => paged((q) => q.in('division_id', ids))),
   ];
   return (await Promise.all(reads)).flat();
 }

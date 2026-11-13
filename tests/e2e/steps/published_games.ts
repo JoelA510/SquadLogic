@@ -819,3 +819,19 @@ Then('the game cannot be added to the review', async ({ page }) => {
   await expect(addDialog(page).getByRole('button', { name: 'Add to the review' })).toBeDisabled();
   await expect(page.getByText(/staged for review/)).toHaveCount(0);
 });
+
+Then(
+  'the added game has a card on the grid in its new time on {string}',
+  async ({ page }, fieldName: string) => {
+    const field = fieldName.split(' ')[0].toLowerCase();
+    // The first dialog of the page names its game `added-1` and its pending time `new-slot-1`.
+    const cell = page.getByTestId(`drop-zone-e2e-${field}:new-slot-1`);
+    await expect(cell).toBeVisible();
+    const card = cell.getByTestId('game-card-added-1');
+    await expect(card).toBeVisible();
+    // Keyboard-reachable: its "Move to" list takes focus.
+    const select = card.getByRole('combobox');
+    await select.focus();
+    await expect(select).toBeFocused();
+  }
+);

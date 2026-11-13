@@ -88,22 +88,40 @@ function occupiedRefusal(occupant, homeTeamId, awayTeamId) {
 }
 
 /**
+ * The division a slot is reserved for: by its `division_id` (the page's read of `divisions`), else the name it carries,
+ * else null (any division).
+ *
+ * @param {Record<string, any> | null | undefined} slot
+ * @param {(divisionId: string) => string | null} divisionName
+ * @returns {string | null}
+ */
+export function reservedDivisionOf(slot, divisionName) {
+  if (!slot) return null;
+  const id = slot.division_id ?? slot.divisionId;
+  return (id ? divisionName(id) : null) ?? slot.division ?? null;
+}
+
+/**
  * The warnings a staged game raises against the rest of the review, none a refusal: a team (not an outside club)
  * already playing, or the field already in use, at an overlapping time; and a slot reserved for another division.
+ * Everything is read from where the game is NOW (its slot, field and times), never from when it was added, so a game
+ * moved with "Move to" is judged in its new place (review of #731, C5).
  *
- * @param {Record<string, any>} candidate - `id`, `homeTeamId`, `awayTeamId`, `fieldId`, `start`, `end`, `division`,
- *   `slotDivision`
+ * @param {Record<string, any>} candidate - `id`, `homeTeamId`, `awayTeamId`, `slotId`, `fieldId`, `start`, `end`,
+ *   `division`
  * @param {ReadonlyArray<Record<string, any>>} others
- * @param {{ isExternal: (teamId: string) => boolean, fieldName: (fieldId: string) => string }} names
+ * @param {{ isExternal: (teamId: string) => boolean, fieldName: (fieldId: string) => string,
+ *   slotDivision: (slotId: string) => string | null }} names
  * @returns {Array<{ type: string, message: string, details: Record<string, any> }>}
  */
-export function addedGameWarnings(candidate, others, { isExternal, fieldName }) {
+export function addedGameWarnings(candidate, others, { isExternal, fieldName, slotDivision }) {
   const warnings = [];
   const { home, away } = matchupOf(candidate);
-  if (candidate.slotDivision && candidate.slotDivision !== candidate.division) {
+  const reserved = slotDivision(candidate.slotId);
+  if (reserved && reserved !== candidate.division) {
     warnings.push({
       type: 'slot-other-division',
-      message: `${home} vs ${away} is in a slot reserved for ${candidate.slotDivision}.`,
+      message: `${home} vs ${away} is in a slot reserved for ${reserved}.`,
       details: { gameIds: [candidate.id] },
     });
   }
@@ -296,20 +314,22 @@ export function planAddedGame(choice, ctx) {
     end: slot ? slot.end : newSlot?.end,
     kickoff: slot ? slot.start : newSlot?.start,
     weekIndex: slot ? slot.weekIndex : newSlot?.weekIndex,
-    // The division a slot is reserved for, by its id (the page's read of `divisions`), else the name it carries.
-    slotDivision: slot
-      ? (((slot.division_id ?? slot.divisionId)
-          ? ctx.divisionName(slot.division_id ?? slot.divisionId)
-          : null) ??
-        slot.division ??
-        null)
-      : null,
     assignmentSource: 'manual',
     ...(newSlot ? { newSlot } : {}),
   };
   return {
     game,
-    warnings: uniqueWarnings(addedGameWarnings(game, ctx.review, ctx)),
+    warnings: uniqueWarnings(
+      addedGameWarnings(game, ctx.review, {
+        isExternal: ctx.isExternal,
+        fieldName: ctx.fieldName,
+        slotDivision: (slotId) =>
+          reservedDivisionOf(
+            ctx.slots.find((s) => sameId(s.id, slotId)),
+            ctx.divisionName
+          ),
+      })
+    ),
   };
 }
 

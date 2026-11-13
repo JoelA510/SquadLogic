@@ -26,7 +26,7 @@
  */
 import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { prepareGamePersistenceSnapshot } from '../packages/core/src/gamePersistenceSnapshot.js';
 import { getMockData, mockSupabase } from '../frontend/src/lib/mockSupabaseClient.js';
@@ -117,6 +117,18 @@ vi.mock('../frontend/src/hooks/useAutoRunOnNavigate.js', () => ({
 vi.mock('../frontend/src/lib/logger.js', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), log: vi.fn(), info: vi.fn() },
 }));
+/** What the page handed `DndContext`, so a test can finish a drop the way the library does. */
+const DND = vi.hoisted(() => ({ props: /** @type {any} */ (null) }));
+vi.mock('@dnd-kit/core', async (importOriginal) => {
+  const actual = /** @type {any} */ (await importOriginal());
+  return {
+    ...actual,
+    DndContext: (props) => {
+      DND.props = props;
+      return <actual.DndContext {...props} />;
+    },
+  };
+});
 vi.mock('../frontend/src/utils/gamePersistenceClient.js', () => ({
   persistGameScheduleReview: async (args) => {
     SAVE.calls.push(args);
@@ -1122,6 +1134,114 @@ describe('review of #731: flags, the banner and the scheduler', () => {
       listRows().filter((row) => row.startsWith('Synthetic Rockets vs Synthetic Planets'))
     ).toHaveLength(1);
     armed.on = false;
+  });
+});
+
+describe('review of #731, round 2: the added game on the grid, judged where it is now', () => {
+  const enterOverride = async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Manual Override' }));
+    await screen.findByTestId('game-schedule-grid');
+  };
+  /** Move a card with its own "Move to" list, the keyboard path. */
+  const moveWithList = async (cardId, fieldName) => {
+    const card = within(screen.getByTestId(`game-card-${cardId}`));
+    const select = card.getByRole('combobox');
+    // The list fills once it is reached.
+    fireEvent.focus(select);
+    const option = within(select)
+      .getAllByRole('option')
+      .find((o) => (o.textContent ?? '').startsWith(`${fieldName},`));
+    if (!option) throw new Error(`no empty slot on ${fieldName} in the Move to list`);
+    fireEvent.change(select, { target: { value: option.getAttribute('value') } });
+    fireEvent.click(card.getByRole('button', { name: 'Move' }));
+    await screen.findByText(/Manual game move staged/);
+  };
+  const reservedFlags = () =>
+    within(
+      screen.queryByTestId('game-conflict-banner') ?? document.createElement('div')
+    ).queryAllByTestId('conflict-item-slot-other-division');
+
+  it('in Manual Override, a game added at a new time has a card in its pending slot, reachable by keyboard (C4)', async () => {
+    await mount();
+    await enterOverride();
+    await stage({
+      home: 'team-2',
+      away: 'team-4',
+      where: { field: 'f-north', date: '2026-10-17', start: '11:00', end: '12:00' },
+    });
+    const cell = await screen.findByTestId('drop-zone-f-north:new-slot-1');
+    const card = within(cell).getByTestId('game-card-added-1');
+    // The card is the added game (cards show the teams by id).
+    expect(card).toHaveTextContent('team-2vsteam-4');
+    // Keyboard-reachable: its "Move to" list takes focus, and offers the season's real empty slots.
+    const select = within(card).getByRole('combobox');
+    select.focus();
+    fireEvent.focus(select);
+    expect(document.activeElement).toBe(select);
+    expect(
+      within(select)
+        .getAllByRole('option')
+        .some((o) => /North Field,/.test(o.textContent ?? ''))
+    ).toBe(true);
+    // Shown, never offered: no other card can be moved to the pending time.
+    const other = within(screen.getByTestId(`game-card-${G2}`)).getByRole('combobox');
+    fireEvent.focus(other);
+    // The list was read: it offers the real empty slots (so the absence below is a finding, not an empty list).
+    expect(within(other).getAllByRole('option').length).toBeGreaterThan(1);
+    expect(
+      within(other)
+        .getAllByRole('option')
+        .some((o) => /new time/.test(o.textContent ?? ''))
+    ).toBe(false);
+  });
+
+  it('moved into a slot reserved for another division: the flag appears, and Apply records it (C5)', async () => {
+    await mount();
+    await stage({ home: 'team-1', away: 'team-3', where: { slot: 'North Field' } });
+    expect(reservedFlags()).toHaveLength(0);
+    await enterOverride();
+    await moveWithList('added-1', 'South Field');
+    await waitFor(() => expect(reservedFlags()).toHaveLength(1));
+    await apply();
+    await screen.findByText(/Game schedule applied through the persistence workflow\./);
+    expect(SAVE.calls[0].runMetadata.results.warnings.map((w) => w.type)).toEqual([
+      'slot-other-division',
+    ]);
+  });
+
+  it('moved out of a reserved slot: the flag is gone, and Apply records none (C5)', async () => {
+    await mount();
+    await stage({ home: 'team-1', away: 'team-3', where: { slot: 'South Field' } });
+    expect(reservedFlags()).toHaveLength(1);
+    await enterOverride();
+    await moveWithList('added-1', 'North Field');
+    await waitFor(() => expect(reservedFlags()).toHaveLength(0));
+    await apply();
+    await screen.findByText(/Game schedule applied through the persistence workflow\./);
+    expect(SAVE.calls[0].runMetadata.results.warnings).toEqual([]);
+  });
+
+  it('a drop that would put two games in one slot is refused, either way round, for an added game', async () => {
+    await mount();
+    await stage({ home: 'team-1', away: 'team-3', where: { slot: 'North Field' } });
+    await enterOverride();
+    // A saved game dropped on the added game's slot.
+    act(() => {
+      DND.props.onDragEnd({ active: { id: G2 }, over: { id: 'f-north:gs-3' } });
+    });
+    expect(screen.getByText(/was not moved: that slot already has/)).toBeInTheDocument();
+    // The added game dropped on a saved game's slot.
+    act(() => {
+      DND.props.onDragEnd({ active: { id: 'added-1' }, over: { id: 'f-south:gs-2' } });
+    });
+    expect(screen.getByText(/was not moved: that slot already has/)).toBeInTheDocument();
+    // Both games are where they were.
+    expect(
+      within(screen.getByTestId('drop-zone-f-north:gs-3')).getByTestId('game-card-added-1')
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('drop-zone-f-south:gs-2')).getByTestId(`game-card-${G2}`)
+    ).toBeInTheDocument();
   });
 });
 

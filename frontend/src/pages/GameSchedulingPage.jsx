@@ -96,6 +96,7 @@ import {
 import {
   addedGameWarnings as addedGameWarningsOf,
   describeNewSlot,
+  reservedDivisionOf,
   planAddedGame,
   resolveAddedSlots,
   uniqueWarnings,
@@ -1692,6 +1693,20 @@ export default function GameSchedulingPage() {
     [seasonTeams]
   );
   const isExternalTeam = useCallback((id) => externalTeamIds.has(String(id)), [externalTeamIds]);
+  const divisionNameOf = useCallback(
+    (id) => divisionRows.find((row) => String(row.id) === String(id))?.name ?? null,
+    [divisionRows]
+  );
+  // The division the slot a game is in NOW is reserved for (C5, review of #731): read when the warnings are, so a move
+  // carries the flag with it.
+  const slotDivisionOf = useCallback(
+    (slotId) =>
+      reservedDivisionOf(
+        gameSlots.find((slot) => String(slot.id) === String(slotId)),
+        divisionNameOf
+      ),
+    [divisionNameOf, gameSlots]
+  );
   // Each clash once (two added games that clash raise it from both sides): one list for the banner and the save.
   const addedGameWarnings = useMemo(
     () =>
@@ -1702,10 +1717,11 @@ export default function GameSchedulingPage() {
             addedGameWarningsOf(assignment, reviewAssignments ?? [], {
               isExternal: isExternalTeam,
               fieldName: fieldNameOf,
+              slotDivision: slotDivisionOf,
             })
           )
       ),
-    [fieldNameOf, isExternalTeam, reviewAssignments]
+    [fieldNameOf, isExternalTeam, reviewAssignments, slotDivisionOf]
   );
   // The slots Apply has had from `ensure_game_slot` in this session: known to exist before the slot read catches up.
   const ensuredSlotIdsRef = useRef(new Set());
@@ -2158,8 +2174,7 @@ export default function GameSchedulingPage() {
         teamName: (id) => addTeamNames.get(String(id)) ?? String(id),
         isExternal: isExternalTeam,
         fieldName: fieldNameOf,
-        divisionName: (id) =>
-          divisionRows.find((row) => String(row.id) === String(id))?.name ?? null,
+        divisionName: divisionNameOf,
         timezone,
         seasonStart: currentSeasonSetting?.season_start ?? null,
         key: addKeyRef.current,
@@ -2167,7 +2182,7 @@ export default function GameSchedulingPage() {
     [
       addTeamNames,
       currentSeasonSetting?.season_start,
-      divisionRows,
+      divisionNameOf,
       fieldNameOf,
       gameSlots,
       isExternalTeam,
@@ -2212,6 +2227,31 @@ export default function GameSchedulingPage() {
                   ? 'The scheduler is running: add a game once it has finished.'
                   : null;
   const addGameReasonId = useId();
+
+  // The new times of games added by hand, not yet made by the database (C4, review of #731): drawn in the preview grid
+  // under their own field so the game is seen and can be moved before Apply. Shown, never offered: "Move to" and a
+  // drop still take only the season's real slots (`gameSlots`), and a pending time a game has left is not drawn.
+  const pendingAddedSlots = useMemo(
+    () =>
+      displayedAssignments
+        .filter(
+          (assignment) =>
+            assignment.newSlot && String(assignment.slotId) === assignment.newSlot.placeholderId
+        )
+        .map((assignment) => ({
+          id: assignment.newSlot.placeholderId,
+          fieldId: assignment.newSlot.fieldId,
+          start: assignment.newSlot.start,
+          end: assignment.newSlot.end,
+          weekIndex: assignment.newSlot.weekIndex,
+          label: `${formatDateTime(assignment.newSlot.start, timezone)} (new time, made on Apply)`,
+        })),
+    [displayedAssignments, timezone]
+  );
+  const gridTimeSlots = useMemo(
+    () => (pendingAddedSlots.length > 0 ? [...gameSlots, ...pendingAddedSlots] : gameSlots),
+    [gameSlots, pendingAddedSlots]
+  );
 
   const gridSensors = useGameGridSensors();
 
@@ -2512,7 +2552,7 @@ export default function GameSchedulingPage() {
                       <GameScheduleGrid
                         assignments={displayedAssignments}
                         fields={fields}
-                        timeSlots={gameSlots}
+                        timeSlots={gridTimeSlots}
                         conflictSet={conflictSet}
                         activeGameId={activeGame?.id}
                         timezone={timezone}

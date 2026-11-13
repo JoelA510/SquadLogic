@@ -144,3 +144,14 @@ Feature: Published games on the Game Scheduling page (schedule expansion, PR 3)
     When I switch to the dark theme behind the open dialog
     Then the scan sees "Add a game to the review" on the page
     And axe finds no serious or critical violations on "/schedule/game" in the "dark" theme
+
+  Scenario: In Manual Override, a game added at a new time is on the grid in its pending slot, and the grid passes axe in both themes
+    When I open "/schedule/game" and see its "Game Scheduling" heading
+    And I enter manual override on the Game Scheduling page
+    And I fill in the game "Lions" vs "Bulls" in "U10 Boys" at "North Field" on "2026-10-24" from "09:00" to "10:00"
+    And I add the game to the review
+    Then the added game has a card on the grid in its new time on "North Field"
+    And axe finds no serious or critical violations on "/schedule/game" in the "light" theme
+    When I switch to the dark theme on this page
+    Then the scan sees "(new time, made on Apply)" on the page
+    And axe finds no serious or critical violations on "/schedule/game" in the "dark" theme

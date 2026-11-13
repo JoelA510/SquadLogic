@@ -315,6 +315,12 @@ export function parseScheduleRows({ headers, rows, season, rowOffset = 0 }) {
   if (!Number.isInteger(rowOffset) || rowOffset < 0) {
     throw new TypeError('parseScheduleRows: rowOffset must be a whole number, 0 or more');
   }
+  if (headers.length > SCHEDULE_IMPORT_LIMITS.MAX_COLUMNS) {
+    return fileRefusal(
+      R.TOO_MANY_COLUMNS,
+      `The file has ${headers.length} columns; one import reads at most ${SCHEDULE_IMPORT_LIMITS.MAX_COLUMNS}. Remove the columns it does not need and choose it again.`
+    );
+  }
 
   // Columns: match by the shared normaliser (trim, collapse, fold case; a byte-order mark is
   // whitespace to it), drop every name that is not on the list, and refuse a name given twice.

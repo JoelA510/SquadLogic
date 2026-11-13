@@ -28,6 +28,7 @@ export const GAME_IMPORT_REASON = Object.freeze({
   MISSING_COLUMN: 'missing-column',
   DUPLICATE_COLUMN: 'duplicate-column',
   TOO_MANY_ROWS: 'too-many-rows',
+  TOO_MANY_COLUMNS: 'too-many-columns',
   NO_SEASON_CLOCK: 'no-season-clock',
   MISSING_WEEK: 'missing-week',
   BAD_GAME_ID: 'bad-game-id',
@@ -67,6 +68,7 @@ export const GAME_IMPORT_LIMITS = Object.freeze({
   MAX_GAME_ID_LENGTH: 40,
   /** A cell longer than this is cut before it is read (no label of a schedule is this long). */
   MAX_CELL_LENGTH: 500,
+  /** The header row: more is refused (`too-many-columns`), never cut (core: `SCHEDULE_IMPORT_LIMITS.MAX_COLUMNS`). */
   MAX_HEADERS: 200,
 });
 
@@ -316,6 +318,12 @@ export function parseGameImportRows({
   if (!Array.isArray(rows)) throw new TypeError('parseScheduleRows: rows must be an array');
   if (!Number.isInteger(rowOffset) || rowOffset < 0) {
     throw new TypeError('parseScheduleRows: rowOffset must be a whole number, 0 or more');
+  }
+  if (headers.length > GAME_IMPORT_LIMITS.MAX_HEADERS) {
+    return fileRefusal(
+      R.TOO_MANY_COLUMNS,
+      `The file has ${headers.length} columns; one import reads at most ${GAME_IMPORT_LIMITS.MAX_HEADERS}. Remove the columns it does not need and choose it again.`
+    );
   }
 
   const header = new Map<string, string>();
@@ -851,12 +859,13 @@ export function stageGameChunk({
   const byKey = new Map<string, string>(
     Object.values(C).map((name) => [scheduleLabelKey(name), name])
   );
-  // The header row as the file wrote it, cut to what a header can be; names the allowlist does not hold stay in the
-  // list (so the parse can report them as dropped) and their VALUES are never read.
+  // The header row as the file wrote it; names the allowlist does not hold stay in the list (so the parse can report
+  // them as dropped) and their VALUES are never read. Every header is read: a file with more than the cap is refused
+  // by the parse (`too-many-columns`), never cut (a column the import reads past the cap would be dropped while its
+  // values stayed).
   // A VALUE is read by the header as the file wrote it (the row is keyed by that); the cleaned name only says which
   // column it is. Reading by the cleaned name lost every value of a column whose header had a stray space.
   const named = headers
-    .slice(0, GAME_IMPORT_LIMITS.MAX_HEADERS)
     .map((h) => ({ original: String(h ?? ''), cleaned: cleanCell(h) }))
     .filter((h) => h.cleaned.trim() !== '');
   const fileHeaders = named.map((h) => h.cleaned);

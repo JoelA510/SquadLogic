@@ -101,6 +101,15 @@ export async function startGameImport(
   { organizationId, seasonSettingsId, fileName, headers, rows, onProgress }
 ) {
   requireClient(client);
+  // A file with more columns than the import reads is refused here, before a job is made, and never cut: a column the
+  // import reads past the cap (a Game ID, a Week) would be dropped while its values stayed (the practice import's C5
+  // on #732, followed here).
+  if (headers.length > SCHEDULE_IMPORT_CHUNK_LIMITS.MAX_HEADERS) {
+    throw refusal(
+      `The file has ${headers.length} columns; one import reads at most ${SCHEDULE_IMPORT_CHUNK_LIMITS.MAX_HEADERS}. Remove the columns it does not need and choose it again.`,
+      'too-many-columns'
+    );
+  }
   const created = await client.rpc('create_import_job', {
     p_organization_id: organizationId,
     p_import_type: 'games',
@@ -135,7 +144,6 @@ export async function startGameImport(
     Object.values(SCHEDULE_IMPORT_COLUMNS).map((name) => scheduleLabelKey(name))
   );
   const kept = headers.filter((header) => read.has(scheduleLabelKey(header)));
-  const sentHeaders = headers.slice(0, SCHEDULE_IMPORT_CHUNK_LIMITS.MAX_HEADERS);
   const sentRows = rows.map((row) => Object.fromEntries(kept.map((h) => [h, row?.[h] ?? ''])));
   // A file with a header and no rows still goes to the function once, so the refusal or the empty answer is its own.
   for (let offset = 0; offset === 0 || offset < rows.length; offset += size) {
@@ -145,7 +153,7 @@ export async function startGameImport(
         action: 'stage',
         organization_id: organizationId,
         import_job_id: jobId,
-        headers: sentHeaders,
+        headers,
         rows: sentRows.slice(offset, offset + size),
         row_offset: offset,
       },

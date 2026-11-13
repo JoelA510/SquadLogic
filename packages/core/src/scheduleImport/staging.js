@@ -29,7 +29,7 @@ import {
   venueDecisionKey,
 } from './mapping.js';
 import { SCHEDULE_IMPORT_COLUMNS, parseScheduleRows } from './parseRows.js';
-import { SCHEDULE_IMPORT_STAGED_FLAGS } from './reasonCodes.js';
+import { SCHEDULE_IMPORT_LIMITS, SCHEDULE_IMPORT_STAGED_FLAGS } from './reasonCodes.js';
 
 /** The staged flags as plain text, for a membership test of any code. */
 const STAGED_FLAGS = /** @type {readonly string[]} */ (SCHEDULE_IMPORT_STAGED_FLAGS);
@@ -113,7 +113,7 @@ export const SCHEDULE_IMPORT_CHUNK_LIMITS = Object.freeze({
   MAX_CHUNK_ROWS: 500,
   /** A cell longer than this is cut before it is read (no label of a schedule is this long). */
   MAX_CELL_LENGTH: 500,
-  MAX_HEADERS: 200,
+  MAX_HEADERS: SCHEDULE_IMPORT_LIMITS.MAX_COLUMNS,
 });
 
 /**
@@ -152,12 +152,13 @@ export function stageScheduleChunk({ headers, rows, season, rowOffset, clean }) 
   const byKey = new Map(
     Object.values(SCHEDULE_IMPORT_COLUMNS).map((name) => [scheduleLabelKey(name), name])
   );
-  // The header row as the file wrote it, cut to what a header can be; names the allowlist does not hold stay in the
-  // list (so the parse can report them as dropped) and their VALUES are never read.
+  // The header row as the file wrote it; names the allowlist does not hold stay in the list (so the parse can report
+  // them as dropped) and their VALUES are never read. Every header is read: a file with more than the cap is refused
+  // by the parse (`too-many-columns`), never cut (a column the import reads past the cap would be dropped while its
+  // values stayed).
   // A VALUE is read by the header as the file wrote it (the row is keyed by that); the cleaned name only says which
   // column it is. Reading by the cleaned name lost every value of a column whose header had a stray space.
   const named = headers
-    .slice(0, SCHEDULE_IMPORT_CHUNK_LIMITS.MAX_HEADERS)
     .map((h) => ({ original: String(h ?? ''), cleaned: cleanCell(h) }))
     .filter((h) => h.cleaned.trim() !== '');
   const fileHeaders = named.map((h) => h.cleaned);

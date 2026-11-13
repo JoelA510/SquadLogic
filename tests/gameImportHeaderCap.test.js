@@ -54,8 +54,14 @@ const gameIdAt = (at) => {
 /** A client that records every call and answers as a working backend would. */
 function recordingClient() {
   return {
+    // The start reads no table; a read here would be a change worth seeing.
+    from: vi.fn(() => {
+      throw new Error('startGameImport read a table');
+    }),
     rpc: vi.fn(async (name) =>
-      name === 'create_import_job' ? { data: { id: 'job-1' }, error: null } : { data: null, error: null }
+      name === 'create_import_job'
+        ? { data: { id: 'job-1' }, error: null }
+        : { data: null, error: null }
     ),
     functions: {
       invoke: vi.fn(async () => ({
@@ -103,7 +109,7 @@ describe('the client: a file of more than 200 columns is refused before a job is
     await start(client, gameIdAt(200));
     expect(client.rpc.mock.calls[0][0]).toBe('create_import_job');
     expect(client.functions.invoke).toHaveBeenCalledTimes(1);
-    const body = client.functions.invoke.mock.calls[0][1].body;
+    const body = /** @type {any} */ (client.functions.invoke.mock.calls[0])[1].body;
     expect(body.headers).toHaveLength(200);
     expect(body.headers.at(-1)).toBe('Game ID');
     expect(body.rows[0]['Game ID']).toBe('G-1');
@@ -113,7 +119,13 @@ describe('the client: a file of more than 200 columns is refused before a job is
 describe('the stage, in core and in the Edge mirror: refused at 201, every column read at 200', () => {
   const stages = {
     core: (headers) =>
-      stageScheduleChunk({ headers, rows: [row], season: SEASON, rowOffset: 0, clean: sanitizeImportText }),
+      stageScheduleChunk({
+        headers,
+        rows: [row],
+        season: SEASON,
+        rowOffset: 0,
+        clean: sanitizeImportText,
+      }),
     edge: (headers) => edge.stageGameChunk({ headers, rows: [row], season: SEASON, rowOffset: 0 }),
   };
   for (const [name, stage] of Object.entries(stages)) {

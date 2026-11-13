@@ -1608,10 +1608,17 @@ clocks skip, and the import refuses a file that names one, so the export has no 
 
 Depends on: PR 6 merged. On no other pull request's dependency path; placed after F11-3 in the order.
 
-- [ ] G5a (M) Lift the Exports page's master-file generation (`buildExportPayload`, the directory read and
+- [x] G5a (M) Lift the Exports page's master-file generation (`buildExportPayload`, the directory read and
       `generateScheduleExports` as `OutputGenerationPanel` calls them) into one function both callers use. A refactor,
       in its own pull request first if it is more than a move. Test: the Exports page's existing tests unchanged, and
       the function's rows equal to the page's for one seeded league.
+      **As built (2026-11-13), in its own pull request:** `generateMasterExport` in
+      `frontend/src/utils/masterExport.js` (a frontend util: it needs the client for the TIME TBD and directory
+      reads), with `buildExportPayload` and its normalisers moved unchanged; it returns a status
+      (`tbd-failed`, `nothing-scheduled`, `directory-failed`, `nothing-writable`, `generated`) and the panel keeps
+      every sentence. `onTbdRead` keeps the page's TIME TBD count updated before the directory read, as it was.
+      Tests: `tests/exportMasterRowsCharacterization.test.jsx` (the page's whole output as JSON, committed before
+      the move and unchanged by it) and `tests/masterExport.test.jsx` (the function's rows equal to the page's).
 - [ ] G5 (S) The import's result offers "record this import as the publication baseline", ticked by default when the
       games arrive Published, and records the shared function's rows through `admin_publish_schedule_baseline`. Tests
       as 5.1 and 5.6 (each with a case for a cancelled game and a TIME TBD game), and "Changes since publication"

@@ -31,11 +31,9 @@ vi.mock('../frontend/src/lib/logger.js', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), log: vi.fn() },
 }));
 
-const {
-  default: OutputGenerationPanel,
-  buildExportPayload,
-  omittedGamesNote,
-} = await import('../frontend/src/components/OutputGenerationPanel.jsx');
+const { default: OutputGenerationPanel, omittedGamesNote } =
+  await import('../frontend/src/components/OutputGenerationPanel.jsx');
+const { buildExportPayload } = await import('../frontend/src/utils/masterExport.js');
 const { mockSupabase } = await import('../frontend/src/lib/mockSupabaseClient.js');
 const { readSeasonTeamDirectory, seasonTeamsOf } =
   await import('../frontend/src/utils/scheduleReportsRead.js');

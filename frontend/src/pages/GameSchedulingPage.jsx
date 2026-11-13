@@ -689,6 +689,12 @@ export default function GameSchedulingPage() {
   const [applyError, setApplyError] = useState(null);
   const [statusMessage, setStatusMessage] = useState(null);
   const [lastRollbackAssignments, setLastRollbackAssignments] = useState(null);
+  /** The flags and games of the run a rollback restores (C14): set with `lastRollbackAssignments`. */
+  const [lastRollbackFlags, setLastRollbackFlags] = useState(
+    /** @type {null | { savedWarnings: Array<Record<string, any>>, savedGames: Array<Record<string, any>> }} */ (
+      null
+    )
+  );
   const [fields, setFields] = useState([]);
   // **Every field the organisation holds, live or retired.** The scheduler's
   // list above is filtered to live ground; a venue-scoped blackout still has to
@@ -741,6 +747,7 @@ export default function GameSchedulingPage() {
 
   useEffect(() => {
     setLastRollbackAssignments(null);
+    setLastRollbackFlags(null);
   }, [currentOrganization?.id, currentSeasonSetting?.id]);
 
   useEffect(() => {
@@ -1571,8 +1578,22 @@ export default function GameSchedulingPage() {
       resultDetails,
       knownSlotIds = undefined,
       generatorWarnings = [],
-      extraWarnings = [],
+      flags,
     }) => {
+      // Every save records the flags of the games added by hand, worked out here and nowhere else, over the games it
+      // saves (Codex C11 to C14): the flags of games added in this review, and the flags the run it replaces recorded
+      // for games added before, judged again against these games. No save path can leave them out.
+      if (!flags)
+        throw new Error(
+          'A game save was asked for without the context its flags are worked out from.'
+        );
+      const addedWarnings = addedGameWarningsToSave({
+        review: assignments,
+        slotRows: flags.slotRows,
+        savedWarnings: flags.savedWarnings,
+        savedGames: flags.savedGames,
+        names: flags.names,
+      });
       const persistenceAssignments = assignments.map(toPersistenceAssignment);
       // The save is told which saved game each assignment is, by id (a moved, flipped or regenerated game keeps its
       // id, its Published state and its history); a new game carries none. The run's recorded `results.assignments`
@@ -1622,15 +1643,15 @@ export default function GameSchedulingPage() {
               ? parseGameUnscheduled(resultDetails.unscheduled)
               : undefined,
             sharedSlotUsage: resultDetails?.sharedSlotUsage ?? [],
-            // The generator's own warnings when the generated review is the one saved, and the flags of the games added
-            // by hand (flagged, not blocked: PR 8), each set given by the caller (C12).
-            warnings: [...generatorWarnings, ...extraWarnings],
+            // The generator's own warnings when the generated review is the one saved (given by the caller, C12), and
+            // the flags of the games added by hand (flagged, not blocked: PR 8), worked out above.
+            warnings: [...generatorWarnings, ...addedWarnings],
           },
           completedAt: now,
         },
       });
 
-      return { result, persistenceAssignments };
+      return { result, persistenceAssignments, addedWarnings };
     },
     [
       currentOrganization?.id,
@@ -1858,15 +1879,15 @@ export default function GameSchedulingPage() {
     const freshIds = new Set(freshRows.map((row) => String(row.id)));
     const slotRows = [...gameSlotRows.filter((row) => !freshIds.has(String(row.id))), ...freshRows];
     const review = resolved.review;
-    // With them, the saved run's own flags of games added before, carried forward while they still hold (C11): an
-    // unrelated addition must not clear an open conflict.
-    const finalWarnings = addedGameWarningsToSave({
-      review,
+    // Their flags are worked out by the save itself, from these rows and the run it replaces (C11, C14): the saved
+    // run's own flags of games added before are carried forward while they still hold, so an unrelated addition never
+    // clears an open conflict.
+    const flags = {
       slotRows,
       savedWarnings: game?.warnings ?? [],
       savedGames: savedAssignments,
       names: { isExternal: isExternalTeam, fieldName: fieldNameOf, divisionName: divisionNameOf },
-    });
+    };
     // The generator's own warnings, unchanged, only while the review being applied is the generated one (C12).
     const generatorWarnings =
       schedulerResult && appliedRunWarnings === null
@@ -1885,14 +1906,14 @@ export default function GameSchedulingPage() {
 
     // 4. Save. The save is told which slots exist: the rows the page holds and those just read, nothing else.
     try {
-      const { result } = await persistReviewedAssignments({
+      const { result, addedWarnings: finalWarnings } = await persistReviewedAssignments({
         assignments: review,
         generationMode: 'round-robin',
         resultSummary: finalSummary,
         resultDetails: schedulerResult,
         knownSlotIds: new Set(slotRows.map((row) => String(row.id))),
         generatorWarnings,
-        extraWarnings: finalWarnings,
+        flags,
       });
 
       // 5. Only now is anything committed: the slots, the applied games, the review cleared, the result brought to
@@ -1900,6 +1921,8 @@ export default function GameSchedulingPage() {
       if (freshRows.length > 0) setGameSlotRows(slotRows);
       const appliedRunId = result.runId ?? game?.runId ?? null;
       setLastRollbackAssignments(localAssignments);
+      // What the rollback restores is judged against the run it restores: its flags and its games (C14).
+      setLastRollbackFlags({ savedWarnings: game?.warnings ?? [], savedGames: savedAssignments });
       setLocalAssignments(
         review.map((assignment) => ({
           ...assignment,
@@ -1969,7 +1992,7 @@ export default function GameSchedulingPage() {
     setApplyError(null);
 
     try {
-      const { result } = await persistReviewedAssignments({
+      const { result, addedWarnings } = await persistReviewedAssignments({
         assignments: lastRollbackAssignments,
         generationMode: 'rollback',
         resultSummary: summarizeGameResult({
@@ -1978,6 +2001,17 @@ export default function GameSchedulingPage() {
           unscheduled: [],
         }),
         resultDetails: null,
+        // The restored games keep the flags their run recorded while those still hold (C14).
+        flags: {
+          slotRows: gameSlotRows,
+          savedWarnings: lastRollbackFlags?.savedWarnings ?? [],
+          savedGames: lastRollbackFlags?.savedGames ?? [],
+          names: {
+            isExternal: isExternalTeam,
+            fieldName: fieldNameOf,
+            divisionName: divisionNameOf,
+          },
+        },
       });
 
       const rollbackRunId = result.runId ?? null;
@@ -1989,6 +2023,11 @@ export default function GameSchedulingPage() {
         }))
       );
       setLastRollbackAssignments(null);
+      setLastRollbackFlags(null);
+      // A generated result on screen shows what the last save recorded: the rollback's flags now (C14).
+      setAppliedRunWarnings((current) =>
+        current ? { generator: [], manual: addedWarnings } : current
+      );
       setApplyStatus('rolledBack');
       setStatusMessage('Game schedule rolled back through the persistence workflow.');
       markSavedStale();
@@ -2001,7 +2040,12 @@ export default function GameSchedulingPage() {
   }, [
     canApplySchedule,
     canManageSchedule,
+    divisionNameOf,
+    fieldNameOf,
+    gameSlotRows,
+    isExternalTeam,
     lastRollbackAssignments,
+    lastRollbackFlags,
     markSavedStale,
     persistReviewedAssignments,
     refetchSaved,

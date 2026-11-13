@@ -138,8 +138,13 @@ vi.mock('../frontend/src/utils/gamePersistenceClient.js', () => ({
 
 const { default: GameSchedulingPage } =
   await import('../frontend/src/pages/GameSchedulingPage.jsx');
-const { planAddedGame, occupantAt, duplicateTupleRefusal, addedGameWarningsToSave } =
-  await import('../frontend/src/utils/gameAddByHand.js');
+const {
+  planAddedGame,
+  occupantAt,
+  duplicateTupleRefusal,
+  addedGameWarningsToSave,
+  warningsOfAddedGames,
+} = await import('../frontend/src/utils/gameAddByHand.js');
 
 const at = (date, hhmm) => {
   // 2026-10 is EDT (UTC-4).
@@ -1803,6 +1808,127 @@ describe('Codex re-review of #731, round 6: what a generated Apply saved is neve
     gate.release();
     await waitFor(() =>
       expect(screen.queryByText('Apply waits while the saved schedule is read.')).toBeNull()
+    );
+  });
+});
+
+describe('Codex re-review of #731, round 7: every partner of a clash, and a rollback keeps its flags (C13, C14)', () => {
+  const game = (id, homeTeamId, awayTeamId, fieldId, slotId, start, end, extra = {}) => ({
+    id,
+    homeTeamId,
+    awayTeamId,
+    homeTeamName: homeTeamId,
+    awayTeamName: awayTeamId,
+    division: 'U10',
+    fieldId,
+    slotId,
+    weekIndex: 1,
+    start: at('2026-10-03', start),
+    end: at('2026-10-03', end),
+    ...extra,
+  });
+  const place = (g) => ({
+    homeTeamId: g.homeTeamId,
+    awayTeamId: g.awayTeamId,
+    slotId: g.slotId,
+    weekIndex: g.weekIndex,
+  });
+  const names = {
+    isExternal: (id) => id === 'club-x',
+    fieldName: (id) => id,
+    divisionName: () => null,
+  };
+  const pairs = (warnings, type) =>
+    warnings.filter((w) => w.type === type).map((w) => w.details.gameIds.join('+'));
+  /** Saved as the first save would have it, then the same game under its saved id, judged again after a move. */
+  function judgedAgain(added, partners, moved) {
+    const first = warningsOfAddedGames([added, ...partners], [], names);
+    const saved = { ...added, id: 'g-added', addedByHand: undefined };
+    const review = [saved, ...partners.map((p) => (p.id === moved.id ? moved : p))];
+    return {
+      first,
+      again: addedGameWarningsToSave({
+        review,
+        slotRows: [],
+        savedWarnings: first,
+        savedGames: [saved, ...partners],
+        names,
+      }),
+    };
+  }
+
+  it('a field overlap with two games: both recorded; one moved away, the other stays (C13)', () => {
+    const added = game('added-1', 'team-1', 'team-3', 'f-north', 'gs-new', '09:00', '11:00', {
+      addedByHand: true,
+    });
+    const p1 = game('g-p1', 'team-2', 'team-4', 'f-north', 'gs-a', '09:00', '10:00');
+    const p2 = game('g-p2', 'team-2', 'team-4', 'f-north', 'gs-b', '10:00', '11:00');
+    const { first, again } = judgedAgain(added, [p1, p2], {
+      ...p1,
+      slotId: 'gs-c',
+      start: at('2026-10-03', '13:00'),
+      end: at('2026-10-03', '14:00'),
+    });
+    expect(pairs(first, 'field-overlap')).toEqual(['added-1+g-p1', 'added-1+g-p2']);
+    expect(pairs(again, 'field-overlap')).toEqual(['g-added+g-p2']);
+  });
+
+  it('a team with two clashes: both recorded; one moved away, the other stays (C13)', () => {
+    const added = game('added-1', 'team-1', 'club-x', 'f-south', 'gs-new', '09:00', '11:00', {
+      addedByHand: true,
+    });
+    const p1 = game('g-p1', 'team-1', 'team-2', 'f-north', 'gs-a', '09:00', '10:00');
+    const p2 = game('g-p2', 'team-3', 'team-1', 'f-east', 'gs-b', '10:00', '11:00');
+    const { first, again } = judgedAgain(added, [p1, p2], {
+      ...p2,
+      slotId: 'gs-c',
+      start: at('2026-10-03', '13:00'),
+      end: at('2026-10-03', '14:00'),
+    });
+    expect(pairs(first, 'team-double-booked')).toEqual(['added-1+g-p1', 'added-1+g-p2']);
+    expect(pairs(again, 'team-double-booked')).toEqual(['g-added+g-p1']);
+  });
+
+  it('Codex’s repro: added in a slot reserved for another division, moved out, then the move rolled back: the rollback records the flag and the banner shows it (C14)', async () => {
+    await mount();
+    await stage({ home: 'team-1', away: 'team-3', where: { slot: 'South Field' } });
+    await apply();
+    await screen.findByText(/Game schedule applied through the persistence workflow\./);
+    expect(SAVE.calls[0].runMetadata.results.warnings.map((w) => w.type)).toEqual([
+      'slot-other-division',
+    ]);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Add a game' })).toBeEnabled());
+    const added = orgGames().find(
+      (g) => g.home_team_id === 'team-1' && g.away_team_id === 'team-3'
+    );
+    if (!added) throw new Error('the added game was not saved');
+    // Moved out of the reserved slot and applied: no flag.
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Manual Override' }));
+    await screen.findByTestId('game-schedule-grid');
+    const card = within(screen.getByTestId(`game-card-${added.id}`));
+    const select = card.getByRole('combobox');
+    fireEvent.focus(select);
+    fireEvent.change(select, { target: { value: 'f-north:gs-3' } });
+    fireEvent.click(card.getByRole('button', { name: 'Move' }));
+    await screen.findByText(/Manual game move staged/);
+    await apply();
+    await waitFor(() => expect(SAVE.calls).toHaveLength(2));
+    await screen.findByText(/Game schedule applied through the persistence workflow\./);
+    expect(SAVE.calls[1].runMetadata.results.warnings).toEqual([]);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Add a game' })).toBeEnabled());
+    // Rolled back: the game is in the reserved slot again, and so is its flag.
+    fireEvent.click(await screen.findByRole('button', { name: 'Rollback Last Apply' }));
+    await waitFor(() => expect(SAVE.calls).toHaveLength(3));
+    await screen.findByText(/Game schedule rolled back through the persistence workflow\./);
+    expect(SAVE.calls[2].runMetadata.results.warnings.map((w) => w.type)).toEqual([
+      'slot-other-division',
+    ]);
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId('game-conflict-banner')).getByTestId(
+          'conflict-item-slot-other-division'
+        )
+      ).toHaveTextContent('Synthetic Comets vs Synthetic Meteors is in a slot reserved for U12.')
     );
   });
 });

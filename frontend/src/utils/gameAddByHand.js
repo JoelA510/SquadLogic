@@ -159,28 +159,28 @@ function addedGameWarnings(candidate, others, { isExternal, fieldName, slotDivis
     const e = instant(game.end);
     return s !== null && e !== null && s < end && start < e;
   });
+  // Every partner, not the first: each clash is its own warning, so resolving one never clears another (Codex C13).
   for (const [teamId, teamName] of [
     [candidate.homeTeamId, home],
     [candidate.awayTeamId, away],
   ]) {
     if (isExternal(teamId)) continue;
-    const other = clashing.find(
+    for (const other of clashing.filter(
       (game) => sameId(game.homeTeamId, teamId) || sameId(game.awayTeamId, teamId)
-    );
-    if (!other) continue;
-    const o = matchupOf(other);
-    warnings.push({
-      type: 'team-double-booked',
-      message: `${teamName} already plays ${o.home} vs ${o.away} at that time.`,
-      details: {
-        teamId,
-        gameIds: [candidate.id, other.id],
-        places: [placeOf(candidate), placeOf(other)],
-      },
-    });
+    )) {
+      const o = matchupOf(other);
+      warnings.push({
+        type: 'team-double-booked',
+        message: `${teamName} already plays ${o.home} vs ${o.away} at that time.`,
+        details: {
+          teamId,
+          gameIds: [candidate.id, other.id],
+          places: [placeOf(candidate), placeOf(other)],
+        },
+      });
+    }
   }
-  const onField = clashing.find((game) => sameId(game.fieldId, candidate.fieldId));
-  if (onField) {
+  for (const onField of clashing.filter((game) => sameId(game.fieldId, candidate.fieldId))) {
     const o = matchupOf(onField);
     warnings.push({
       type: 'field-overlap',

@@ -1780,6 +1780,14 @@ answers; none adds scope):
   its flags forward from the saved run. The schedule counts as read only once both reads of the re-read have settled:
   it is two reads (the latest run, then the games of the run on screen), and the games of the OLD run (what the save
   left in it) can answer first, which put the list briefly back to them, as `rekeyReview`'s marker already allows for.
+- **Every save works out the added games' flags, in one place, with every partner** (Codex C13, C14). There is no
+  durable mark that a saved game was added by hand: `game_assignments.assignment_source` is `auto` or `manual`, and a
+  move writes `manual` too, so deriving the flags from it would flag every moved game. So the carry-forward stays, but
+  the save itself (`persistReviewedAssignments`) works the flags out, from a context every caller must give (the slot
+  rows, the replaced run's flags and its games): Apply gives the run on screen, and a rollback gives the run it
+  restores, captured when the Apply it undoes was made, so a restored game keeps a flag that still holds. A clash names
+  every partner, one warning each (each team's every overlapping game, the field's every overlapping game), so
+  resolving one never clears another.
 - **No field-overlap flag over a game the generator dropped** (examined, not a defect). A probe added a game on South
   Field over the hour of a saved, unpublished game and got only the team flag. The regenerated review no longer held
   that game (the generator re-solves unpublished games and placed none in that slot; it stays in the old run), so the
@@ -1789,17 +1797,19 @@ answers; none adds scope):
 - **A failed save after a slot was made** keeps the slot and names it in the error. When the outcome is unknown (a
   timeout, an unreadable answer) the error says instead that whether the game was saved into it is being checked. The
   review is left as staged, and a second Apply finds the slot rather than making it again.
-- **Plant evidence** (executed, 2026-11-13, re-run in full after the review round): thirty-four plants after the
-  C12 follow-up, each but one turning its cases red against the 48 cases of `tests/gameAddByHand.test.jsx`, the
-  restored code green. The follow-up's two: moves left enabled during the read (1 red), the old run's rows taken as the
-  saved schedule (1 red). C12's five: the generator's warnings saved on every Apply (2 red), that with the manual flags
-  appended to the generated result again, the old behaviour (2 red), the shown set appended to (1 red), Apply not off
-  during the read (1 red); and the manual flags appended to the result alone stays green, because nothing reads the
-  result's warnings after an Apply now (said, not hidden). Item 5's plant was re-aimed at the new code: the applied
-  flags left out of what is shown (3 red). C11's four: no carry-forward on the page (2 red), the carried flags dropped
-  in the pure rule (3 red), a carried flag kept as saved, not judged again (3 red), one judged against the whole
-  schedule rather than the games it named (1 red). The plan's three: a Published slot addable (4 red), a double booking
-  blocked (10 red), a new game arriving Published (6 red). The E2E
+- **Plant evidence** (executed, 2026-11-13, re-run in full after the review round): thirty-eight plants after the
+  seventh Codex round, each but one turning its cases red against the 51 cases of `tests/gameAddByHand.test.jsx`, the
+  restored code green. C13 and C14's four: the first team partner only (1 red), the first field partner only (1 red), a
+  rollback with no carried flags (1 red), the save leaving the added games' flags out (10 red). The C12 follow-up's two:
+  moves left enabled during the read (1 red), the old run's rows taken as the saved schedule (1 red). C12's five: the
+  generator's warnings saved on every Apply (2 red), that with the manual flags appended to the generated result again,
+  the old behaviour (2 red), the shown set appended to (1 red), Apply not off during the read (1 red); and the manual
+  flags appended to the result alone stays green, because nothing reads the result's warnings after an Apply now
+  (said, not hidden). Item 5's plant was re-aimed at the new code (the applied flags left out of what is shown, 3 red),
+  and round 4's R1 (the flags judged on the slots from before resolution, 1 red). C11's four: no carry-forward on the
+  page (2 red), the carried flags dropped in the pure rule (6 red), a carried flag kept as saved, not judged again (6
+  red), one judged against the whole schedule rather than the games it named (1 red). The plan's three: a Published
+  slot addable (4 red), a double booking blocked (11 red), a new game arriving Published (6 red). The E2E
   refusal scenario fails under the first. "Arriving Published" is caught on the staged game; once saved, the database
   cannot be told to publish it through this save, so the post-Apply assertions hold under that plant too (said, not
   hidden).

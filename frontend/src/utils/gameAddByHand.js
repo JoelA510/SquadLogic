@@ -95,7 +95,7 @@ function occupiedRefusal(occupant, homeTeamId, awayTeamId) {
  * @param {(divisionId: string) => string | null} divisionName
  * @returns {string | null}
  */
-export function reservedDivisionOf(slot, divisionName) {
+function reservedDivisionOf(slot, divisionName) {
   if (!slot) return null;
   const id = slot.division_id ?? slot.divisionId;
   return (id ? divisionName(id) : null) ?? slot.division ?? null;
@@ -114,7 +114,7 @@ export function reservedDivisionOf(slot, divisionName) {
  *   slotDivision: (slotId: string) => string | null }} names
  * @returns {Array<{ type: string, message: string, details: Record<string, any> }>}
  */
-export function addedGameWarnings(candidate, others, { isExternal, fieldName, slotDivision }) {
+function addedGameWarnings(candidate, others, { isExternal, fieldName, slotDivision }) {
   const warnings = [];
   const { home, away } = matchupOf(candidate);
   const reserved = slotDivision(candidate.slotId);
@@ -170,7 +170,7 @@ export function addedGameWarnings(candidate, others, { isExternal, fieldName, sl
  * @param {ReadonlyArray<W>} warnings
  * @returns {W[]}
  */
-export function uniqueWarnings(warnings) {
+function uniqueWarnings(warnings) {
   const seen = new Set();
   return warnings.filter((warning) => {
     const d = warning.details ?? {};
@@ -338,6 +338,29 @@ export function planAddedGame(choice, ctx) {
       })
     ),
   };
+}
+
+/**
+ * The flags of every game added by hand in a review, each clash once, judged against the slot rows given: the screen
+ * passes the slots it holds, and Apply passes those with the slots it has just resolved and read, so what is saved is
+ * judged on the slots it is saved in (Codex re-review of #731, C9). One function for both.
+ *
+ * @param {ReadonlyArray<Record<string, any>>} review
+ * @param {ReadonlyArray<Record<string, any>>} slotRows - `game_slots` rows (or the page's slots made from them)
+ * @param {{ isExternal: (teamId: string) => boolean, fieldName: (fieldId: string) => string,
+ *   divisionName: (divisionId: string) => string | null }} names
+ */
+export function warningsOfAddedGames(review, slotRows, { isExternal, fieldName, divisionName }) {
+  const slotDivision = (slotId) =>
+    reservedDivisionOf(
+      slotRows.find((row) => sameId(row.id, slotId)),
+      divisionName
+    );
+  return uniqueWarnings(
+    review
+      .filter((game) => game.addedByHand === true)
+      .flatMap((game) => addedGameWarnings(game, review, { isExternal, fieldName, slotDivision }))
+  );
 }
 
 /** A new time's slot as a person reads it: the field, and when it starts on the season's clock. */

@@ -1330,6 +1330,111 @@ describe('Codex re-review of #731, round 3', () => {
   });
 });
 
+describe('Codex re-review of #731, round 4: Apply over resolved state', () => {
+  it('a reused slot another admin reserved for another division: the save records the flag, and the banner shows it after Apply (C9)', async () => {
+    const real = mockSupabase.rpc.bind(mockSupabase);
+    // Another admin made the very slot, reserved for U12, after the page loaded: the database finds it.
+    vi.spyOn(mockSupabase, 'rpc').mockImplementation(async (name, params) => {
+      const result = await real(name, params);
+      if (name !== 'ensure_game_slot' || !result.data) return result;
+      await mockSupabase
+        .from('game_slots')
+        .update({ division_id: OTHER_DIVISION })
+        .eq('id', result.data.id);
+      return { ...result, data: { ...result.data, created: false } };
+    });
+    await mount();
+    await stage({
+      home: 'team-2',
+      away: 'team-4',
+      where: { field: 'f-north', date: '2026-10-24', start: '09:00', end: '10:00' },
+    });
+    // Staged at a time the page knows no slot for: nothing to flag yet.
+    expect(screen.queryByTestId('conflict-item-slot-other-division')).not.toBeInTheDocument();
+    await apply();
+    await screen.findByText(/Game schedule applied through the persistence workflow\./);
+    expect(SAVE.calls[0].runMetadata.results.warnings.map((w) => w.type)).toEqual([
+      'slot-other-division',
+    ]);
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId('game-conflict-banner')).getByTestId(
+          'conflict-item-slot-other-division'
+        )
+      ).toBeInTheDocument()
+    );
+  });
+
+  it('the slot read fails once: nothing is saved and the review is as it was; Apply again saves, and every card is on the grid (C10)', async () => {
+    const realFrom = mockSupabase.from.bind(mockSupabase);
+    const failNext = { on: false };
+    vi.spyOn(mockSupabase, 'from').mockImplementation((table) => {
+      const builder = realFrom(table);
+      if (table !== 'game_slots') return builder;
+      const select = builder.select;
+      builder.select = (...args) => {
+        const query = select(...args);
+        const inFilter = query.in;
+        query.in = (...inArgs) => {
+          const filtered = inFilter(...inArgs);
+          if (failNext.on) {
+            failNext.on = false;
+            filtered.then = (ok, ko) =>
+              Promise.resolve({ data: null, error: { message: 'the read timed out' } }).then(
+                ok,
+                ko
+              );
+          }
+          return filtered;
+        };
+        return query;
+      };
+      return builder;
+    });
+    await mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Manual Override' }));
+    await screen.findByTestId('game-schedule-grid');
+    await stage({
+      home: 'team-2',
+      away: 'team-4',
+      where: { field: 'f-north', date: '2026-10-24', start: '09:00', end: '10:00' },
+    });
+    expect(
+      within(screen.getByTestId('drop-zone-f-north:new-slot-1')).getByTestId('game-card-added-1')
+    ).toBeInTheDocument();
+
+    failNext.on = true;
+    await apply();
+    expect(
+      await screen.findByText(/The new time slots could not be read: the read timed out/)
+    ).toHaveTextContent('Nothing was saved, and the review is as it was');
+    expect(SAVE.calls).toHaveLength(0);
+    // The review is untouched: still staged, the game still at its pending new time.
+    expect(screen.getByText(/3 game assignments staged for review/)).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('drop-zone-f-north:new-slot-1')).getByTestId('game-card-added-1')
+    ).toBeInTheDocument();
+
+    await apply();
+    await screen.findByText(/Game schedule applied through the persistence workflow\./);
+    expect(SAVE.calls).toHaveLength(1);
+    await waitFor(() => expect(orgGames()).toHaveLength(3));
+    const made = orgSlots().find((slot) => slot.slot_date === '2026-10-24');
+    const saved = orgGames().find((g) => g.home_team_id === 'team-2');
+    expect(saved.game_slot_id).toBe(made.id);
+    // Every saved game has its card, the new one in its slot's cell.
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId(`drop-zone-f-north:${made.id}`)).getByTestId(
+          `game-card-${saved.id}`
+        )
+      ).toBeInTheDocument()
+    );
+    expect(screen.getByTestId(`game-card-${G1}`)).toBeInTheDocument();
+    expect(screen.getByTestId(`game-card-${G2}`)).toBeInTheDocument();
+  });
+});
+
 /** The page's context for the pure rule, over the league above. */
 function context({ review }) {
   const names = new Map([

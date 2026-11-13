@@ -94,12 +94,10 @@ import {
   stagedMoveNote,
 } from '../utils/gamePublishedText.js';
 import {
-  addedGameWarnings as addedGameWarningsOf,
   describeNewSlot,
-  reservedDivisionOf,
   planAddedGame,
   resolveAddedSlots,
-  uniqueWarnings,
+  warningsOfAddedGames,
 } from '../utils/gameAddByHand.js';
 
 function normalizeAssignmentSource(source) {
@@ -1697,34 +1695,18 @@ export default function GameSchedulingPage() {
     (id) => divisionRows.find((row) => String(row.id) === String(id))?.name ?? null,
     [divisionRows]
   );
-  // The division the slot a game is in NOW is reserved for (C5, review of #731): read when the warnings are, so a move
-  // carries the flag with it.
-  const slotDivisionOf = useCallback(
-    (slotId) =>
-      reservedDivisionOf(
-        gameSlots.find((slot) => String(slot.id) === String(slotId)),
-        divisionNameOf
-      ),
-    [divisionNameOf, gameSlots]
-  );
-  // Each clash once (two added games that clash raise it from both sides): one list for the banner and the save.
+  // The flags of the games added by hand, each clash once, judged where each game is NOW (its slot's reserved division,
+  // its field and times; C5): shown in the banner while the review is staged. Apply works them out again over the
+  // slots it resolves (C9), through the same function.
   const addedGameWarnings = useMemo(
     () =>
-      uniqueWarnings(
-        (reviewAssignments ?? [])
-          .filter((assignment) => assignment.addedByHand === true)
-          .flatMap((assignment) =>
-            addedGameWarningsOf(assignment, reviewAssignments ?? [], {
-              isExternal: isExternalTeam,
-              fieldName: fieldNameOf,
-              slotDivision: slotDivisionOf,
-            })
-          )
-      ),
-    [fieldNameOf, isExternalTeam, reviewAssignments, slotDivisionOf]
+      warningsOfAddedGames(reviewAssignments ?? [], gameSlotRows, {
+        isExternal: isExternalTeam,
+        fieldName: fieldNameOf,
+        divisionName: divisionNameOf,
+      }),
+    [divisionNameOf, fieldNameOf, gameSlotRows, isExternalTeam, reviewAssignments]
   );
-  // The slots Apply has had from `ensure_game_slot` in this session: known to exist before the slot read catches up.
-  const ensuredSlotIdsRef = useRef(new Set());
   /** An error, with the new-time slots this Apply made and left unused named after it (the plan, 5.5). */
   const withLeftSlots = useCallback(
     (message, made, { unknown = false } = {}) => {
@@ -1751,30 +1733,12 @@ export default function GameSchedulingPage() {
     setApplyStatus('applying');
     setApplyError(null);
 
-    // A game added by hand at a new time needs its slot first: found or made by the database, which also says
-    // whether that slot holds a game (refused here, before anything is saved).
+    // Apply is one sequence over RESOLVED state (Codex re-review of #731, C9 and C10). Nothing in state changes until
+    // the save has succeeded: a failure at any step leaves the staged review exactly as it was (its new times still
+    // pending), says why, and Apply again redoes every step (`ensure_game_slot` finds a slot it made before).
     //
-    // The slots of this Apply the grid does not hold, by id, read into the grid's slots before the save: the ones it
-    // makes, and one the database already had that this page has not read (another admin made it after the page loaded;
-    // Codex re-review of #731, C8), or the saved game's card would have no row until a reload. The list is not put back
-    // to the schedule before the save by that read: it keeps the applied review while the saved rows are stale (the
-    // effect guarded by `savedIsStale`; review of #731).
-    const knownSlotRowIds = new Set(gameSlotRows.map((row) => String(row.id)));
-    /** @type {string[]} */
-    const slotIdsToRead = [];
-    const readResolvedSlots = async () => {
-      if (slotIdsToRead.length === 0) return;
-      const { data, error } = await supabase
-        .from('game_slots')
-        .select('*, divisions(id, name)')
-        .in('id', slotIdsToRead);
-      if (error) throw error;
-      const fresh = new Set((data ?? []).map((row) => String(row.id)));
-      setGameSlotRows((rows) => [
-        ...rows.filter((row) => !fresh.has(String(row.id))),
-        ...(data ?? []),
-      ]);
-    };
+    // 1. Resolve: the database's slot for each new time, the slot it already had checked against the new time, and
+    //    the one-game-per-slot and one-place-per-pair checks, all on a local copy of the review.
     /** @type {{ review: Array<Record<string, any>>, made: Array<Record<string, any>>, slotIds: Set<string> }} */
     let resolved;
     try {
@@ -1796,8 +1760,6 @@ export default function GameSchedulingPage() {
               `The new time could not be made: ${error?.message ?? 'the database returned no slot'}. Nothing was saved.`
             );
           }
-          ensuredSlotIdsRef.current.add(String(data.id));
-          if (!knownSlotRowIds.has(String(data.id))) slotIdsToRead.push(String(data.id));
           if (data.created) return data;
           // A slot it already had: its result is the id alone, so the slot is read back to be compared.
           const { data: row, error: readError } = await supabase
@@ -1815,33 +1777,55 @@ export default function GameSchedulingPage() {
         { fieldName: fieldNameOf }
       );
     } catch (err) {
-      const made = /** @type {any} */ (err)?.madeSlots ?? [];
-      setApplyStatus('error');
-      setApplyError(withLeftSlots(err instanceof Error ? err.message : String(err), made));
-      // Best effort: the grid learns of the slots made; the error above already names them.
-      await readResolvedSlots().catch((readErr) =>
-        logger.warn('Made slots not read back', readErr)
-      );
-      return;
-    }
-    const review = resolved.review;
-    try {
-      await readResolvedSlots();
-    } catch (err) {
       setApplyStatus('error');
       setApplyError(
         withLeftSlots(
-          `The slots this Apply made could not be read back: ${err?.message ?? err}. Nothing was saved yet: apply again.`,
-          resolved.made
+          err instanceof Error ? err.message : String(err),
+          /** @type {any} */ (err)?.madeSlots ?? []
         )
       );
-      setReviewAssignments(review);
       return;
     }
 
-    // The summary of the games actually saved (Codex re-review of #731, C7): a generated review's own summary does not
-    // count a game added by hand. The generator's byes and unscheduled games stay; with no generation the save makes it
-    // from the games itself, as it always did.
+    // 2. Read every resolved slot the page does not hold, whether this Apply made it or another admin did (C8). If the
+    //    read fails, stop here: the review is untouched, so Apply again resolves and reads again.
+    const missingSlotIds = [...resolved.slotIds].filter(
+      (id) => !gameSlotRows.some((row) => String(row.id) === id)
+    );
+    /** @type {Array<Record<string, any>>} */
+    let freshRows = [];
+    if (missingSlotIds.length > 0) {
+      const { data, error } = await supabase
+        .from('game_slots')
+        .select('*, divisions(id, name)')
+        .in('id', missingSlotIds);
+      const read = data ?? [];
+      if (error || read.length !== missingSlotIds.length) {
+        setApplyStatus('error');
+        setApplyError(
+          withLeftSlots(
+            `The new time slots could not be read: ${error?.message ?? 'not every slot was returned'}. Nothing was saved, and the review is as it was: apply again.`,
+            resolved.made
+          )
+        );
+        return;
+      }
+      freshRows = read;
+    }
+
+    // 3. The final games, their flags and their summary, from the resolved review and the slot rows it is saved in:
+    //    the same rules the screen uses, given these rows, never the flags worked out before the slots were known (C9).
+    const freshIds = new Set(freshRows.map((row) => String(row.id)));
+    const slotRows = [...gameSlotRows.filter((row) => !freshIds.has(String(row.id))), ...freshRows];
+    const review = resolved.review;
+    const finalWarnings = warningsOfAddedGames(review, slotRows, {
+      isExternal: isExternalTeam,
+      fieldName: fieldNameOf,
+      divisionName: divisionNameOf,
+    });
+    // The summary of the games actually saved (C7): a generated review's own summary does not count a game added by
+    // hand. The generator's byes and unscheduled games stay; with no generation the save makes it from the games
+    // itself, as it always did.
     const finalSummary = schedulerResult
       ? summarizeGameResult({
           assignments: review,
@@ -1850,16 +1834,20 @@ export default function GameSchedulingPage() {
         })
       : undefined;
 
+    // 4. Save. The save is told which slots exist: the rows the page holds and those just read, nothing else.
     try {
       const { result } = await persistReviewedAssignments({
         assignments: review,
         generationMode: 'round-robin',
         resultSummary: finalSummary,
         resultDetails: schedulerResult,
-        knownSlotIds: ensuredSlotIdsRef.current,
-        extraWarnings: addedGameWarnings,
+        knownSlotIds: new Set(slotRows.map((row) => String(row.id))),
+        extraWarnings: finalWarnings,
       });
 
+      // 5. Only now is anything committed: the slots, the applied games, the review cleared, the result brought to
+      //    what the run saved.
+      if (freshRows.length > 0) setGameSlotRows(slotRows);
       const appliedRunId = result.runId ?? game?.runId ?? null;
       setLastRollbackAssignments(localAssignments);
       setLocalAssignments(
@@ -1877,11 +1865,11 @@ export default function GameSchedulingPage() {
           ? {
               ...current,
               summary: finalSummary ?? current.summary,
-              ...(current.evaluation && addedGameWarnings.length > 0
+              ...(current.evaluation && finalWarnings.length > 0
                 ? {
                     evaluation: {
                       ...current.evaluation,
-                      warnings: [...(current.evaluation.warnings ?? []), ...addedGameWarnings],
+                      warnings: [...(current.evaluation.warnings ?? []), ...finalWarnings],
                     },
                   }
                 : {}),
@@ -1903,24 +1891,24 @@ export default function GameSchedulingPage() {
       markSavedStale();
       refetchSaved?.();
     } catch (err) {
+      // The review is left as it was staged; Apply again resolves the same slots (found, not made, this time).
       setApplyStatus('error');
       setApplyError(
         withLeftSlots(err.message || 'Game schedule changes could not be applied.', resolved.made, {
           unknown: isUnknownPersistenceOutcome(err),
         })
       );
-      // The review names the database's slots from here on, so a second Apply does not ask for them again.
-      if (resolved.slotIds.size > 0) setReviewAssignments(review);
       rereadAfterUnknownOutcome(err);
     }
   }, [
-    addedGameWarnings,
     canApplySchedule,
     canManageSchedule,
     currentOrganization?.id,
+    divisionNameOf,
     fieldNameOf,
     game?.runId,
     gameSlotRows,
+    isExternalTeam,
     localAssignments,
     markSavedStale,
     persistReviewedAssignments,

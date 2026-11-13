@@ -66,6 +66,41 @@ export const CSV_TEMPLATES = {
     ],
     filename: 'squadlogic-games-template.csv',
   },
+  // The practice schedule import (plan 4.11.2 of docs/changes/2026-11-03-schedule-expansion.md): the header row is
+  // core's `PRACTICE_IMPORT_TEMPLATE_HEADER`, written out here so the parser does not load with the Import page
+  // (`tests/practiceImportPanel.test.jsx` holds the two equal). Placeholder values; `Length` in minutes may stand in
+  // for `End`, a blank Team is an open slot, and Use is blank or "hold".
+  practice_schedule: {
+    headers: [
+      'Team',
+      'Division',
+      'Day',
+      'Start',
+      'End',
+      'Location',
+      'Field',
+      'Subunit',
+      'Valid From',
+      'Valid Until',
+      'Capacity',
+      'Use',
+    ],
+    example: [
+      'Team Name',
+      'U10 Boys',
+      'Tue',
+      '16:00',
+      '17:00',
+      'Venue A',
+      'Field 1',
+      'A',
+      '',
+      '',
+      '1',
+      '',
+    ],
+    filename: 'squadlogic-practices-template.csv',
+  },
   fields: {
     headers: [
       'Location',
@@ -168,7 +203,7 @@ function toCsv(rows) {
 
 /**
  * Generate a template CSV and trigger a browser download.
- * @param {'players'|'coaches'|'evaluations'|'fields'|'field_availability'|'games'} type
+ * @param {'players'|'coaches'|'evaluations'|'fields'|'field_availability'|'games'|'practice_schedule'} type
  */
 export function downloadTemplate(type) {
   const tmpl = CSV_TEMPLATES[type];

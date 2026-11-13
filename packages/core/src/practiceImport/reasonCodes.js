@@ -43,6 +43,7 @@ export const PRACTICE_IMPORT_REASON = Object.freeze({
   MISSING_COLUMN: 'missing-column',
   DUPLICATE_COLUMN: 'duplicate-column',
   TOO_MANY_ROWS: 'too-many-rows',
+  TOO_MANY_COLUMNS: 'too-many-columns',
 
   // A row is listed with its reason and not written; the rest of the file imports.
   BAD_USE: 'bad-use',
@@ -96,6 +97,7 @@ export const PRACTICE_IMPORT_FILE_REFUSALS = Object.freeze([
   R.MISSING_COLUMN,
   R.DUPLICATE_COLUMN,
   R.TOO_MANY_ROWS,
+  R.TOO_MANY_COLUMNS,
 ]);
 
 /** Reasons a single row is listed and not written.
@@ -180,6 +182,12 @@ export const PRACTICE_IMPORT_LIMITS = Object.freeze({
   /** `practice_slots.capacity` is a smallint. */
   MAX_CAPACITY: 32767,
   /**
+   * The most columns a file may have (PR 11 review of #732). A file with more is refused, never cut: a column the
+   * import reads past the cap would be dropped while its values stayed in the rows (a Team, and a placement read as an
+   * open slot).
+   */
+  MAX_COLUMNS: 200,
+  /**
    * What `admin_upsert_division_settings` accepts (`20261105010000`, lines 1573-1580): 0 to 7 practices a
    * week, and a practice length of 15 to 240 minutes (or none, any slot length). A proposal outside
    * these is shown and never offered as a change.
@@ -194,6 +202,7 @@ const DESCRIPTIONS = Object.freeze({
   [R.MISSING_COLUMN]: 'The file is missing a column the import needs.',
   [R.DUPLICATE_COLUMN]: 'The file has the same column twice, so neither can be trusted.',
   [R.TOO_MANY_ROWS]: 'The file has more rows than one import takes.',
+  [R.TOO_MANY_COLUMNS]: 'The file has more columns than one import reads.',
   [R.BAD_USE]: 'Use is blank or "hold", and a held cell has no team.',
   [R.BAD_DAY]: 'The day is not Monday to Sunday (Mon to Sun is read too).',
   [R.BAD_TIME]: 'A time is not one the import reads (HH:mm, or h:mm AM or PM), or there is none.',

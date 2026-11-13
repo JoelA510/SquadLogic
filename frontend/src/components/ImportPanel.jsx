@@ -35,11 +35,11 @@ import EvaluationImportSummary from './EvaluationImportSummary.jsx';
 
 // A demo opens this instead of the file picker (D4). Lazy: only a demo visitor ever needs it.
 const DemoImportNotice = lazy(() => import('./DemoImportNotice.jsx'));
-// The schedule import (games; PR 11 adds practices as a second kind of the same panel) has its own steps: mapping,
+// The schedule import (games, and since PR 11 practices, a second kind of the same panel) has its own steps: mapping,
 // a preview that is the apply with its writes off, a confirm. Lazy: only an admin importing a schedule needs it.
 const ScheduleImportPanel = lazy(() => import('./import/ScheduleImportPanel.jsx'));
 
-/** @typedef {'players' | 'coaches' | 'evaluations' | 'fields' | 'field_availability' | 'games'} ImportType */
+/** @typedef {'players' | 'coaches' | 'evaluations' | 'fields' | 'field_availability' | 'games' | 'practice_schedule'} ImportType */
 /** @type {readonly ImportType[]} */
 const IMPORT_TYPES = Object.freeze([
   'players',
@@ -48,9 +48,14 @@ const IMPORT_TYPES = Object.freeze([
   'fields',
   'field_availability',
   'games',
+  'practice_schedule',
 ]);
 /** The types whose file goes through `ImportContext`; a schedule import runs in its own panel. */
-const SCHEDULE_IMPORT_TYPES = Object.freeze(['games']);
+const SCHEDULE_IMPORT_TYPES = Object.freeze(['games', 'practice_schedule']);
+/** The schedule panel's kind for each schedule import type. */
+const SCHEDULE_PANEL_KIND = Object.freeze({ games: 'games', practice_schedule: 'practices' });
+/** A tile's name where the type's own word is not one (the tile shows the type, capitalised). */
+const IMPORT_TYPE_NAMES = Object.freeze({ practice_schedule: 'practices' });
 const COMPLETED_IMPORT_STATUSES = new Set(['completed', 'completed_with_warnings']);
 const IMPORT_TYPE_TOOLTIPS = {
   players: 'Requires first name, last name, and date of birth columns.',
@@ -63,6 +68,8 @@ const IMPORT_TYPE_TOOLTIPS = {
     'Requires season_label, location, name, available_from, and available_until columns.',
   games:
     'Requires date, start time, end time or length, venue, field, division, home team and away team columns. You map the names and review the changes before anything is written.',
+  practice_schedule:
+    'Requires day, start, end or length, location and field columns, and a division beside each team. You map the names and review the changes before anything is written.',
 };
 
 /** What each deferrable import is called in a sentence, and on a button. */
@@ -833,7 +840,7 @@ export default function ImportPanel({ onImport }) {
                     <span
                       className={`font-semibold capitalize truncate ${importType === type ? 'text-text-accent' : 'text-text-primary'}`}
                     >
-                      {type}
+                      {IMPORT_TYPE_NAMES[type] ?? type}
                     </span>
                     {getImportedCount(type) > 0 && (
                       <span className="shrink-0 text-xs bg-green-500/20 text-status-success-text px-2 py-0.5 rounded-full flex items-center gap-1">
@@ -850,6 +857,8 @@ export default function ImportPanel({ onImport }) {
                     {type === 'field_availability' &&
                       'Upload seasonal availability metadata (not schedule slots)'}
                     {type === 'games' && 'Bring in a game schedule that already exists'}
+                    {type === 'practice_schedule' &&
+                      'Bring in a practice schedule that already exists'}
                   </p>
                 </div>
               </button>
@@ -866,7 +875,7 @@ export default function ImportPanel({ onImport }) {
             }
           >
             <ScheduleImportPanel
-              kind={/** @type {'games'} */ (importType)}
+              kind={SCHEDULE_PANEL_KIND[importType]}
               isDemo={isDemo}
               onDemoBlocked={() => setDemoNoticeOpen(true)}
               onDone={() => onImport?.()}

@@ -82,12 +82,31 @@ export const PRACTICE_IMPORT_TEMPLATE_HEADER = Object.freeze([
   C.USE,
 ]);
 
-/** Header names read as another column (plan 4.11.2): `Venue` for `Location`, `Half`/`Side` for `Subunit`. */
-const HEADER_ALIASES = Object.freeze({
+/**
+ * Header names read as another column (plan 4.11.2): `Venue` for `Location`, `Half`/`Side` for `Subunit`, by their
+ * label key. Exported for the stage (`staging.js`) and its Edge mirror, which keep only the columns this file reads.
+ */
+export const PRACTICE_IMPORT_HEADER_ALIASES = Object.freeze({
   [practiceLabelKey('Venue')]: C.LOCATION,
   [practiceLabelKey('Half')]: C.SUBUNIT,
   [practiceLabelKey('Side')]: C.SUBUNIT,
 });
+
+/** The label keys of every header the practice parse reads (its columns and their aliases). */
+const READ_HEADER_KEYS = new Set([
+  ...Object.values(PRACTICE_IMPORT_COLUMNS).map((name) => practiceLabelKey(name)),
+  ...Object.keys(PRACTICE_IMPORT_HEADER_ALIASES),
+]);
+
+/**
+ * Whether the practice parse reads a column of this name (its own name or an alias, any case and spacing). The browser
+ * sends only these columns; the stage drops the rest before a value is read.
+ *
+ * @param {unknown} header
+ * @returns {boolean}
+ */
+export const practiceImportReadsHeader = (header) =>
+  READ_HEADER_KEYS.has(practiceLabelKey(String(header ?? '')));
 
 /**
  * The weekday words the SQL day parser reads (`import_text_to_day_of_week`,
@@ -202,6 +221,18 @@ function fileRefusal(code, message, column) {
 }
 
 /**
+ * A date the caller gave (the season's, or the confirm step's) that is not a calendar date. Its own class, so the Edge
+ * function and the mock answer exactly this as `bad-date` and let every other error through (PR 11 review).
+ */
+export class PracticeImportDateError extends TypeError {
+  /** @param {string} message */
+  constructor(message) {
+    super(message);
+    this.name = 'PracticeImportDateError';
+  }
+}
+
+/**
  * A date that comes from the caller (the season, the confirm step): present and not a date is a defect
  * in the caller, not "no date" (which would turn a rule off in silence).
  */
@@ -209,7 +240,7 @@ function callerDate(value, what) {
   if (value === undefined || value === null || value === '') return null;
   const date = parseScheduleDate(value);
   if (date === null) {
-    throw new TypeError(
+    throw new PracticeImportDateError(
       `parsePracticeRows: ${what} must be YYYY-MM-DD, got ${JSON.stringify(value)}`
     );
   }
@@ -231,6 +262,12 @@ function callerDate(value, what) {
 export function parsePracticeRows({ headers, rows, season, dates }) {
   if (!Array.isArray(headers)) throw new TypeError('parsePracticeRows: headers must be an array');
   if (!Array.isArray(rows)) throw new TypeError('parsePracticeRows: rows must be an array');
+  if (headers.length > PRACTICE_IMPORT_LIMITS.MAX_COLUMNS) {
+    return fileRefusal(
+      R.TOO_MANY_COLUMNS,
+      `The file has ${headers.length} columns; one import reads at most ${PRACTICE_IMPORT_LIMITS.MAX_COLUMNS}. Remove the columns it does not need and choose it again.`
+    );
+  }
 
   // Columns: match by the shared normaliser (trim, collapse, fold case; a byte-order mark is
   // whitespace to it), drop every name that is not on the list, and refuse a name given twice.
@@ -243,7 +280,10 @@ export function parsePracticeRows({ headers, rows, season, dates }) {
     const written = String(raw ?? '');
     const key = practiceLabelKey(written);
     const canonical =
-      byKey.get(key) ?? (Object.hasOwn(HEADER_ALIASES, key) ? HEADER_ALIASES[key] : undefined);
+      byKey.get(key) ??
+      (Object.hasOwn(PRACTICE_IMPORT_HEADER_ALIASES, key)
+        ? PRACTICE_IMPORT_HEADER_ALIASES[key]
+        : undefined);
     if (canonical === undefined) {
       if (written.trim() !== '') droppedColumns.push(written.trim());
       continue;

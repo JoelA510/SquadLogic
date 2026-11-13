@@ -11,7 +11,8 @@
  * | `aliases.js` | the optional alias file: a label of the practice file to one of the organization's grounds |
  * | `mapping.js` | the file's labels against the organization's records: proposals, decisions, slots, settings |
  * | `probableMoves.js` | a re-import's rows leaving and arriving, paired at team level |
- * | `staging.js` | a parsed row as the staged payload the SQL apply reads (PR 10) |
+ * | `staging.js` | a parsed row as the staged payload the SQL apply reads (PR 10), and the whole file staged (PR 11) |
+ * | `previewCounts.js` | the counts a preview shows and its confirm carries: the dry run's own (PR 11) |
  *
  * ## What it is not
  *
@@ -28,3 +29,4 @@ export * from './aliases.js';
 export * from './mapping.js';
 export * from './probableMoves.js';
 export * from './staging.js';
+export * from './previewCounts.js';

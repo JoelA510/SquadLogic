@@ -133,11 +133,11 @@ const CODE_REGISTRY = {
     why: "the evaluations finalizer's own mock: it names the type for itself, not in a list",
   },
   'frontend/src/components/ImportPanel.jsx': {
-    class: 'deferred',
+    class: 'ready',
     why: "PR 11 (L2): the Practices tab is a kind of PR 6's panel",
   },
   'frontend/src/contexts/ImportContext.jsx': {
-    class: 'deferred',
+    class: 'ready',
     why: 'PR 11 (L2): a practice job is left to its own panel, as a games job is',
   },
   'frontend/src/utils/csvTemplates.js': {
@@ -149,7 +149,7 @@ const CODE_REGISTRY = {
     why: 'names evaluations for its own preview; the practice import, like the games import, calls its own RPCs',
   },
   'supabase/functions/import-validation/index.ts': {
-    class: 'deferred',
+    class: 'ready',
     why: 'PR 11 (L1): import-validation accepts practice_schedule (the allowlist, Zod rows, the 2,400 cap, the header aliases)',
   },
 };

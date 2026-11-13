@@ -1928,10 +1928,10 @@ Review (c) because it holds an Edge write path and the import panel.
 Depends on: PR 6 (the shared Import panel) and PR 10 merged and deployed. Owner cost: one E2E feature in CI; after
 merge the owner may try a real file in their own session (a dry run, then roll back); the plan never asks for the file.
 
-- [ ] L1 (M) `import-validation` accepts `practice_schedule`: the allowlist, Zod rows, the 2,400 cap, the header aliases
+- [x] L1 (M) `import-validation` accepts `practice_schedule`: the allowlist, Zod rows, the 2,400 cap, the header aliases
       of 4.11.2, no instant conversion. Tests: a Deno test and a vitest twin (days in every accepted form; `TZ` set to two
       other zones to prove the host zone is not read); a 500-row chunk timed with coverage on (lesson 59).
-- [ ] L2 (L) The Practices tab of the Import panel (a `kind` of PR 6's panel, not a copy): upload; mapping with its
+- [x] L2 (L) The Practices tab of the Import panel (a `kind` of PR 6's panel, not a copy): upload; mapping with its
       proposals and their sources; the division-settings proposals, one tick each; the confirm list (everything to be
       created, with counts, and "venues created here have no coordinates"); the preview from the dry run (flags by rule,
       the coverage sentence, teams short of their count, and the probable moves as team-level pairs, "team X: N rows
@@ -1939,9 +1939,9 @@ merge the owner may try a real file in their own session (a dry run, then roll b
       state. Tests: `tests/practiceImportPanel.test.jsx` (nothing is created without the confirm; each unmapped row is
       listed with its reason; only a ticked division setting is sent; the pairs are shown with their rows unticked by default
       and an unticked row is not sent).
-- [ ] L3 (S) `tests/practiceImportPreviewResult.test.js`: the preview's counts and flags equal the apply's over one file
+- [x] L3 (S) `tests/practiceImportPreviewResult.test.js`: the preview's counts and flags equal the apply's over one file
       that reaches every outcome (each non-zero first).
-- [ ] L4 (M) E2E `tests/e2e/features/practice_import.feature`: import the fixture, map with an alias file, see the flags
+- [x] L4 (M) E2E `tests/e2e/features/practice_import.feature`: import the fixture, map with an alias file, see the flags
       and the short teams, confirm, see the practices locked, roll back; axe in both themes. After `bddgen`; only this
       feature locally. Whether the mock client can run the practice solver in E2E was not checked; if it cannot, the "a
       run fills the gaps" case stays in K2.
@@ -1949,6 +1949,77 @@ merge the owner may try a real file in their own session (a dry run, then roll b
 Plants: a label created without the confirm list; the preview's counts computed apart from the dry run; a division
 setting sent without its tick. Stop and report if: PR 6's panel cannot take a second kind without a rewrite (flag the
 refactor first: rule 2); the mock cannot answer the dry run.
+
+**As built (2026-11-13, written from the branch; the gates and their numbers are in the pull request).** No stop condition
+held: PR 6's panel took the second kind (its `KINDS` entry `practices`; the shared flow reads the few games-only
+expressions through the kind: the header check, the confirm counts, the last-import and roll-back sentences), and the
+mock answers the dry run with every outcome. L1: `supabase/functions/_shared/practice-import.ts` (a mirror of core's parse
+and staging, held to it by `tests/practiceImportEdgeParity.test.js` over a vector table built from core,
+`_shared/tests/fixtures/practice-import.vectors.json`, and by `_shared/tests/practice-import_test.ts` under Deno) and
+the `practice_schedule` arm of `import-validation` (stage only; no shared helper changed). L2: the panel's practices kind,
+its steps in their own chunk (`PracticeImportSteps.jsx`), the client `frontend/src/utils/practiceImportClient.js` and
+`practiceImportMapping.js`, the Practices tile and its template. L3 and L4 as written. The decisions, by the owner's
+requirements of the PR 10 review and by this PR:
+
+1. **The probable moves are the database's.** The preview shows the dry run's `probable_move` and `added` (the database
+   scopes "leaving" by dates); the team-level line "team X: N rows leaving, N arriving" is grouped from the rows the
+   database flagged (`practiceProbableMoves`), and core's `pairProbableMoves`, which sees no dates, is not called. A
+   spring file over fall practices pairs nothing (tested in L3 and L2).
+2. **Ticks.** A "Tick all probable moves" control and one tick per team (the plan's unit is the team-level pair, so no
+   row-level tick); arriving rows open unticked; only ticked row keys, and only of rows the dry run flagged, go into
+   `options.add_moved_rows`. A tick is stored only by making the preview again ("Update the preview with these ticks"),
+   and the confirm waits for it, so the confirmed counts are always a dry run's. The case is named in words: "These teams
+   already have saved practices in these dates; their new rows are held back until you tick them."
+3. **The whole file is one request**, not 500-row chunks: the parse judges the file as a whole (`team-in-two-divisions`,
+   `duplicate-row`) and the SQL requires a row key unique in the file; there is no clock, so the 2,400-row cap stages in
+   about 90 ms with coverage on (500 rows: about 14 ms).
+4. **The confirm step's two dates (decision 25) are asked on the upload step**, because the parse fills a blank Valid
+   From or Valid Until when the file is staged; changing them means choosing the file again.
+5. **The confirm is the Edge function's** (`import-validation`, `action: 'apply'`; review round): it runs the dry run
+   again as the admin, compares its counts with the confirmed ones and applies only when they hold, else answers
+   `practice_import_preview_stale` with the fresh preview and writes nothing (`applyPracticeImportConfirmed`, a sibling of
+   the games one, which is not changed). A file is staged only into a job still `importing`, so a ready job is never
+   emptied and staged again.
+6. **Division settings are saved after the apply, for existing divisions only**, through `admin_upsert_division_settings`
+   with the division's other rules sent back as stored (the RPC sets every rule it is given; a null clears it). The
+   division is read again just before the write and the save is refused, in words, when its roster rules are no longer
+   the ones the import read. Then the TIME TBD list is counted again and read back, and the result shows the teams short
+   as counted with the saved settings (or says its list is from before them). A division the import creates is offered
+   no setting (a setting would make the rollback keep it as changed): the screen says to set it on the Team Analysis page
+   after the confirm. The confirm list and the rollback say that a rollback does not undo a saved setting. **Follow-up:**
+   an RPC that sets a division's practice settings alone, without the roster rules, would end the read-then-write.
+7. **The confirm list** names every record to be created and counts the practice slots, and the confirm is refused until
+   it is ticked; venues and fields created have no coordinates, said beside the list.
+8. **Every reason in words**: the reason's sentence and the database's own message with record ids taken out
+   (`slot-differs` names what differs; the blank-cell reasons; a hold's `ground_known`; `coach-conflict`), the flags by
+   rule, the coverage sentence with the coach-judged teams, and the teams short of their count.
+9. **Mechanical moves** (no behaviour change): `Notice` and `NamedList` moved from the panel into
+   `components/import/importParts.jsx` so the steps chunk shows them too; the panel's games-only code is unchanged and
+   its 45 tests are unchanged and pass on the base and the branch alike. **Lazy:** the practice steps, the practice
+   client and the practice parser are chunks of their own, loaded when the Practices tab uses them; first paint is
+   281.08 KB gz against 281.09 on the base, and the Games tab's own chunks grow by about 2 KB gz (the kind's words).
+10. **Review round (#732: three Codex findings and one review).** A repeated column in the alias file refuses it; a
+    ground only a hold names is stored as its exact existing ground (a hold creates nothing), so the database knows it
+    and flags a hold over a slot; a `map` that leaves its label's scope goes back to undecided in the choices, the scope judged with the proposal
+    made again under the updated choices at each level (Codex's C4: a location remapped to another with a field of the
+    same name moves that field, and a half chosen under it goes); a file of more than 200 columns is refused
+    (`too-many-columns`, by the parse in core and the mirror, and by the client before a job is made), never cut, so a
+    Team past the cap cannot turn a placement into an open slot (C5; the games import cuts its header row at 200 the
+    same way, a follow-up); every probable-move team has its own tick, the first 25 listed and "Show all N teams" for
+    the rest (C6); a team the import creates is named on the TIME TBD list by the dry run's or the apply's own
+    `arriving` rows (C8); every test of PR 11 that reads the date pins it (the world's `pinWorldClock`, the E2E's
+    `page.clock.setFixedTime`; the TIME TBD rebuild counts only practices that end after today, so the E2E broke after
+    the fixture's 2026-11-20 end, C7); the stage
+    answers `bad-date` only for `PracticeImportDateError` and audits and rethrows anything else; the words helper catches
+    nothing; the header-to-column map is made once per file in core and the mirror; the clients share
+    `utils/importClientCommon.js`; the panel's kind checks are `KINDS` fields (`Steps`, `takesDates`,
+    `recordsBaseline`, `uploadNote`), with only `data-kind` left reading `kind`.
+11. **A defect of PR 10's mock, fixed**: a division the mock's apply created had no `program_id` (the SQL's trigger fills
+    it), so the mock's read-time program backfill changed the row and the rollback kept the division as changed. The
+    games mock creates divisions the same way and was not changed (follow-up). Lesson 112.
+
+The "a run fills the gaps" case stays in K2, as the plan allowed: the E2E sees the practices saved and locked in the
+result's words and does not open the Practices page.
 
 ### PR 12: Paired days, same slot (L; migration; the practice solver; rule 14; Review: (c); added 2026-11-06)
 
@@ -2839,17 +2910,19 @@ section 7). **Updated 2026-11-13:** F11-2 is merged (#725, `dcb54ff`) and its mi
 **Updated 2026-11-13 (later):** F11-3 is merged (#726, `5151f6c`; its task C3 was the blocker for turning score entry
 on: **once F11-3's client is deployed, `score_entry` may be turned on**), and so are PR 6b's refactor G5a (#728,
 `70f443a`) and its G5 (#729, `be268be`; the import recorded as the publication baseline; no migration; see "As built"
-under PR 6b in section 7). **In review:** PR 10 (the practice import's database half, migration `20261123010000`; see
-"As built" under PR 10 in section 7); PR 11 waits for it to be merged and deployed. **Not merged:** PR 8 (in review, 2026-11-13; see "As built" under PR 8 in section 7), 10, 11 and
+under PR 6b in section 7). **Updated 2026-11-13 (PR 11):** PR 10 is merged (#730, `f5110be`) and its migration deployed (the owner, 08:20 UTC).
+**In review:** PR 8 (2026-11-13; see "As built" under PR 8 in section 7) and PR 11 (the Edge validation, the
+Practices tab and its E2E; no migration; see "As built" under PR 11 in section 7). **Not merged:** PR 8, 11 and
 12, F11-4 and F11-5. PR 14 stays held.
 
 - **Order and the dependency rule.** Section 7 ("Dependencies and order") has the dependency table and the one priority
   rule: at most two PRs in flight; a free slot takes the first PR, in the order PR 1; PR 4; PR 2; PR 5; PR 3; PR 9;
   PR 6; PR 10; PR 7; PR 13; PR 8; PR 11; PR 12, whose dependencies are merged and deployed. There are no waves. PR 14 is
-  held (decision 28). Left, with the F11 plan's pull requests in their places (2026-11-13, later): PR 10 (in review),
+  held (decision 28). Left, with the F11 plan's pull requests in their places (2026-11-13, PR 11): PR 11 (in review),
   and the follow-ups of PR 6's review still open, listed under PR 6 in section 7 (the preview-stale check inside the
   RPC at the next replacement; a SQL sweep for abandoned games jobs), none with a pull request number yet,
-  PR 8, PR 11 (after PR 10 is merged and its migration deployed), F11-4, PR 12. F11-5 and PR 14 are the coordinating agent's call when their turn comes (section 10, the 2026-11-10
+  PR 8, F11-4, PR 12 (PR 10 and PR 11 are its dependencies), and the games mock's division `program_id` (PR 11's
+  decision 10). F11-5 and PR 14 are the coordinating agent's call when their turn comes (section 10, the 2026-11-10
   answers, entry 5). Later, with no PR number: the B5.10 discovery pass and its plan-change (registration state and
   optional-data features), which the owner agreed to on 2026-11-09 (section 10, the 2026-11-09 answers, entry 2). Outside
   this plan: Dependabot #716 to #718, to be batched into one dependency pull request.

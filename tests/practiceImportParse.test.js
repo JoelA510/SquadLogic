@@ -115,6 +115,7 @@ describe('practice import: the reason codes', () => {
     expect([...PRACTICE_IMPORT_FILE_REFUSALS].sort()).toEqual([
       'duplicate-column',
       'missing-column',
+      'too-many-columns',
       'too-many-rows',
     ]);
     // plan 4.11.4's closed row list, and the five this build added (named in the header)
@@ -649,6 +650,18 @@ describe('practice import: the file', () => {
     const refused = note(parse(make(2401)));
     expect([refused.ok, refused.refusal?.code]).toEqual([false, 'too-many-rows']);
     expect(refused.refusal.message).toMatch(/2,400/);
+  });
+
+  it('takes 200 columns and refuses 201, never cutting a column it reads (PR 11, Codex on #732)', () => {
+    const filler = (n) => Array.from({ length: n }, (_, i) => `Extra ${i}`);
+    expect(parse([row()], { headers: [...HEADERS, ...filler(200 - HEADERS.length)] }).ok).toBe(
+      true
+    );
+    const refused = note(
+      parse([row()], { headers: [...HEADERS, ...filler(201 - HEADERS.length)] })
+    );
+    expect([refused.ok, refused.refusal?.code]).toEqual([false, 'too-many-columns']);
+    expect(refused.refusal.message).toMatch(/201 columns; one import reads at most 200/);
   });
 
   it('rejects input that is not a header row and rows', () => {

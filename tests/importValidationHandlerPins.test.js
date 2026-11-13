@@ -45,8 +45,12 @@ describe('the handler assertions of the Deno suite, made here too', () => {
     );
   });
 
-  it('the games arm reads its season through the shared module, for the JOB’s season and organization', () => {
-    expect(HANDLER.split('await loadGameImportSeason(').length - 1).toBe(1);
+  it('the games and practice arms read their season through the shared module, for the JOB’s season and organization', () => {
+    // one read in the games arm and one in the practice schedule arm (PR 11), each of the job's season
+    expect(HANDLER.split('await loadGameImportSeason(').length - 1).toBe(2);
+    expect(
+      HANDLER.split('{ seasonSettingsId: job.season_settings_id, organizationId }').length - 1
+    ).toBe(2);
     expect(HANDLER).toContain('seasonSettingsId: job.season_settings_id, organizationId');
     const shared = read('supabase/functions/_shared/schedule-import.ts');
     const fn = shared.slice(shared.indexOf('export async function loadGameImportSeason('));

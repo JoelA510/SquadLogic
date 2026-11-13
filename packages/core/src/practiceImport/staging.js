@@ -88,7 +88,9 @@ export function toStagedPracticeRow(row) {
       valid_from: row.validFrom,
       valid_until: row.validUntil,
       capacity: row.capacity,
-      flags: row.flags.map((flag) => flag.code).filter((code) => PRACTICE_STAGED_FLAGS.includes(code)),
+      flags: row.flags
+        .map((flag) => flag.code)
+        .filter((code) => PRACTICE_STAGED_FLAGS.includes(code)),
       division: (row.divisionLabel ?? '').trim(),
       division_key: placement ? practiceDivisionDecisionKey(row.divisionLabel) : '',
       location: row.locationLabel.trim(),

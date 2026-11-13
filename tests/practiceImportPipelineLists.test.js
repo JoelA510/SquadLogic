@@ -223,7 +223,9 @@ describe('the SQL functions that name an existing type are classified, and the l
 
   it('create_import_job maps practice_schedule to its own job type, and a draft season is not allowed for it', () => {
     const body = naming.get('create_import_job')?.text ?? '';
-    expect(body).toMatch(/WHEN\s+v_import_type\s*=\s*'practice_schedule'\s+THEN\s+'practice_schedule'/i);
+    expect(body).toMatch(
+      /WHEN\s+v_import_type\s*=\s*'practice_schedule'\s+THEN\s+'practice_schedule'/i
+    );
     expect(body).toMatch(/v_job_type\s+NOT\s+IN\s*\('registration',\s*'evaluations'\)/i);
   });
 
@@ -237,7 +239,9 @@ describe('the SQL functions that name an existing type are classified, and the l
 
   it('import_allowed_keys has the practice_schedule arm, equal to the allowlist', () => {
     const body = naming.get('import_allowed_keys')?.text ?? '';
-    const arm = /WHEN\s+'practice_schedule'\s+THEN\s+ARRAY\s*\[([\s\S]*?)\]\s*::\s*text\[\]/i.exec(body);
+    const arm = /WHEN\s+'practice_schedule'\s+THEN\s+ARRAY\s*\[([\s\S]*?)\]\s*::\s*text\[\]/i.exec(
+      body
+    );
     expect(arm).not.toBeNull();
     const keys = [...(arm?.[1] ?? '').matchAll(/'([^']*)'/g)].map((m) => m[1]);
     expect(keys).toEqual([...browserAllowlist.PRACTICE_SCHEDULE_IMPORT_KEYS]);
@@ -261,7 +265,9 @@ describe('the SQL functions that name an existing type are classified, and the l
   });
 
   it('K1: persist_practice_schedule and its gate are not replaced by this migration', () => {
-    expect(functions.get('persist_practice_schedule')?.file).toBe('20261108020000_schedule_tbd.sql');
+    expect(functions.get('persist_practice_schedule')?.file).toBe(
+      '20261108020000_schedule_tbd.sql'
+    );
     expect(functions.get('practice_new_auto_row_refusals')?.file).toBe(
       '20261105010000_practices_per_division.sql'
     );
@@ -297,7 +303,9 @@ describe('the code names practice_schedule where this PR says it does, and not w
   it('PLANT: a ready file that stops naming the type is reported, and a deferred one that starts is too', () => {
     const mock = lists.get('frontend/src/lib/mockSupabaseClient.js') ?? '';
     expect(namesPracticeSchedule(mock)).toBe(true);
-    expect(namesPracticeSchedule(mock.replace(/practice_schedule/g, 'practice_schedulx'))).toBe(false);
+    expect(namesPracticeSchedule(mock.replace(/practice_schedule/g, 'practice_schedulx'))).toBe(
+      false
+    );
     expect(namesPracticeSchedule("['games', 'practice_schedule']")).toBe(true);
   });
 });
@@ -340,7 +348,11 @@ describe('the migration is guarded, reversible and in the harness', () => {
 
   it("the demo fence's census lists the three new RPCs, and not the internal ensure_practice_slot", () => {
     const fence = read('supabase/tests/demo_sessions.sql');
-    for (const name of ['apply_practice_import_job', 'map_practice_import_job', 'rollback_practice_import_job']) {
+    for (const name of [
+      'apply_practice_import_job',
+      'map_practice_import_job',
+      'rollback_practice_import_job',
+    ]) {
       expect((fence.match(new RegExp(`'${name}'`, 'g')) ?? []).length, name).toBe(2);
     }
     expect(fence).not.toContain("'ensure_practice_slot'");

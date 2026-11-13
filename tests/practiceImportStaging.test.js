@@ -73,7 +73,9 @@ describe('a staged practice row carries the allowlisted keys and nothing else', 
   });
 
   it('carries core decision keys beside the labels, so the SQL never normalises a label', () => {
-    const row = /** @type {any} */ (parsed.rows.find((r) => r.status === 'placement' && r.subunitLabel));
+    const row = /** @type {any} */ (
+      parsed.rows.find((r) => r.status === 'placement' && r.subunitLabel)
+    );
     const p = /** @type {any} */ (toStagedPracticeRow(row).normalized_payload);
     expect(p.division_key).toBe(practiceDivisionDecisionKey(row.divisionLabel));
     expect(p.location_key).toBe(practiceLocationDecisionKey(row.locationLabel));
@@ -85,7 +87,9 @@ describe('a staged practice row carries the allowlisted keys and nothing else', 
   });
 
   it('a whole-field row has an empty subunit and an empty subunit key (never a key of a blank label)', () => {
-    const row = /** @type {any} */ (parsed.rows.find((r) => r.status === 'placement' && !r.subunitLabel));
+    const row = /** @type {any} */ (
+      parsed.rows.find((r) => r.status === 'placement' && !r.subunitLabel)
+    );
     expect(row).toBeTruthy();
     const p = /** @type {any} */ (toStagedPracticeRow(row).normalized_payload);
     expect(p.subunit).toBe('');
@@ -118,7 +122,9 @@ describe('a staged practice row carries the allowlisted keys and nothing else', 
       invalid.rows.find((r) => r.flags?.some((f) => f.code === 'division-not-reserved'))
     );
     expect(flagged).toBeTruthy();
-    expect(toStagedPracticeRow(flagged).normalized_payload?.flags).toEqual(['division-not-reserved']);
+    expect(toStagedPracticeRow(flagged).normalized_payload?.flags).toEqual([
+      'division-not-reserved',
+    ]);
   });
 });
 
@@ -135,7 +141,9 @@ describe('every row of the fixtures stages in the shape the SQL accepts', () => 
     for (const r of invalid.rows) {
       const s = toStagedPracticeRow(/** @type {any} */ (r));
       if (s.normalized_payload === null) continue;
-      expect(sqlAccepts(/** @type {any} */ (s.normalized_payload)), `row ${r.rowNumber}`).toBe(true);
+      expect(sqlAccepts(/** @type {any} */ (s.normalized_payload)), `row ${r.rowNumber}`).toBe(
+        true
+      );
     }
   });
 

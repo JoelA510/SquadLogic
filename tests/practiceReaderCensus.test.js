@@ -128,8 +128,7 @@ const REGISTRY = {
   },
   'sql:rollback_practice_import_job': {
     class: 'writer',
-    why:
-      'PR 10: deletes the rows the practice import inserted, refused while one was changed since or has an exception',
+    why: 'PR 10: deletes the rows the practice import inserted, refused while one was changed since or has an exception',
   },
   'sql:practice_new_auto_row_refusals': {
     class: 'writer',

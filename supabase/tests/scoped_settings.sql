@@ -26,7 +26,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(84);
+SELECT plan(92);
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
 -- err: SQLSTATE:DETAIL of the first error, or 'no error' (the statement's effect stays).
@@ -110,6 +110,9 @@ INSERT INTO public.programs (id, organization_id, season_settings_id, name) VALU
     ('a1111111-1111-1111-1111-00000005c0c1', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-00000005c0c0', 'Old Juniors');
 INSERT INTO public.divisions (id, organization_id, season_settings_id, name, program_id) VALUES
     ('a1111111-1111-1111-1111-00000005c0c2', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-00000005c0c0', 'Old U9', 'a1111111-1111-1111-1111-00000005c0c1');
+INSERT INTO public.divisions (id, organization_id, season_settings_id, name) VALUES
+    ('a1111111-1111-1111-1111-00000005c0c3', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-00000005c0c0', 'Old U8'),
+    ('a1111111-1111-1111-1111-00000005c0c4', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-00000005c0c0', 'Old U10');
 UPDATE public.season_settings SET status = 'completed' WHERE id = 'a1111111-1111-1111-1111-00000005c0c0';
 
 -- ── 1. The shape ───────────────────────────────────────────────────────────
@@ -264,7 +267,25 @@ SELECT is(pg_temp.val($$SELECT string_agg(d.name || '=' || public.standings_coun
                          FROM public.divisions d WHERE d.season_settings_id = 'a1111111-1111-1111-1111-111111111aaa'$$),
     'Org A U10=false,Scope U11=true,Scope U8=true,Scope U9=false',
     'the seam reads the cascade: a division''s own value, else its program''s, else the organization''s');
+-- The completed season C: Old U9 (in Old Juniors, which has no value), Old U8 (no program) and Old U10 (no program, a
+-- value of its own, true). Before the change all but Old U10 inherit the organization's false.
+SET LOCAL "request.jwt.claims" TO '{}';
+INSERT INTO public.scoped_settings (organization_id, division_id, key, value) VALUES
+    ('a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-00000005c0c4', 'standings_count_outside_results', 'true');
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 SELECT is(pg_temp.set('organization', 'a1111111-1111-1111-1111-111111111111', 'true'), 'changed=true old=false new=true', 'the organization turns it on');
+SELECT is(pg_temp.val($$SELECT metadata->>'frozen_completed_divisions' FROM public.audit_log WHERE action = 'settings.updated' AND resource_type = 'scoped_setting'
+                         AND metadata->>'scope' = 'organization' AND metadata->'new' = 'true'::jsonb$$),
+    '2', 'the change first held the completed season''s two inheriting divisions at their value, counted in its audit row');
+SELECT is(pg_temp.val($$SELECT string_agg(d.name || '=' || public.standings_counts_outside(d.id)::text, ',' ORDER BY d.name)
+                         FROM public.divisions d WHERE d.season_settings_id = 'a1111111-1111-1111-1111-00000005c0c0'$$),
+    'Old U10=true,Old U8=false,Old U9=false',
+    'a completed season''s history is not rewritten: its inheriting divisions keep false, its own true stays true');
+SELECT is(pg_temp.val($$SELECT string_agg(d.name || ':' || s.frozen_from_organization::text, ',' ORDER BY d.name) FROM public.scoped_settings s
+                         JOIN public.divisions d ON d.id = s.division_id WHERE d.season_settings_id = 'a1111111-1111-1111-1111-00000005c0c0'$$),
+    'Old U10:false,Old U8:true,Old U9:true', 'the two held rows are marked frozen; the division''s own row is untouched');
+SELECT is(pg_temp.val($$SELECT (public.admin_create_season_from('a1111111-1111-1111-1111-00000005c0c0', 'Org A Scope Old Next', 2025) ->> 'scoped_settings_copied')$$),
+    '1', 'a season made from the completed one copies the division''s own value and not the frozen ones (the next season inherits)');
 SELECT is(pg_temp.val($$SELECT string_agg(d.name || '=' || public.standings_counts_outside(d.id)::text, ',' ORDER BY d.name)
                          FROM public.divisions d WHERE d.season_settings_id = 'a1111111-1111-1111-1111-111111111aaa'$$),
     'Org A U10=true,Scope U11=true,Scope U8=true,Scope U9=false',
@@ -281,6 +302,14 @@ SELECT is(pg_temp.val($$SELECT (p.prosecdef AND p.proconfig @> ARRAY['search_pat
                           AND p.prosrc ~ 'scoped_setting_value' AND p.prosrc !~ 'org_flag')::text
                           FROM pg_proc p WHERE p.oid = to_regprocedure('public.standings_counts_outside(uuid)')$$),
     'true', 'the seam''s body: a definer with the member check that reads the resolver and not org_flag');
+
+-- Tenancy: a row's organization is its program's or division's, whoever writes it (the definer path here).
+SELECT is(pg_temp.err($$INSERT INTO public.scoped_settings (organization_id, division_id, key, value)
+                        VALUES ('b2222222-2222-2222-2222-222222222222', 'a1111111-1111-1111-1111-00000005c103', 'standings_count_outside_results', 'true')$$),
+    '23514:', 'a row naming another organization''s division is refused');
+SELECT is(pg_temp.err($$INSERT INTO public.scoped_settings (organization_id, program_id, key, value)
+                        VALUES ('b2222222-2222-2222-2222-222222222222', 'a1111111-1111-1111-1111-00000005c001', 'standings_count_outside_results', 'true')$$),
+    '23514:', 'and one naming another organization''s program');
 
 -- ── 6. admin_set_division_practice_settings ────────────────────────────────
 SET LOCAL "request.jwt.claims" TO '{}';
@@ -315,6 +344,19 @@ SELECT is(pg_temp.err($$SELECT public.admin_set_division_practice_settings('a111
     'no signed-in user: refused');
 SELECT is(pg_temp.val($$SELECT practices_per_week || ' ' || COALESCE(practice_minutes::text, 'any') FROM public.divisions WHERE id = 'a1111111-1111-1111-1111-00000005c101'$$),
     '2 any', 'and every refusal left the division as it was');
+
+-- ── 6b. A text set has one spelling: code point order (COLLATE "C") ────────
+-- A registry row made for this test only (rolled back with it): mixed case, an accented letter, a fullwidth letter
+-- and an astral one, where code point order and UTF-16 order differ (tests/scopedSettings.test.js holds core's
+-- canonical order to the same expected text).
+SET LOCAL "request.jwt.claims" TO '{}';
+INSERT INTO public.scoped_setting_keys (key, value_type, allowed_values, default_value, label) VALUES
+    ('zz_scope_test_set', 'text_set', '["a", "B", "é", "ｚ", "𝒜"]', '[]', 'Test set');
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SELECT is(pg_temp.set('division', 'a1111111-1111-1111-1111-00000005c102', '["𝒜", "ｚ", "é", "a", "B"]', 'zz_scope_test_set'),
+    'changed=true old=null new=["B", "a", "é", "ｚ", "𝒜"]', 'a text set is stored in code point order');
+SELECT is(pg_temp.set('division', 'a1111111-1111-1111-1111-00000005c102', '["a", "a"]', 'zz_scope_test_set'),
+    '22023:setting_value_invalid', 'a text set with a repeat is refused');
 
 -- ── 7. A deleted program takes its values with it (S8) ─────────────────────
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';

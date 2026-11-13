@@ -11,6 +11,8 @@
 --   4. The seam, standings_counts_outside, follows the cascade for a signed-in member.
 --   5. The rollover copies a program's and a division's value and counts them.
 --   6. admin_set_division_practice_settings changes the practice columns and leaves the roster rules.
+--   7. An organization change holds a completed season's inheriting division at its value (frozen, counted), and a row
+--      naming another organization's division is refused by the tenancy trigger (23514) on the definer path.
 --
 -- The pgTAP file (supabase/tests/scoped_settings.sql) holds the full table; this is the part the migration harness can
 -- run without pgTAP, and the part its plants are shown to turn red (scripts/dbharness/prove.sh).
@@ -29,6 +31,11 @@ DECLARE
     v_d2      uuid := gen_random_uuid();   -- in the program, with no value of its own
     v_d3      uuid := gen_random_uuid();   -- in no program
     v_default uuid;
+    v_old     uuid := gen_random_uuid();   -- a completed season of the organization
+    v_dold    uuid := gen_random_uuid();   -- its division, in no program
+    v_org2    uuid := gen_random_uuid();   -- another organization
+    v_season2 uuid := gen_random_uuid();
+    v_div2    uuid := gen_random_uuid();
     v_res     jsonb;
     v_next    uuid;
     v_text    text;
@@ -168,6 +175,33 @@ BEGIN
     END IF;
     v_checks := v_checks + 1;
     RAISE NOTICE 'practice setter: practices a week and length changed, the roster rules as they were';
+
+    -- ---- 7. the freeze and the tenancy trigger ----------------------------------------------------------
+    INSERT INTO public.season_settings (id, organization_id, name, status, season_year) VALUES (v_old, v_org, 'Scope Old Season', 'draft', 2024);
+    INSERT INTO public.divisions (id, organization_id, season_settings_id, name) VALUES (v_dold, v_org, v_old, 'Scope Old U9');
+    UPDATE public.season_settings SET status = 'completed' WHERE id = v_old;
+    -- The organization is true now; the completed division inherits it.
+    IF public.scoped_setting_value(v_dold, v_key) IS DISTINCT FROM 'true'::jsonb THEN
+        RAISE EXCEPTION 'the completed division does not inherit the organization''s true before the change';
+    END IF;
+    v_res := public.admin_set_scoped_setting(v_key, 'organization', v_org, 'false');
+    IF public.scoped_setting_value(v_dold, v_key) IS DISTINCT FROM 'true'::jsonb
+       OR (v_res ->> 'frozen_completed_divisions') IS DISTINCT FROM '1'
+       OR NOT EXISTS (SELECT 1 FROM public.scoped_settings WHERE division_id = v_dold AND frozen_from_organization) THEN
+        RAISE EXCEPTION 'an organization change rewrote a completed season''s history: the completed division gives %, % frozen',
+            public.scoped_setting_value(v_dold, v_key), v_res ->> 'frozen_completed_divisions';
+    END IF;
+    INSERT INTO public.organizations (id, name, slug) VALUES (v_org2, 'Scope Smoke Other', 'scope-smoke-other-' || replace(v_org2::text, '-', ''));
+    DELETE FROM public.season_settings WHERE organization_id = v_org2;
+    INSERT INTO public.season_settings (id, organization_id, name, status, season_year) VALUES (v_season2, v_org2, 'Other Season', 'active', 2026);
+    INSERT INTO public.divisions (id, organization_id, season_settings_id, name) VALUES (v_div2, v_org2, v_season2, 'Other U9');
+    BEGIN
+        INSERT INTO public.scoped_settings (organization_id, division_id, key, value) VALUES (v_org, v_div2, v_key, 'true');
+        RAISE EXCEPTION 'a row of one organization naming another organization''s division was written' USING ERRCODE = 'XX000';
+    EXCEPTION WHEN check_violation THEN NULL;
+    END;
+    v_checks := v_checks + 3;
+    RAISE NOTICE 'freeze and tenancy: an organization change held the completed season''s inheriting division at its value (1 frozen); a row naming another organization''s division was refused (23514)';
 
     RAISE NOTICE 'settings scope smoke: % checks', v_checks;
 END

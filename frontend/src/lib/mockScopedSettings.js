@@ -19,6 +19,7 @@
  */
 
 import {
+  canonicalScopedValue,
   isValidScopedValue,
   resolveScopedSetting,
   SCOPED_SETTING_KEYS,
@@ -53,10 +54,6 @@ function audit(db, ctx, orgId, resourceType, resourceId, metadata) {
   });
 }
 
-/** A text set stored as the SQL stores it: sorted, without repeats. */
-const canonical = (key, value) =>
-  SCOPED_SETTING_KEYS[key].type === 'boolean' ? value : [...value].sort();
-
 /**
  * A division's value of a scoped setting, as `scoped_setting_value` gives it: its own row, else its (non-default)
  * program's, else its organization's, else the registered default. An unknown division gives the default.
@@ -83,46 +80,51 @@ export function scopedValueForDivision(db, divisionId, key) {
 
 /**
  * The rollover's copy (`admin_create_season_from`, 20261124010000): each program's and each division's rows go to their
- * copies (a program by `copied_from_program_id`, a division by name). Returns how many were copied.
+ * copies (a program by `copied_from_program_id`, a division by name). A division row frozen_from_organization (a
+ * completed season held at what it inherited) is not copied. A row of the source season whose copy is not found
+ * refuses the whole rollover, as the SQL's count check does (XX000), and nothing is written.
  * @param {any} db
  * @param {string} sourceSeasonId
  * @param {string} newSeasonId
  * @param {{ newId: () => string, currentUserId?: string|null }} ctx
+ * @returns {{ copied: number, error: null } | { copied: 0, error: { code: string, message: string } }}
  */
 export function copyScopedSettingsForRollover(db, sourceSeasonId, newSeasonId, ctx) {
   const rows = db.scoped_settings || [];
   const copies = [];
+  let owed = 0;
   for (const row of rows) {
-    if (present(row.program_id)) {
-      const source = (db.programs || []).find((p) => same(p.id, row.program_id));
-      if (!source || !same(source.season_settings_id, sourceSeasonId)) continue;
-      const copy = (db.programs || []).find(
-        (p) => same(p.season_settings_id, newSeasonId) && same(p.copied_from_program_id, source.id)
-      );
-      if (copy)
-        copies.push({
-          ...row,
-          id: ctx.newId(),
-          program_id: copy.id,
-          updated_by: ctx.currentUserId ?? null,
-        });
-    } else if (present(row.division_id)) {
-      const source = (db.divisions || []).find((d) => same(d.id, row.division_id));
-      if (!source || !same(source.season_settings_id, sourceSeasonId)) continue;
-      const copy = (db.divisions || []).find(
-        (d) => same(d.season_settings_id, newSeasonId) && d.name === source.name
-      );
-      if (copy)
-        copies.push({
-          ...row,
-          id: ctx.newId(),
-          division_id: copy.id,
-          updated_by: ctx.currentUserId ?? null,
-        });
-    }
+    if (row.frozen_from_organization) continue;
+    const isProgram = present(row.program_id);
+    const table = isProgram ? db.programs || [] : db.divisions || [];
+    if (!isProgram && !present(row.division_id)) continue;
+    const source = table.find((x) => same(x.id, isProgram ? row.program_id : row.division_id));
+    if (!source || !same(source.season_settings_id, sourceSeasonId)) continue;
+    owed += 1;
+    const copy = table.find(
+      (x) =>
+        same(x.season_settings_id, newSeasonId) &&
+        (isProgram ? same(x.copied_from_program_id, source.id) : x.name === source.name)
+    );
+    if (!copy) continue;
+    copies.push({
+      ...row,
+      id: ctx.newId(),
+      ...(isProgram ? { program_id: copy.id } : { division_id: copy.id }),
+      updated_by: ctx.currentUserId ?? null,
+    });
+  }
+  if (copies.length !== owed) {
+    return {
+      copied: 0,
+      error: {
+        code: 'XX000',
+        message: `season ${sourceSeasonId} was not copied whole: ${copies.length} of its scoped settings found their copy`,
+      },
+    };
   }
   db.scoped_settings = [...rows, ...copies];
-  return copies.length;
+  return { copied: copies.length, error: null };
 }
 
 /**
@@ -187,6 +189,9 @@ function setScopedSetting(db, p, c) {
   if (!Object.hasOwn(SCOPED_SETTING_KEYS, key ?? '')) {
     return fail('22023', `unknown setting ${key ?? 'NULL'}`, 'unknown_setting');
   }
+  // "Inherit" is the RPC's SQL NULL. A client cannot send anything else for it: PostgREST reads an RPC's arguments
+  // with json_to_record, which turns a JSON null into an SQL NULL (so `p_value: null`, or leaving it out, is inherit).
+  // The SQL's refusal of a JSON 'null' value (setting_value_invalid) is reachable from SQL only.
   const unset = p.p_value === undefined || p.p_value === null;
   if (!unset && !isValidScopedValue(key, p.p_value)) {
     return fail('22023', `the setting ${key} takes another kind of value`, 'setting_value_invalid');
@@ -208,7 +213,7 @@ function setScopedSetting(db, p, c) {
       );
     }
   }
-  const value = unset ? null : canonical(key, p.p_value);
+  const value = unset ? null : canonicalScopedValue(key, p.p_value);
   db.scoped_settings = db.scoped_settings || [];
   const matches = (row) =>
     row.key === key &&
@@ -224,6 +229,46 @@ function setScopedSetting(db, p, c) {
     error: null,
   });
   if (JSON.stringify(old) === JSON.stringify(value)) return result(false);
+  // An organization's change holds each COMPLETED season's division that inherits its value today at that value (a
+  // division row marked frozen_from_organization), as the SQL does, so a completed season's history is not rewritten.
+  let frozen = 0;
+  if (scope === 'organization') {
+    const defaultValue = SCOPED_SETTING_KEYS[key].defaultValue;
+    const before = old ?? defaultValue;
+    const after = value ?? defaultValue;
+    if (JSON.stringify(before) !== JSON.stringify(after)) {
+      const completed = new Set(
+        (db.season_settings || [])
+          .filter((s) => same(s.organization_id, org) && s.status === 'completed')
+          .map((s) => String(s.id))
+      );
+      for (const division of (db.divisions || []).filter(
+        (d) => same(d.organization_id, org) && completed.has(String(d.season_settings_id))
+      )) {
+        const own = db.scoped_settings.some(
+          (r) => r.key === key && same(r.division_id, division.id)
+        );
+        const program = (db.programs || []).find((q) => same(q.id, division.program_id));
+        const programValue =
+          program &&
+          !program.is_default &&
+          db.scoped_settings.some((r) => r.key === key && same(r.program_id, program.id));
+        if (own || programValue) continue;
+        db.scoped_settings.push({
+          id: c.newId(),
+          organization_id: org,
+          program_id: null,
+          division_id: division.id,
+          key,
+          value: before,
+          updated_at: (c.now ?? new Date()).toISOString(),
+          updated_by: c.currentUserId,
+          frozen_from_organization: true,
+        });
+        frozen += 1;
+      }
+    }
+  }
   if (value === null) {
     db.scoped_settings = db.scoped_settings.filter((row) => row !== existing);
   } else if (!existing) {
@@ -252,8 +297,11 @@ function setScopedSetting(db, p, c) {
     season_settings_id: season,
     old,
     new: value,
+    frozen_completed_divisions: frozen,
   });
-  return result(true);
+  const done = result(true);
+  done.data.frozen_completed_divisions = frozen;
+  return done;
 }
 
 function setPracticeSettings(db, p, c) {

@@ -155,7 +155,9 @@ security-invoker view over `scheduler_runs`: a reader sees the runs that table l
 it (`Scoped settings: org members select`, `is_org_member`), signed-in users read the key registry
 `scoped_setting_keys`, and neither table has a write policy or a client write grant, so `admin_set_scoped_setting`
 (admin of the scope row's own organization, audited) and the rollover are its only writers. Its resolver,
-`scoped_setting_value`, is closed to every client role; `standings_counts_outside` calls it for a member only. No coach requests anything: the coach
+`scoped_setting_value`, is closed to every client role; `standings_counts_outside` calls it for a member only. A
+trigger (`scoped_settings_enforce_tenancy`) refuses a row whose organization is not its program's or division's,
+whoever writes it. No coach requests anything: the coach
 preference request RPC and the lighting request RPC are dropped; admins record preferences as rules per team
 (`admin_add_practice_preference`, `admin_edit_practice_preference`, `admin_remove_practice_preference`,
 `admin_decide_must_preference`, `admin_accept_all_musts`, and the preference import's

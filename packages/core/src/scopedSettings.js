@@ -68,6 +68,36 @@ export function isValidScopedValue(key, value) {
 }
 
 /**
+ * Code point order, the order of PostgreSQL's `COLLATE "C"` over UTF-8 text. JavaScript's default sort compares UTF-16
+ * code units, which puts an astral character (a surrogate pair, D800-DFFF) before a BMP one above U+DFFF (U+E000 to
+ * U+FFFF): the two orders differ there, so this compares by code point.
+ * @param {string} a
+ * @param {string} b
+ */
+export function compareCodePoints(a, b) {
+  const x = Array.from(a);
+  const y = Array.from(b);
+  for (let i = 0; i < Math.min(x.length, y.length); i += 1) {
+    const d =
+      /** @type {number} */ (x[i].codePointAt(0)) - /** @type {number} */ (y[i].codePointAt(0));
+    if (d !== 0) return d;
+  }
+  return x.length - y.length;
+}
+
+/**
+ * A value as `admin_set_scoped_setting` stores it: a boolean as it is; a text set in code point order (its one
+ * spelling, so "unchanged" is an equality on both sides).
+ * @param {string} key
+ * @param {unknown} value
+ */
+export function canonicalScopedValue(key, value) {
+  const entry = scopedSettingKey(key);
+  if (entry.type === 'boolean' || !Array.isArray(value)) return value;
+  return [...value].sort(compareCodePoints);
+}
+
+/**
  * A division's value of a scoped setting from the three levels' own values (`undefined` or `null` = no row).
  *
  * @param {{ organization?: unknown, program?: unknown, division?: unknown }} levels

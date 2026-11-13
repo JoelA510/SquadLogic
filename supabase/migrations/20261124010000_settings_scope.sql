@@ -22,8 +22,13 @@
 --     packages/core/src/scopedSettings.js, held to it by tests/scopedSettingsParity.test.js over the case table of
 --     supabase/tests/scoped_settings.sql.
 --   * `admin_set_scoped_setting(key, scope, scope_id, value)`: the one setter, for all three levels. A SQL NULL value
---     unsets (inherit). Admin of the scope row's own organization; the organization's season lock; the value checked
---     against the registry; a program or division of a completed season refused; the default program refused. One
+--     unsets (inherit). An ORGANIZATION change does not rewrite a completed season's history: each division of a
+--     completed season that inherits the organization's value today is first held at that value by a division row
+--     marked `frozen_from_organization` (counted in the audit row as `frozen_completed_divisions`); the rollover does
+--     not copy such a row. A row's organization must be its program's or division's (a trigger, 23514). Admin of the
+--     scope row's own organization; the organization's season lock; the value checked against the registry (a text set
+--     stored in code point order, COLLATE "C"); a program or division of a completed season refused; the default
+--     program refused. One
 --     `settings.updated` audit row per change (resource_type `scoped_setting`, metadata {setting, field, key, scope,
 --     scope_id, scope_name, season_settings_id, old, new}, null meaning "inherited"), so get_settings_audit_log shows it
 --     unchanged.
@@ -126,10 +131,16 @@ CREATE TABLE public.scoped_settings (
     value           jsonb NOT NULL,
     updated_at      timestamptz NOT NULL DEFAULT now(),
     updated_by      uuid,
+    -- True on a row the setter wrote to hold a COMPLETED season's division at the value it inherited when the
+    -- organization's value changed (its history is not rewritten). The rollover does not copy such a row: the next
+    -- season inherits.
+    frozen_from_organization boolean NOT NULL DEFAULT false,
     -- One level per row: the organization's (neither), a program's or a division's.
     CONSTRAINT scoped_settings_one_level CHECK (num_nonnulls(program_id, division_id) <= 1),
     -- "Inherit" is the absence of a row, never a JSON null.
-    CONSTRAINT scoped_settings_value_not_null CHECK (jsonb_typeof(value) <> 'null')
+    CONSTRAINT scoped_settings_value_not_null CHECK (jsonb_typeof(value) <> 'null'),
+    -- Only a division's row is ever frozen.
+    CONSTRAINT scoped_settings_frozen_division CHECK (NOT frozen_from_organization OR division_id IS NOT NULL)
 );
 
 CREATE UNIQUE INDEX scoped_settings_organization_key
@@ -139,6 +150,35 @@ CREATE UNIQUE INDEX scoped_settings_program_key
 CREATE UNIQUE INDEX scoped_settings_division_key
     ON public.scoped_settings (division_id, key) WHERE division_id IS NOT NULL;
 CREATE INDEX idx_scoped_settings_key ON public.scoped_settings (key);
+
+-- A row belongs to the organization of the program or division it names: refused (23514) whoever writes it, the
+-- definer writers included (the schedule_tbd_enforce_tenancy pattern, 20261108020000).
+CREATE FUNCTION public.scoped_settings_enforce_tenancy()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    IF NEW.program_id IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM public.programs p WHERE p.id = NEW.program_id AND p.organization_id = NEW.organization_id) THEN
+        RAISE EXCEPTION 'scoped_settings: program % is not a program of organization %', NEW.program_id, NEW.organization_id
+            USING ERRCODE = '23514';
+    END IF;
+    IF NEW.division_id IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM public.divisions d WHERE d.id = NEW.division_id AND d.organization_id = NEW.organization_id) THEN
+        RAISE EXCEPTION 'scoped_settings: division % is not a division of organization %', NEW.division_id, NEW.organization_id
+            USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.scoped_settings_enforce_tenancy() FROM PUBLIC, anon, authenticated;
+
+CREATE TRIGGER scoped_settings_enforce_tenancy
+    BEFORE INSERT OR UPDATE ON public.scoped_settings
+    FOR EACH ROW EXECUTE FUNCTION public.scoped_settings_enforce_tenancy();
 
 CREATE TRIGGER scoped_settings_set_timestamp
     BEFORE UPDATE ON public.scoped_settings
@@ -251,6 +291,8 @@ DECLARE
     v_value jsonb;
     v_row_id uuid;
     v_old jsonb;
+    v_old_effective jsonb;
+    v_frozen integer := 0;
 BEGIN
     IF auth.uid() IS NULL THEN
         RAISE EXCEPTION 'authenticated user is required' USING ERRCODE = '42501';
@@ -320,7 +362,7 @@ BEGIN
                 RAISE EXCEPTION 'the setting % takes a list of distinct values from %', p_key, v_key.allowed_values::text
                     USING ERRCODE = '22023', DETAIL = 'setting_value_invalid';
             END IF;
-            v_value := COALESCE((SELECT jsonb_agg(e ORDER BY e) FROM jsonb_array_elements_text(p_value) e), '[]'::jsonb);
+            v_value := COALESCE((SELECT jsonb_agg(e ORDER BY e COLLATE "C") FROM jsonb_array_elements_text(p_value) e), '[]'::jsonb);
         END IF;
     END IF;
 
@@ -336,19 +378,46 @@ BEGIN
         END IF;
     END IF;
 
-    SELECT s.id, s.value INTO v_row_id, v_old
-      FROM public.scoped_settings s
-     WHERE s.key = p_key
-       AND CASE p_scope
-               WHEN 'organization' THEN s.organization_id = v_org AND s.program_id IS NULL AND s.division_id IS NULL
-               WHEN 'program' THEN s.program_id = p_scope_id
-               ELSE s.division_id = p_scope_id
-           END
-       FOR UPDATE;
+    -- One plain lookup per level, each the shape of its partial unique index.
+    IF p_scope = 'organization' THEN
+        SELECT s.id, s.value INTO v_row_id, v_old
+          FROM public.scoped_settings s
+         WHERE s.organization_id = v_org AND s.key = p_key AND s.program_id IS NULL AND s.division_id IS NULL
+           FOR UPDATE;
+    ELSIF p_scope = 'program' THEN
+        SELECT s.id, s.value INTO v_row_id, v_old
+          FROM public.scoped_settings s
+         WHERE s.program_id = p_scope_id AND s.key = p_key
+           FOR UPDATE;
+    ELSE
+        SELECT s.id, s.value INTO v_row_id, v_old
+          FROM public.scoped_settings s
+         WHERE s.division_id = p_scope_id AND s.key = p_key
+           FOR UPDATE;
+    END IF;
 
     IF v_old IS NOT DISTINCT FROM v_value THEN
         RETURN jsonb_build_object('changed', false, 'scope', p_scope, 'scope_id', p_scope_id, 'key', p_key,
                                   'previous', v_old, 'current', v_value);
+    END IF;
+
+    -- An organization's change does not rewrite a COMPLETED season's history: each of its divisions that inherits the
+    -- organization's value today (no row of its own, and no program value: in no program or the default one) is held at
+    -- the value it had, by a division row marked frozen_from_organization, before the change is made.
+    IF p_scope = 'organization' THEN
+        v_old_effective := COALESCE(v_old, v_key.default_value);
+        IF v_old_effective IS DISTINCT FROM COALESCE(v_value, v_key.default_value) THEN
+            INSERT INTO public.scoped_settings (organization_id, division_id, key, value, updated_by, frozen_from_organization)
+            SELECT v_org, d.id, p_key, v_old_effective, auth.uid(), true
+              FROM public.divisions d
+              JOIN public.season_settings ss ON ss.id = d.season_settings_id AND ss.status = 'completed'
+              LEFT JOIN public.programs p ON p.id = d.program_id
+             WHERE d.organization_id = v_org
+               AND NOT EXISTS (SELECT 1 FROM public.scoped_settings s WHERE s.division_id = d.id AND s.key = p_key)
+               AND (p.id IS NULL OR p.is_default
+                    OR NOT EXISTS (SELECT 1 FROM public.scoped_settings s WHERE s.program_id = p.id AND s.key = p_key));
+            GET DIAGNOSTICS v_frozen = ROW_COUNT;
+        END IF;
     END IF;
 
     IF v_value IS NULL THEN
@@ -377,12 +446,13 @@ BEGIN
             'scope_name', v_name,
             'season_settings_id', v_season,
             'old', v_old,
-            'new', v_value
+            'new', v_value,
+            'frozen_completed_divisions', v_frozen
         )
     );
 
     RETURN jsonb_build_object('changed', true, 'scope', p_scope, 'scope_id', p_scope_id, 'key', p_key,
-                              'previous', v_old, 'current', v_value);
+                              'previous', v_old, 'current', v_value, 'frozen_completed_divisions', v_frozen);
 END;
 $$;
 
@@ -641,7 +711,8 @@ BEGIN
     -- 20261124010000: each program's and each division's own scoped settings go with their copies (the organization's
     -- are not per season). A program's copy is found by copied_from_program_id; a division's by its name, which is
     -- unique in a season and copied exactly above. The default program holds none (admin_set_scoped_setting refuses
-    -- it), so its copy gets none.
+    -- it), so its copy gets none. A division row frozen_from_organization (a completed season held at what it inherited)
+    -- is not copied: the next season inherits.
     INSERT INTO public.scoped_settings (organization_id, program_id, key, value, updated_by)
     SELECT s.organization_id, np.id, s.key, s.value, auth.uid()
       FROM public.scoped_settings s
@@ -652,14 +723,16 @@ BEGIN
     SELECT s.organization_id, nd.id, s.key, s.value, auth.uid()
       FROM public.scoped_settings s
       JOIN public.divisions sd ON sd.id = s.division_id AND sd.season_settings_id = p_source_season_id
-      JOIN public.divisions nd ON nd.season_settings_id = v_new_id AND nd.name = sd.name;
+      JOIN public.divisions nd ON nd.season_settings_id = v_new_id AND nd.name = sd.name
+     WHERE NOT s.frozen_from_organization;
     GET DIAGNOSTICS v_settings_divisions = ROW_COUNT;
     v_settings := v_settings + v_settings_divisions;
     -- A value the joins dropped would be silently lost: the copy must be whole.
     IF v_settings <> (SELECT count(*) FROM public.scoped_settings s
                         LEFT JOIN public.programs sp ON sp.id = s.program_id
                         LEFT JOIN public.divisions sd ON sd.id = s.division_id
-                       WHERE sp.season_settings_id = p_source_season_id OR sd.season_settings_id = p_source_season_id) THEN
+                       WHERE (sp.season_settings_id = p_source_season_id OR sd.season_settings_id = p_source_season_id)
+                         AND NOT s.frozen_from_organization) THEN
         RAISE EXCEPTION 'season % was not copied whole: % of its scoped settings found their copy', p_source_season_id, v_settings
             USING ERRCODE = 'XX000';
     END IF;
@@ -732,6 +805,17 @@ BEGIN
        OR NOT has_function_privilege('authenticated', 'public.admin_set_scoped_setting(text,text,uuid,jsonb)', 'EXECUTE')
        OR NOT has_function_privilege('authenticated', 'public.admin_set_division_practice_settings(uuid,integer,integer)', 'EXECUTE') THEN
         RAISE EXCEPTION 'the setters must be executable by authenticated and not by anon';
+    END IF;
+
+    -- Volatility, as 20261122010000 asserted for the seam: the resolver and the seam are STABLE (the standings view calls
+    -- them per row); the two setters and the tenancy trigger write, so they are VOLATILE.
+    IF (SELECT string_agg(p.oid::regprocedure::text || '=' || p.provolatile::text, ',' ORDER BY p.oid::regprocedure::text) FROM pg_proc p
+         WHERE p.oid IN (to_regprocedure('public.standings_counts_outside(uuid)'), to_regprocedure('public.scoped_setting_value(uuid,text)'),
+                         to_regprocedure('public.admin_set_scoped_setting(text,text,uuid,jsonb)'),
+                         to_regprocedure('public.admin_set_division_practice_settings(uuid,integer,integer)'),
+                         to_regprocedure('public.scoped_settings_enforce_tenancy()')))
+       IS DISTINCT FROM 'admin_set_division_practice_settings(uuid,integer,integer)=v,admin_set_scoped_setting(text,text,uuid,jsonb)=v,scoped_setting_value(uuid,text)=s,scoped_settings_enforce_tenancy()=v,standings_counts_outside(uuid)=s' THEN
+        RAISE EXCEPTION 'a function of this migration does not have the volatility it needs';
     END IF;
 
     -- The seam: the member-checked definer, reading the resolver and no longer org_flag.

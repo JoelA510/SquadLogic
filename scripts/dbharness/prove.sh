@@ -5863,7 +5863,7 @@ plant "M80 the rollback reads no reference" "$M80" \
   "                   AND true" \
   "smoke 20261123010000"
 
-# 20261124010000: the settings cascade. The plan's three plants (F11-4a), each executed against the smoke and against the
+# 20261124010000: the settings cascade. The plan's three plants (F11-4a) and two of the review round, each executed against the smoke and against the
 # pgTAP file on the local stand-in (which is NOT pgTAP):
 #   - the resolver treats an explicit false as unset, so an inherited true wins (the smoke's precedence check);
 #   - the rollover's division block is removed, so a division's value does not reach its copy (the smoke's rollover,
@@ -5876,8 +5876,25 @@ plant "M81 the resolver treats an explicit false as unset" "$M81" \
   "smoke 20261124010000"
 
 plant "M81 the rollover does not copy division values" "$M81" \
-  "      JOIN public.divisions nd ON nd.season_settings_id = v_new_id AND nd.name = sd.name;" \
-  "      JOIN public.divisions nd ON nd.season_settings_id = v_new_id AND nd.name = sd.name AND false;" \
+  "      JOIN public.divisions nd ON nd.season_settings_id = v_new_id AND nd.name = sd.name
+     WHERE NOT s.frozen_from_organization;" \
+  "      JOIN public.divisions nd ON nd.season_settings_id = v_new_id AND nd.name = sd.name AND false
+     WHERE NOT s.frozen_from_organization;" \
+  "smoke 20261124010000"
+
+# The review round of #733 (two more): an organization change that does not hold a completed season's inheriting
+# divisions at their value (the smoke's freeze check: the completed division follows the organization), and the tenancy
+# trigger left out (the smoke's insert naming another organization's division goes through).
+plant "M81 an organization change rewrites a completed season (no freeze)" "$M81" \
+  "        IF v_old_effective IS DISTINCT FROM COALESCE(v_value, v_key.default_value) THEN" \
+  "        IF false THEN" \
+  "smoke 20261124010000"
+
+plant "M81 no tenancy trigger on scoped_settings" "$M81" \
+  "CREATE TRIGGER scoped_settings_enforce_tenancy
+    BEFORE INSERT OR UPDATE ON public.scoped_settings
+    FOR EACH ROW EXECUTE FUNCTION public.scoped_settings_enforce_tenancy();" \
+  "SELECT 1;" \
   "smoke 20261124010000"
 
 plant "M81 the standings seam still reads org_flag" "$M81" \

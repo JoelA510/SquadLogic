@@ -456,14 +456,52 @@ are done. What differs from the text above, each a decision of the build:
   any value an admin set on it since (S8's rule for programs, applied to divisions). Declared, not guarded: a guard
   waits for the next replacement of `rollback_game_import_job`. The practice import's rollback reads every foreign key
   from the catalogue and keeps such a division.
-- **The Standings page's sentence** no longer says "in Settings, under Features" (the switch is gone); it says the
-  setting is chosen for the league, a program or a division. F11-4b names the panel.
+- **The Standings page's sentence** no longer says "in Settings, under Features" (the switch is gone). After the review
+  round it says "Whether they count is a league setting; the settings screen for it is coming." **Accepted gap until
+  F11-4b (next):** between this deploy and F11-4b's no screen changes the value; the sentence points to no control that
+  does not exist yet.
 - **The harness** gains a stage that plants four organizations (the flag true, false, absent and a string) before the
   migration and requires each division to resolve as `org_flag` read it; and a revert check (an organization row
   written back, an unset key removed, the division value counted as dropped). Two plants re-aimed at this migration:
   `M59 the rollover takes no season lock` and `M71 the standings helper runs as its caller` (lesson 70).
 - **Smokes:** `docs/sql/20261122010000_smoke.sql` sets the organization's standings value through the setter (its
   `feature_flags` write is no longer read).
+
+**Review round (2026-11-13, the one `/code-review high` of #733, ten findings; Codex had none).**
+
+1. **Fixed: an organization change no longer rewrites a completed season's standings.** Before the change,
+   `admin_set_scoped_setting` holds each division of each COMPLETED season of the organization that inherits the
+   organization's value today (no row of its own; in no program, the default program, or a program with no value) at
+   the value it had: a division row marked `frozen_from_organization` (a new column; only a division row may carry it).
+   The count is in the audit row and the result (`frozen_completed_divisions`). The rollover does not copy a frozen
+   row (the next season inherits) and its count check leaves them out. No completed-season guard elsewhere is touched.
+   Mirrored in the mock. The revert drops the frozen rows with every other division value (said in its header).
+2. **Fixed: tenancy.** `scoped_settings_enforce_tenancy`, a `BEFORE INSERT OR UPDATE` trigger after
+   `schedule_tbd_enforce_tenancy`'s pattern: a row's organization is its program's or division's (23514), whoever
+   writes it, the definer writers included.
+3. **Accepted: the screen waits for F11-4b** (above), with the sentence made honest and pinned by a test.
+4. **Fixed:** the mock's rollover refuses a value it cannot copy with the SQL's code (XX000) and words, and puts the
+   season, programs and divisions back.
+5. **Fixed, by contract:** what a client sends for "inherit" is `p_value: null` (or nothing). PostgREST reads RPC
+   arguments with `json_to_record`, which turns a JSON null into an SQL NULL (executed on the stand-in:
+   `json_to_record('{"p_value": null}')` gives `p_value IS NULL`), so the SQL sees inherit and the mock treats null and
+   undefined as inherit too. The SQL's refusal of a JSON `'null'` value is reachable from SQL only and is pgTAP's case;
+   a mock test pins both sides.
+6. **Fixed:** a text set has one spelling on both sides: `ORDER BY e COLLATE "C"` in SQL, code point order in core
+   (`compareCodePoints`; JavaScript's default sort compares UTF-16 units and puts an astral letter before U+FF5A). The
+   pgTAP file stores mixed case, an accented, a fullwidth and an astral letter, and core is held to its text.
+7. **Fixed:** the registry reader applies every statement on `scoped_setting_keys` in migration order (INSERT in any
+   column order, UPDATE, DELETE) and fails on any other statement naming the table, or a write to it inside a function
+   or DO body. Plants: a reordered-column INSERT in a scratch migration is read; an unreadable statement fails.
+8. **Fixed:** the setter's row lookup is three plain branches. On the stand-in, the generic plan PL/pgSQL caches for
+   the old `CASE` form is a sequential scan; each branch's is an index scan on its partial unique index.
+9. **Deferred (follow-up):** `view_league_standings` calls the seam, and so the resolver, once per scored side.
+   Measured on the stand-in (one division, one own team, 200 results against one outside club, the organization's
+   value true, read as a member): 9.3 / 10.0 / 11.3 / 14.6 / 14.4 ms over five runs (median 11.3 ms), against
+   12.9 / 12.7 / 12.5 / 12.9 / 14.8 ms (median 12.9 ms) for the base's `org_flag` over the same seed. Not a cost today;
+   the follow-up resolves once per division (a per-division CTE in the view, or a set-returning resolver).
+10. **Fixed:** the end-state check asserts the volatility of every function this migration adds or replaces: the
+    resolver and the seam STABLE, the two setters and the tenancy trigger VOLATILE.
 
 ### F11-4b: the panel, the audit wording, the import's practice RPC (no migration; Review (a))
 

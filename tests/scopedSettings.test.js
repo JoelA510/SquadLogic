@@ -4,8 +4,12 @@
  * cannot see: which level a value came from, how rows are read into levels, the value checks the setter makes, and an
  * unknown key.
  */
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  canonicalScopedValue,
+  compareCodePoints,
   isValidScopedValue,
   resolveScopedSetting,
   scopedLevelsFor,
@@ -81,5 +85,29 @@ describe('isValidScopedValue :: what the setter accepts', () => {
     expect(isValidScopedValue(KEY, false)).toBe(true);
     expect(isValidScopedValue(KEY, 'true')).toBe(false);
     expect(isValidScopedValue(KEY, null)).toBe(false);
+  });
+});
+
+describe('canonicalScopedValue :: a text set has one spelling, the database’s (COLLATE "C")', () => {
+  // The registry has no text-set key yet; supabase/tests/scoped_settings.sql (6b) makes one for its test only, with the
+  // same allowed values, and stores the same input. Its expected text is required here, so the two sides cannot drift.
+  const PGTAP = readFileSync(
+    path.join(process.cwd(), 'supabase/tests/scoped_settings.sql'),
+    'utf8'
+  );
+  const input = ['𝒜', 'ｚ', 'é', 'a', 'B'];
+
+  it('sorts by code point, as PostgreSQL’s C collation orders UTF-8 text', () => {
+    expect(['𝒜', 'ｚ', 'é', 'a', 'B'].sort(compareCodePoints)).toEqual(['B', 'a', 'é', 'ｚ', '𝒜']);
+    const stored = JSON.stringify(['B', 'a', 'é', 'ｚ', '𝒜']).replace(/","/g, '", "');
+    expect(PGTAP).toContain(`new=${stored}', 'a text set is stored in code point order'`);
+  });
+
+  it('control: the default sort orders the astral letter before the fullwidth one, so it would differ', () => {
+    expect([...input].sort()).not.toEqual([...input].sort(compareCodePoints));
+  });
+
+  it('a boolean is returned as it is', () => {
+    expect(canonicalScopedValue(KEY, true)).toBe(true);
   });
 });

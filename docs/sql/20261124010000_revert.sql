@@ -12,7 +12,8 @@
 -- unset it, or it never had one), so org_flag answers what the resolver answered at the organization level.
 --
 -- **What it loses, said by count:** every program's and every division's own value (the old code has no place for
--- them; they stay readable in the audit trail, one settings.updated row per change). A NOTICE names how many. The
+-- them; they stay readable in the audit trail, one settings.updated row per change), the rows that held a completed
+-- season at its value among them, so after the revert a completed season follows the organization's flag again. A NOTICE names how many. The
 -- practice import, if it already calls `admin_set_division_practice_settings`, fails until the client before F11-4b is
 -- deployed again.
 --
@@ -216,6 +217,7 @@ DROP FUNCTION public.admin_set_scoped_setting(text, text, uuid, jsonb);
 DROP FUNCTION public.admin_set_division_practice_settings(uuid, integer, integer);
 DROP FUNCTION public.scoped_setting_value(uuid, text);
 DROP TABLE public.scoped_settings;
+DROP FUNCTION public.scoped_settings_enforce_tenancy();
 DROP TABLE public.scoped_setting_keys;
 
 -- The restored bodies are the ones the forward migration replaced, or nothing commits.
@@ -239,7 +241,8 @@ BEGIN
     IF to_regclass('public.scoped_settings') IS NOT NULL OR to_regclass('public.scoped_setting_keys') IS NOT NULL
        OR to_regprocedure('public.scoped_setting_value(uuid,text)') IS NOT NULL
        OR to_regprocedure('public.admin_set_scoped_setting(text,text,uuid,jsonb)') IS NOT NULL
-       OR to_regprocedure('public.admin_set_division_practice_settings(uuid,integer,integer)') IS NOT NULL THEN
+       OR to_regprocedure('public.admin_set_division_practice_settings(uuid,integer,integer)') IS NOT NULL
+       OR to_regprocedure('public.scoped_settings_enforce_tenancy()') IS NOT NULL THEN
         RAISE EXCEPTION 'revert: an object of 20261124010000 is still there';
     END IF;
     IF NOT (SELECT p.prosecdef FROM pg_proc p WHERE p.oid = to_regprocedure('public.standings_counts_outside(uuid)'))

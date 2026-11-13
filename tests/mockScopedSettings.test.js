@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  copyScopedSettingsForRollover,
   handleScopedSettingRpc,
   scopedValueForDivision,
 } from '../frontend/src/lib/mockScopedSettings.js';
@@ -309,6 +310,144 @@ describe('mock :: a deleted program takes its values with it (S8)', () => {
     expect(db.scoped_settings.filter((s) => s.program_id === P1)).toHaveLength(0);
     expect(`${scopedValueForDivision(db, D3, KEY)} ${scopedValueForDivision(db, D1, KEY)}`).toBe(
       inPgtap('true false')
+    );
+  });
+});
+
+describe('mock :: an organization change holds a completed season’s history (the freeze)', () => {
+  it('holds the inheriting completed divisions at their value, counts them, and leaves one with its own value', () => {
+    const db = world();
+    // The completed season: Old U9 (in Old Juniors, which has no value), Old U8 and Old U10 (no program), Old U10 with
+    // its own true; the organization is false.
+    db.divisions.push(
+      {
+        id: 'dc3',
+        organization_id: ORG,
+        season_settings_id: OLD,
+        name: 'Old U8',
+        program_id: null,
+      },
+      {
+        id: 'dc4',
+        organization_id: ORG,
+        season_settings_id: OLD,
+        name: 'Old U10',
+        program_id: null,
+      }
+    );
+    normalizePrograms(db);
+    db.scoped_settings.push({
+      id: 'own',
+      organization_id: ORG,
+      program_id: null,
+      division_id: 'dc4',
+      key: KEY,
+      value: true,
+    });
+    expect(set(db, ALICE, 'organization', ORG, false)).toBe('changed=true old=null new=false');
+    expect(db.scoped_settings.filter((r) => r.frozen_from_organization)).toHaveLength(0);
+    const r = handleScopedSettingRpc(
+      db,
+      'admin_set_scoped_setting',
+      { p_key: KEY, p_scope: 'organization', p_scope_id: ORG, p_value: true },
+      ctxFor(db, ALICE)
+    );
+    expect(String(r.data.frozen_completed_divisions)).toBe(inPgtap("'2'").slice(1, -1));
+    expect(db.audit_log.at(-1).metadata.frozen_completed_divisions).toBe(2);
+    const completed = db.divisions
+      .filter((d) => d.season_settings_id === OLD)
+      .map((d) => `${d.name}=${scopedValueForDivision(db, d.id, KEY)}`)
+      .sort()
+      .join(',');
+    expect(completed).toBe(inPgtap('Old U10=true,Old U8=false,Old U9=false'));
+    expect(scopedValueForDivision(db, U10, KEY)).toBe(true);
+    expect(
+      db.scoped_settings.find((x) => x.division_id === 'dc4').frozen_from_organization
+    ).toBeUndefined();
+  });
+
+  it('a season made from the completed one copies the own value and not the frozen ones', () => {
+    const db = world();
+    db.divisions.push({
+      id: 'dc4',
+      organization_id: ORG,
+      season_settings_id: OLD,
+      name: 'Old U10',
+      program_id: null,
+    });
+    normalizePrograms(db);
+    db.scoped_settings.push({
+      id: 'own',
+      organization_id: ORG,
+      program_id: null,
+      division_id: 'dc4',
+      key: KEY,
+      value: true,
+    });
+    set(db, ALICE, 'organization', ORG, true);
+    const r = handleSeasonRpc(
+      db,
+      'admin_create_season_from',
+      { p_source_season_id: OLD, p_name: 'Org A Scope Old Next', p_season_year: 2025 },
+      ctxFor(db, ALICE)
+    );
+    expect(String(r.data.scoped_settings_copied)).toBe(inPgtap("'1'").slice(1, -1));
+  });
+});
+
+describe('mock :: the rollover refuses a value it cannot copy, as the SQL’s count check does', () => {
+  it('returns XX000 with the SQL’s words and writes nothing', () => {
+    const db = world();
+    set(db, ALICE, 'division', D1, true);
+    const before = JSON.stringify(db.scoped_settings);
+    // A target season with no copies: the row of the source's division finds none.
+    const out = copyScopedSettingsForRollover(db, SEASON, 'no-such-season', { newId: () => 'x' });
+    expect(out.error).toEqual({
+      code: 'XX000',
+      message: `season ${SEASON} was not copied whole: 0 of its scoped settings found their copy`,
+    });
+    expect(JSON.stringify(db.scoped_settings)).toBe(before);
+    const migration = readFileSync(
+      path.join(process.cwd(), 'supabase/migrations/20261124010000_settings_scope.sql'),
+      'utf8'
+    );
+    expect(migration).toContain(
+      "RAISE EXCEPTION 'season % was not copied whole: % of its scoped settings found their copy'"
+    );
+  });
+
+  it('through admin_create_season_from, the refusal puts the season, programs and divisions back', () => {
+    const db = world();
+    set(db, ALICE, 'division', D1, true);
+    // A source division renamed under the copy would lose its value: simulated by a row naming a division of the source
+    // season that the copy cannot find (its name is changed after the divisions are copied, by a wrapped push).
+    const push = db.divisions.push.bind(db.divisions);
+    db.divisions.push = (...rows) =>
+      push(...rows.map((r) => (r.name === 'Scope U9' ? { ...r, name: 'Renamed' } : r)));
+    const counts = () =>
+      `${db.season_settings.length} ${db.programs.length} ${db.divisions.length}`;
+    const before = counts();
+    const r = handleSeasonRpc(
+      db,
+      'admin_create_season_from',
+      { p_source_season_id: SEASON, p_name: 'Org A Scope Next', p_season_year: 2027 },
+      ctxFor(db, ALICE)
+    );
+    expect(r.error?.code).toBe('XX000');
+    expect(counts()).toBe(before);
+  });
+});
+
+describe('mock :: what a client sends for "inherit"', () => {
+  it('p_value null or left out is inherit: PostgREST reads a JSON null argument as SQL NULL (json_to_record)', () => {
+    const db = world();
+    set(db, ALICE, 'division', D1, true);
+    expect(set(db, ALICE, 'division', D1, null)).toBe('changed=true old=true new=null');
+    set(db, ALICE, 'division', D1, true);
+    expect(set(db, ALICE, 'division', D1, undefined)).toBe('changed=true old=true new=null');
+    // The SQL's refusal of a JSON 'null' value (not reachable from a client) is pgTAP's: a JSON null is refused.
+    expect(PGTAP).toContain(
+      "'22023:setting_value_invalid', 'a JSON null (not \"inherit\"): refused'"
     );
   });
 });

@@ -4235,7 +4235,8 @@ PROBE
                WHEN (SELECT feature_flags ? 'standings_count_outside_results' FROM public.organizations WHERE id = '5d000000-0000-4000-8000-00000000000b') THEN 'unset-key-left'
                WHEN to_regclass('public.scoped_settings') IS NOT NULL OR to_regclass('public.scoped_setting_keys') IS NOT NULL THEN 'table-left'
                WHEN to_regprocedure('public.scoped_setting_value(uuid,text)') IS NOT NULL OR to_regprocedure('public.admin_set_scoped_setting(text,text,uuid,jsonb)') IS NOT NULL
-                    OR to_regprocedure('public.admin_set_division_practice_settings(uuid,integer,integer)') IS NOT NULL THEN 'function-left'
+                    OR to_regprocedure('public.admin_set_division_practice_settings(uuid,integer,integer)') IS NOT NULL
+                    OR to_regprocedure('public.scoped_settings_enforce_tenancy()') IS NOT NULL THEN 'function-left'
                WHEN (SELECT p.prosrc FROM pg_proc p WHERE p.oid = to_regprocedure('public.standings_counts_outside(uuid)')) !~ 'org_flag' THEN 'seam-not-restored'
                ELSE 'restored' END;" \
          >$SCRATCH/harness_ssrevert 2>&1 && grep -q 'SCOPEREVERT-VERDICT:restored' $SCRATCH/harness_ssrevert; then

@@ -1695,9 +1695,124 @@ Changes view enumerates from the changed rows only (a cancelled game vanishes).
 Depends on: PR 3 and PR 5. Review (c) as a judgment call: it writes through `persist_game_schedule` and
 `ensure_game_slot` over Published slots, which fits none of the four criteria strictly.
 
-- [ ] H1 (M) The dialog and the staged manual game (5.5). Test `tests/gameAddByHand.test.jsx`.
+- [x] H1 (M) The dialog and the staged manual game (5.5). Test `tests/gameAddByHand.test.jsx`.
 
 Plants: a game addable over a Published slot; a double booking blocked instead of flagged; a new game arriving Published.
+
+**As built (2026-11-13; the pull request has the detail).** No migration, and no change to `persist_game_schedule` or
+`ensure_game_slot`. The rules are in `frontend/src/utils/gameAddByHand.js`, the dialog is
+`frontend/src/components/scheduling/AddGameDialog.jsx`, and the page stages the game into the review and, on Apply,
+calls `ensure_game_slot` for a new time and then the existing save. Decisions taken here (within 5.5 and the owner's
+answers; none adds scope):
+
+- **One game per slot (review of #731, the coordinator's item 4; it replaces the first draft's "flagged" second game
+  in a slot).** A slot that already holds a game, Published or not, is not offered as an open slot, and a new time
+  that is such a slot is refused, naming the game in it and saying to move that game or choose another time. The grid
+  draws one game per cell, and a schedule that hides a game is the worst failure here, so this is a necessary blocker in
+  the owner's sense (2026-11-09, entry 2). A slot holding a Published or scored game says so in the hold's words
+  (`holdReason`). The test is asked when the game is staged, against a second game staged at the same new time, and again
+  on Apply against the slot id the database returns, since a new time can be an existing slot (`ensure_game_slot`
+  finds one by field, date and start time). Two games of one pair at one place (pair, slot, week, the save's unique key)
+  are refused before the save in the same words.
+- **A new time that is an existing slot must be that slot as it is** (review item 2, as the practice import's
+  slot-differs). If the field, date and start match a slot but the end differs, the new time is refused, naming the
+  slot's end and saying to pick it as an open slot or choose another time; the slot's end is never taken silently. On
+  Apply, a slot the database already had (`created: false`) is read back, because the RPC returns only `{id, created}`
+  (`20261121010000_game_import.sql:736`). If its week, start or end differs from what the page worked out, Apply is
+  refused in words and nothing is saved.
+- **A double booking is flagged, never refused**: a team (not an outside club, which stands for several real teams, as
+  the import rules) already playing, or the field already in use, at an overlapping time in another slot. Flagged in the
+  dialog, in the conflict banner while staged, and in the saved run's `results.warnings`. After Apply on a generated
+  review, the banner reads the generated snapshot with the flags added, which is what the run saved (review C3). A clash
+  between two added games is said once. **A slot reserved for another division** is flagged the same way, not refused
+  (owner: warnings, not blockers).
+- **A new time's week** is `scheduleWeekOf(date, season_start)`, the import's rule. A date before the season starts (the
+  date compared with the start itself first, as the import does: the week rounds back to the Monday, so an earlier day
+  of the start's own week would otherwise be week 1; Codex C6), or a season with no start date, is refused (no week can
+  be given). A daylight-saving gap is refused in the season
+  clock's words. The form waits, with its reason, for two different teams and an end after the start.
+- **Generating waits while an added game is staged** (review item 7): a new schedule replaces the review and would
+  drop the game, so Generate is off with a visible reason until the review is applied or discarded. "Add a game" is off
+  while the scheduler runs.
+- **The list keeps the applied review until the saved schedule is read again** (review item 6). The slots an Apply
+  made are read into the grid before the save, and the effect that copies the saved rows into the list does nothing
+  while those rows are known to be stale (`savedIsStale`), so a slot read landing late cannot put the list back to the
+  schedule before the save.
+- **A new time is on the grid before Apply** (Codex re-review of #731, C4). In Manual Override, the review's pending
+  new times are drawn as slots in the preview grid, under their own field and labelled "(new time, made on Apply)", so
+  the added game has a card that can be seen and moved. They are shown, never offered: "Move to" and a drop still take
+  only the season's real slots, and a pending time the game has left is no longer drawn.
+- **Every flag of an added game is judged where the game is now** (C5): its slot's reserved division, its field and
+  its times are read when the warnings are, never kept from when it was added, so a move into a reserved slot raises the
+  flag, a move out clears it, and Apply records what holds at Apply. A drop that would put two games in one slot is
+  refused for an added game, either way round (the move handler's existing rule).
+- **The saved summary is the summary of the games saved** (Codex C7): on Apply after a generation it is worked out
+  again from the final review with the page's own `summarizeGameResult` (the function the save falls back to), keeping
+  the generator's byes and unscheduled games, so a game added by hand is counted; the readiness panel reads the same.
+- **Every slot of an Apply the page has not read is read before the save** (Codex C8): the ones it made, and one the
+  database already had that another admin made after the page loaded, so the saved game's card has its row in Manual
+  Override without a reload.
+- **Apply is one sequence over resolved state** (Codex re-review of #731, C9 and C10; the root cause of four rounds of
+  Apply findings). (1) Resolve the new times through `ensure_game_slot` and the checks, on a local copy of the review;
+  (2) read every resolved slot the page does not hold, and on a failed read stop with the review untouched (its new
+  times still pending); (3) work out the final games, their flags and their summary from the resolved review and those
+  slot rows, through the same `warningsOfAddedGames` the screen uses; (4) save, the save told only of slots in that
+  catalog; (5) only after a successful save, commit the slots, the games and the cleared review to the page. A failure
+  at any step changes nothing on the page, and Apply again redoes every step (`ensure_game_slot` finds what it made).
+  Still read from before Apply, by design: the generator's byes, unscheduled games and own flags, the saved games for
+  the "left behind" note and the rollback, and the run's `slotCount` parameter (metadata; it does not count a slot the
+  Apply made).
+- **A later Apply keeps an earlier added game's open flag** (Codex C11). Once saved, a game added by hand is a saved game
+  with nothing to say it was added, so each Apply carries forward the saved run's own added-game warnings. Each warning
+  records the places it names (`details.places`, the save's unique key: pair, slot, week; jsonb in `results.warnings`, no
+  schema change), because a new game has no id until it is saved. Each place finds the saved game, its id finds it in
+  the final schedule, and the added game is judged again there against the games the warning named only. The warning is
+  kept only while one of the same kind, on the same team or field, still holds between the same games; a game it named
+  that is gone takes it with it. No other game is flagged (moves record no warnings).
+- **What a generated Apply saved is never appended to** (Codex C12). The generated result's warnings stay the
+  generator's own; the page keeps beside them what its last Apply saved, as two sets: the generator's warnings, saved
+  unchanged and only while the review applied is the generated one (a later Apply of a move saves none of them), and
+  the added games' flags, replaced on every Apply by the recalculated set (C11's carry-forward included). The banner and
+  the readiness panel show the two.
+- **Nothing is staged while the saved schedule is read** (C12 follow-up). After an Apply or a rollback, until the saved
+  schedule is read again, Apply, a move (a drop or "Move to"), "Add a game" and generating all wait, the reason said in
+  words; a change staged from the rows before the save would carry them into the next one, and the next save carries
+  its flags forward from the saved run. The schedule counts as read only once both reads of the re-read have settled:
+  it is two reads (the latest run, then the games of the run on screen), and the games of the OLD run (what the save
+  left in it) can answer first, which put the list briefly back to them, as `rekeyReview`'s marker already allows for.
+- **Every save works out the added games' flags, in one place, with every partner** (Codex C13, C14). There is no
+  durable mark that a saved game was added by hand: `game_assignments.assignment_source` is `auto` or `manual`, and a
+  move writes `manual` too, so deriving the flags from it would flag every moved game. So the carry-forward stays, but
+  the save itself (`persistReviewedAssignments`) works the flags out, from a context every caller must give (the slot
+  rows, the replaced run's flags and its games): Apply gives the run on screen, and a rollback gives the run it
+  restores, captured when the Apply it undoes was made, so a restored game keeps a flag that still holds. A clash names
+  every partner, one warning each (each team's every overlapping game, the field's every overlapping game), so
+  resolving one never clears another.
+- **No field-overlap flag over a game the generator dropped** (examined, not a defect). A probe added a game on South
+  Field over the hour of a saved, unpublished game and got only the team flag. The regenerated review no longer held
+  that game (the generator re-solves unpublished games and placed none in that slot; it stays in the old run), so the
+  field was free in the schedule being saved, and both flags read the games' own times, which the review carries (a
+  generated game takes its slot's times in `buildDisplayAssignment`).
+- **Divisions offered** are those that play games; their teams are the run's teams and the season's outside clubs.
+- **A failed save after a slot was made** keeps the slot and names it in the error. When the outcome is unknown (a
+  timeout, an unreadable answer) the error says instead that whether the game was saved into it is being checked. The
+  review is left as staged, and a second Apply finds the slot rather than making it again.
+- **Plant evidence** (executed, 2026-11-13, re-run in full after the review round): thirty-eight plants after the
+  seventh Codex round, each but one turning its cases red against the 51 cases of `tests/gameAddByHand.test.jsx`, the
+  restored code green. C13 and C14's four: the first team partner only (1 red), the first field partner only (1 red), a
+  rollback with no carried flags (1 red), the save leaving the added games' flags out (10 red). The C12 follow-up's two:
+  moves left enabled during the read (1 red), the old run's rows taken as the saved schedule (1 red). C12's five: the
+  generator's warnings saved on every Apply (2 red), that with the manual flags appended to the generated result again,
+  the old behaviour (2 red), the shown set appended to (1 red), Apply not off during the read (1 red); and the manual
+  flags appended to the result alone stays green, because nothing reads the result's warnings after an Apply now
+  (said, not hidden). Item 5's plant was re-aimed at the new code (the applied flags left out of what is shown, 3 red),
+  and round 4's R1 (the flags judged on the slots from before resolution, 1 red). C11's four: no carry-forward on the
+  page (2 red), the carried flags dropped in the pure rule (6 red), a carried flag kept as saved, not judged again (6
+  red), one judged against the whole schedule rather than the games it named (1 red). The plan's three: a Published
+  slot addable (4 red), a double booking blocked (11 red), a new game arriving Published (6 red). The E2E
+  refusal scenario fails under the first. "Arriving Published" is caught on the staged game; once saved, the database
+  cannot be told to publish it through this save, so the post-Apply assertions hold under that plant too (said, not
+  hidden).
 
 ### PR 9: Practice import I, the fixture and the pure core (L; no migration; Review: (c); added 2026-11-06)
 
@@ -2796,8 +2911,8 @@ section 7). **Updated 2026-11-13:** F11-2 is merged (#725, `dcb54ff`) and its mi
 on: **once F11-3's client is deployed, `score_entry` may be turned on**), and so are PR 6b's refactor G5a (#728,
 `70f443a`) and its G5 (#729, `be268be`; the import recorded as the publication baseline; no migration; see "As built"
 under PR 6b in section 7). **Updated 2026-11-13 (PR 11):** PR 10 is merged (#730, `f5110be`) and its migration deployed (the owner, 08:20 UTC).
-**In review:** PR 11 (the Edge validation, the Practices tab and its E2E; no migration; see "As built" under PR 11 in
-section 7). **Not merged:** PR 8, 11 and
+**In review:** PR 8 (2026-11-13; see "As built" under PR 8 in section 7) and PR 11 (the Edge validation, the
+Practices tab and its E2E; no migration; see "As built" under PR 11 in section 7). **Not merged:** PR 8, 11 and
 12, F11-4 and F11-5. PR 14 stays held.
 
 - **Order and the dependency rule.** Section 7 ("Dependencies and order") has the dependency table and the one priority

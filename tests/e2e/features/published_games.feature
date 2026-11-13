@@ -106,3 +106,52 @@ Feature: Published games on the Game Scheduling page (schedule expansion, PR 3)
     When I switch to the dark theme on this page
     Then the scan sees "Published: allow changes to move it." on the page
     And axe finds no serious or critical violations on "/schedule/game" in the "dark" theme
+
+  # PR 8: one game added by hand. A dialog takes a division, two teams, and an open slot or a new time; it stages a game
+  # placed by hand into the review, and Apply saves it like a move (a new time's slot is found or made first, by the
+  # mock's own ensure_game_slot). A double booking is flagged, not blocked; a Published game's slot is refused; the new
+  # game starts not Published. What the page sends, and the plants, are held by tests/gameAddByHand.test.jsx.
+
+  Scenario: A game added by hand in an open slot is staged, applied, and saved not Published
+    When I open the Game Scheduling page and wait for its saved games
+    And I add the game "Lions" vs "Bulls" in "U10 Boys" in the open slot on "North Field"
+    Then the Games page says "Lions vs Bulls added to the review as a game placed by hand. It starts not Published."
+    When I apply the staged game schedule
+    Then the Published line reads "0 of 6 saved games Published, 0 with changes allowed"
+    And the game "Lions" vs "Bulls" is shown as "Not published" in the list
+
+  Scenario: A game added by hand at a new time that double-books is flagged, not blocked, and its slot is made on Apply
+    When I open the Game Scheduling page and wait for its saved games
+    And I fill in the game "Lions" vs "Bulls" in "U10 Boys" at "South Field" on "2026-10-03" from "09:30" to "10:30"
+    Then the Add a game dialog flags "Lions already plays Lions vs Wolves at that time."
+    And the Add a game dialog flags "South Field already has Comets vs Bulls at that time."
+    When I add the game to the review
+    Then the conflict banner lists a double booking
+    When I apply the staged game schedule
+    Then the Published line reads "0 of 6 saved games Published, 0 with changes allowed"
+    And the game "Lions" vs "Bulls" is shown as "Not published" in the list
+
+  Scenario: A game cannot be added in the slot of a Published game
+    Given the "U10 Boys" division is Published
+    When I fill in the game "Hawks" vs "Owls" in "U12 Girls" at "North Field" on "2026-10-03" from "09:00" to "10:00"
+    Then the Add a game dialog refuses with "Lions vs Wolves is Published in that slot"
+    And the game cannot be added to the review
+
+  Scenario: The Add a game dialog passes axe in both themes
+    When I open "/schedule/game" and see its "Game Scheduling" heading
+    And I fill in the game "Lions" vs "Bulls" in "U10 Boys" at "South Field" on "2026-10-03" from "09:30" to "10:30"
+    Then axe finds no serious or critical violations on "/schedule/game" in the "light" theme
+    When I switch to the dark theme behind the open dialog
+    Then the scan sees "Add a game to the review" on the page
+    And axe finds no serious or critical violations on "/schedule/game" in the "dark" theme
+
+  Scenario: In Manual Override, a game added at a new time is on the grid in its pending slot, and the grid passes axe in both themes
+    When I open "/schedule/game" and see its "Game Scheduling" heading
+    And I enter manual override on the Game Scheduling page
+    And I fill in the game "Lions" vs "Bulls" in "U10 Boys" at "North Field" on "2026-10-24" from "09:00" to "10:00"
+    And I add the game to the review
+    Then the added game has a card on the grid in its new time on "North Field"
+    And axe finds no serious or critical violations on "/schedule/game" in the "light" theme
+    When I switch to the dark theme on this page
+    Then the scan sees "(new time, made on Apply)" on the page
+    And axe finds no serious or critical violations on "/schedule/game" in the "dark" theme

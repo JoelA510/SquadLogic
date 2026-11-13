@@ -28,46 +28,16 @@ import { fetchAllPages } from '../lib/pagedFetch.js';
 import { readCurrentSavedGameIds } from './gamePublishedClient.js';
 import { readSeasonTeamDirectory } from './scheduleReportsRead.js';
 import { readScheduleTbd } from './scheduleTbdClient.js';
+import { functionErrorBody, refusal, requireClient, rpcRefusal } from './importClientCommon.js';
 
-/** An error that carries the code a refusal gave. @param {string} message @param {string | null} [code] @param {any} [body] */
-function refusal(message, code = null, body = null) {
-  return Object.assign(new Error(message), { code, body });
-}
-
-/** @param {any} client */
-function requireClient(client) {
-  if (typeof client?.rpc !== 'function' || typeof client?.from !== 'function') {
-    throw new Error('there is no database connection to import with');
-  }
-}
-
-/** A database error in its own words. @param {any} error @param {string} fallback */
 /** Words for a refusal whose database message is not written for a person. */
 const RPC_REFUSAL_WORDS = {
   import_not_ready_to_apply:
     'This import is no longer waiting to be applied (it was applied or discarded in the meantime), so it was not discarded.',
 };
 
-function fromRpc(error, fallback) {
-  return refusal(
-    RPC_REFUSAL_WORDS[error?.details] || error?.message || fallback,
-    error?.details || error?.code || null
-  );
-}
-
-/**
- * The body of an Edge function's non-2xx answer (supabase-js puts the response on `context`), or null.
- * @param {any} error
- */
-async function functionErrorBody(error) {
-  if (typeof error?.context?.json !== 'function') return null;
-  try {
-    return await error.context.json();
-  } catch {
-    // Best effort: a body that is absent, already read or not JSON leaves the client's own message, which is shown.
-    return null;
-  }
-}
+/** A database error in its own words. @param {any} error @param {string} fallback */
+const fromRpc = (error, fallback) => rpcRefusal(error, fallback, RPC_REFUSAL_WORDS);
 
 /**
  * What the organization has that a label of the file could mean.

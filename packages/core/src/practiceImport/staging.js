@@ -26,7 +26,13 @@ import {
   practiceSubunitDecisionKey,
   practiceTeamDecisionKey,
 } from './mapping.js';
-import { PRACTICE_IMPORT_REASON as R } from './reasonCodes.js';
+import {
+  PRACTICE_IMPORT_COLUMNS,
+  PRACTICE_IMPORT_HEADER_ALIASES,
+  parsePracticeRows,
+  practiceImportReadsHeader,
+} from './parseRows.js';
+import { PRACTICE_IMPORT_LIMITS, PRACTICE_IMPORT_REASON as R } from './reasonCodes.js';
 import { practiceLabelKey } from './slotKey.js';
 
 /** The keys of a staged practice row, in the order the allowlist lists them. */
@@ -106,5 +112,176 @@ export function toStagedPracticeRow(row) {
       team_key: placement ? practiceTeamDecisionKey(row.divisionLabel, row.teamLabel) : '',
     },
     validation_errors: [],
+  };
+}
+
+/**
+ * Limits of one staging request (PR 11, task L1). **The whole file is one request**, not chunks of 500 as the games file
+ * is: the practice parse judges the file as a whole (`team-in-two-divisions` and `duplicate-row` compare every row with
+ * every other, and a row key must be unique in the file, which the SQL's shape check requires), and it converts no
+ * instant, so 2,400 rows are a few milliseconds of CPU (`tests/practiceImportEdgeParity.test.js` times the whole cap
+ * with coverage on; lesson 59). The cell and header limits are the games file's own numbers.
+ */
+export const PRACTICE_IMPORT_STAGE_LIMITS = Object.freeze({
+  MAX_ROWS: PRACTICE_IMPORT_LIMITS.MAX_ROWS,
+  MAX_CELL_LENGTH: 500,
+  MAX_HEADERS: PRACTICE_IMPORT_LIMITS.MAX_COLUMNS,
+});
+
+/**
+ * A practice file as the Edge function stages it (PR 11, task L1), and as the mock's `import-validation` does: the
+ * headers and the cells cleaned by the pipeline's one cleaner, every column the parse does not read dropped before a
+ * value is read from it, the file parsed whole, and each row as its `staging_import_rows` insert with the raw cells it
+ * was read from (the read columns only, under their canonical names). `supabase/functions/_shared/practice-import.ts`
+ * is the Edge copy; `tests/practiceImportEdgeParity.test.js` holds the two equal.
+ *
+ * @param {Object} input
+ * @param {unknown[]} input.headers  the header row as the file wrote it
+ * @param {Array<Record<string, unknown>>} input.rows  keyed by those headers
+ * @param {{ startDate?: string | null, endDate?: string | null } | null} [input.season]
+ * @param {{ validFrom?: string | null, validUntil?: string | null } | null} [input.dates]  the confirm step's two dates
+ * @param {(value: unknown, max: number) => string} input.clean  `sanitizeImportText`
+ * @returns {{ refusal: { code: string, message: string, column?: string } | null,
+ *   staged: Array<ReturnType<typeof toStagedPracticeRow> & { raw_payload: Record<string, string> }>,
+ *   summary: { rows: number, placements: number, open: number, holds: number, refused: number, flagged: number,
+ *     by_reason: Record<string, number>, dropped_columns: string[],
+ *     warnings: Array<{ row: number, code: string, message: string }>,
+ *     refused_rows: Array<{ row: number, code: string, message: string }> } }}
+ */
+export function stagePracticeFile({ headers, rows, season, dates, clean }) {
+  if (typeof clean !== 'function') {
+    throw new TypeError('stagePracticeFile: clean must be the cell cleaner (sanitizeImportText)');
+  }
+  if (!Array.isArray(headers)) throw new TypeError('stagePracticeFile: headers must be an array');
+  if (!Array.isArray(rows)) throw new TypeError('stagePracticeFile: rows must be an array');
+  /** @param {unknown} value */
+  const cleanCell = (value) => clean(value, PRACTICE_IMPORT_STAGE_LIMITS.MAX_CELL_LENGTH);
+  // A value is read by the header as the file wrote it (the row is keyed by that); the cleaned name says which column.
+  // Every header is read: a file with more than the cap is refused by the parse, never cut (a column the import reads
+  // past the cap would be dropped while its values stayed).
+  const named = headers
+    .map((h) => ({ original: String(h ?? ''), cleaned: cleanCell(h) }))
+    .filter((h) => h.cleaned.trim() !== '');
+  const fileHeaders = named.map((h) => h.cleaned);
+  const keptNames = named.filter((h) => practiceImportReadsHeader(h.cleaned));
+  // Each kept header's canonical column, worked out once (not once per row).
+  const keptColumns = keptNames.map((h) => {
+    const key = practiceLabelKey(h.cleaned);
+    const column =
+      Object.values(PRACTICE_IMPORT_COLUMNS).find((name) => practiceLabelKey(name) === key) ??
+      PRACTICE_IMPORT_HEADER_ALIASES[key];
+    return { cleaned: h.cleaned, column };
+  });
+  const allowlisted = rows.map((row) => {
+    /** @type {Record<string, string>} */
+    const out = {};
+    for (const h of keptNames) out[h.cleaned] = cleanCell(row?.[h.original]);
+    return out;
+  });
+  const empty = {
+    rows: 0,
+    placements: 0,
+    open: 0,
+    holds: 0,
+    refused: 0,
+    flagged: 0,
+    by_reason: {},
+    dropped_columns: [],
+    warnings: [],
+    refused_rows: [],
+  };
+  const parsed = parsePracticeRows({ headers: fileHeaders, rows: allowlisted, season, dates });
+  if (!parsed.ok) return { refusal: parsed.refusal, staged: [], summary: empty };
+  const staged = parsed.rows.map((row, i) => {
+    /** @type {Record<string, string>} */
+    const raw = {};
+    for (const h of keptColumns) raw[h.column] = allowlisted[i][h.cleaned];
+    return { ...toStagedPracticeRow(row), raw_payload: raw };
+  });
+  return {
+    refusal: null,
+    staged,
+    summary: {
+      ...parsed.counts,
+      by_reason: parsed.byReason,
+      dropped_columns: parsed.droppedColumns,
+      warnings: parsed.rows.flatMap((row) =>
+        row.status === 'refused'
+          ? []
+          : row.flags.map((flag) => ({
+              row: row.rowNumber,
+              code: flag.code,
+              message: flag.message,
+            }))
+      ),
+      refused_rows: parsed.rows
+        .filter((row) => row.status === 'refused')
+        .map((row) => ({
+          row: row.rowNumber,
+          code: String(row.reason),
+          message: String(row.message ?? ''),
+        })),
+    },
+  };
+}
+
+/**
+ * A staged practice row back as the mapping step takes a parsed one: the inverse of {@link toStagedPracticeRow} for
+ * what `mapping.js` reads. The mapping screen reads the STAGED rows through this (what the Edge function wrote), never
+ * the browser's own reading of the file. A staged flag comes back as its code only; a refused row with its reason.
+ *
+ * @param {{ source_row_number: number, normalized_payload: Record<string, any> | null,
+ *   validation_errors?: Array<{ code?: string, message?: string }> | null }} staged
+ * @returns {import('./parseRows.js').ParsedPracticeRow}
+ */
+export function stagedPracticeRowToParsed(staged) {
+  const p = staged.normalized_payload;
+  const n = Number(staged.source_row_number);
+  if (!p || (staged.validation_errors || []).length > 0) {
+    const e = (staged.validation_errors || [])[0] ?? {};
+    return {
+      rowNumber: n,
+      rowKey: `row-${n}`,
+      status: 'refused',
+      reason: e.code ?? null,
+      message: e.message ?? null,
+      teamLabel: '',
+      divisionLabel: '',
+      day: null,
+      startTime: null,
+      endTime: null,
+      locationLabel: '',
+      fieldLabel: '',
+      subunitLabel: '',
+      capacity: null,
+      validFrom: null,
+      validUntil: null,
+      dateSources: null,
+      flags: [],
+    };
+  }
+  return {
+    rowNumber: n,
+    rowKey: String(p.row_key),
+    status: p.status,
+    reason: null,
+    message: null,
+    teamLabel: String(p.team ?? ''),
+    divisionLabel: String(p.division ?? ''),
+    day: p.day,
+    startTime: p.start_time,
+    endTime: p.end_time,
+    locationLabel: String(p.location ?? ''),
+    fieldLabel: String(p.field ?? ''),
+    subunitLabel: String(p.subunit ?? ''),
+    capacity: p.capacity ?? null,
+    validFrom: p.valid_from,
+    validUntil: p.valid_until,
+    dateSources: null,
+    flags: (p.flags || []).map((/** @type {string} */ code) => ({
+      code,
+      message: '',
+      details: {},
+    })),
   };
 }

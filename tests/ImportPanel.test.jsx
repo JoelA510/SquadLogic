@@ -159,11 +159,12 @@ describe('ImportPanel', () => {
       'min-w-0',
       'overflow-visible'
     );
-    // Six import types (PR 6 of the schedule expansion added games): three across from a tablet up, in two rows.
+    // Seven import types (PR 6 of the schedule expansion added games, PR 11 practices): three across from a tablet
+    // up, in three rows.
     const selector = screen.getByTestId('import-type-selector');
     expect(selector).toHaveClass('grid', 'grid-cols-1', 'sm:grid-cols-3');
     expect(selector).not.toHaveClass('lg:grid-cols-5');
-    expect(within(selector).getAllByRole('button')).toHaveLength(6);
+    expect(within(selector).getAllByRole('button')).toHaveLength(7);
     expect(within(selector).getByRole('button', { name: /^games/i })).toHaveAttribute(
       'aria-pressed',
       'false'
@@ -596,7 +597,7 @@ describe('ImportPanel', () => {
 
   it('the Games tab hands the screen to the schedule import panel, and the file drop zone is not drawn under it', async () => {
     // The panel's own work is in tests/gameImportPanel.test.jsx (against the real mock client); here it is only
-    // reached: the tab is one of the six, pressing it selects it, and the generic upload does not sit beside it.
+    // reached: the tab is one of the seven, pressing it selects it, and the generic upload does not sit beside it.
     render(<ImportPanel onImport={vi.fn()} />);
     expect(screen.getByText('Drag and drop your CSV file here')).toBeInTheDocument();
     const tab = screen.getByRole('button', { name: /^games/i });
@@ -618,5 +619,26 @@ describe('ImportPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /^players/i }));
     expect(screen.getByText('Drag and drop your CSV file here')).toBeInTheDocument();
     expect(screen.queryByTestId('schedule-import-panel')).not.toBeInTheDocument();
+  });
+
+  it('the Practices tab is a kind of the same schedule import panel (PR 11), not a copy', async () => {
+    // The panel's own work is in tests/practiceImportPanel.test.jsx (against the real mock client).
+    render(<ImportPanel onImport={vi.fn()} />);
+    const tab = screen.getByRole('button', { name: /^practices/i });
+    fireEvent.click(tab);
+    expect(tab).toHaveAttribute('aria-pressed', 'true');
+    const panel = await screen.findByTestId('schedule-import-panel');
+    expect(panel).toHaveAttribute('data-kind', 'practices');
+    expect(
+      within(panel).getByRole('heading', { name: 'Import a practice schedule' })
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Drag and drop your CSV file here')).not.toBeInTheDocument();
+    expect(
+      within(panel).getByRole('button', { name: 'Download the template' })
+    ).toBeInTheDocument();
+    // the games-only export is not offered for practices
+    expect(
+      within(panel).queryByRole('button', { name: 'Download the saved schedule as CSV' })
+    ).not.toBeInTheDocument();
   });
 });

@@ -165,6 +165,10 @@ Nothing. 7.3 was the last prompt in the build plan.
 
 Follow-ups raised during the build and deliberately not absorbed:
 
+> **Not planned (owner, 2026-11-23).** What this file lists as open is not scheduled work: the
+> completion plan (`docs/changes/2026-11-23-completion.md`, "Not planned") says what is left
+> and leaves this out. Take an item up only when the owner asks for it by name.
+
 From the whole-build review (#356), stated rather than left to be rediscovered:
 
 - **11 declared reason codes are unreachable**, each named with a reason in

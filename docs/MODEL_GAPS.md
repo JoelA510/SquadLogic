@@ -1,5 +1,9 @@
 # Model Gaps — `fixtures/season-2026` vs. the current domain types
 
+> **Not planned (owner, 2026-11-23).** What this file lists as open is not scheduled work: the
+> completion plan (`docs/changes/2026-11-23-completion.md`, "Not planned") says what is left
+> and leaves this out. Take an item up only when the owner asks for it by name.
+
 > **Status**: a **living ledger**, kept current as phases land. It began as a one-time
 > Phase 0 artefact — the input to the next phase of the scheduling build plan, written
 > while building the read-only fixture loader (`packages/core/src/fixtures/`) for the

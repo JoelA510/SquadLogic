@@ -7,6 +7,7 @@
   "git": {
     "deploymentEnabled": {
       "claude/**": false,
+      "codex/**": false,
       "dependabot/**": false
     }
   },

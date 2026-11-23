@@ -736,11 +736,11 @@ repository builds the same way with only its environment variables set.
 `vite.config.js`.
 
 **Which branches deploy.** `vercel.json` `git.deploymentEnabled` turns off automatic
-deployments for `claude/**` (agent branches) and `dependabot/**`; every other branch,
+deployments for `claude/**` and `codex/**` (agent branches) and `dependabot/**`; every other branch,
 including `main`, deploys on push as before. To preview one of those branches, deploy it on
 request (Vercel dashboard, or `vercel deploy` from a checkout of the branch).
-`tests/vercelBuildSettings.test.js` fails if `main` would stop deploying or if either
-pattern stops matching. Why: see "Free-tier budgets" below.
+`tests/vercelBuildSettings.test.js` fails if `main` would stop deploying or if any of the
+three patterns stops matching. Why: see "Free-tier budgets" below.
 
 ## Free-tier budgets
 

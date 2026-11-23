@@ -1,0 +1,100 @@
+# Commands AGENTS.md ("Where you are running") says to ask about first, or never to run, written
+# as Codex rules (https://learn.chatgpt.com/docs/agent-configuration/rules; the feature is
+# experimental). Adapted from agent-ready-template's `.codex/rules/blast-radius.rules`, with the
+# hosted-Supabase rules at the end added for this repository. They apply to a command Codex runs
+# outside its sandbox, in a project it trusts. A rule matches a command's leading words only, so
+# each one covers the form an agent usually writes (`git push --force`), not every spelling of it
+# (`git push origin main --force`): it is a prompt in the right place, not a boundary. Each rule's
+# `match` and `not_match` lines are checked when the file loads. Test one:
+# codex execpolicy check --pretty --rules .codex/rules/blast-radius.rules -- git push --force
+
+prefix_rule(
+    pattern = ["git", "push", ["--force", "-f", "--force-with-lease"]],
+    decision = "prompt",
+    justification = "A force push rewrites history other people may have. Ask first (AGENTS.md).",
+    match = [["git", "push", "--force"], ["git", "push", "-f", "origin", "topic"]],
+    not_match = [["git", "push"], ["git", "push", "origin", "topic"]],
+)
+
+prefix_rule(
+    pattern = ["git", "reset", "--hard"],
+    decision = "prompt",
+    justification = "A hard reset discards uncommitted work. Ask first (AGENTS.md).",
+    match = [["git", "reset", "--hard"], ["git", "reset", "--hard", "HEAD~1"]],
+    not_match = [["git", "reset"], ["git", "reset", "--soft", "HEAD~1"]],
+)
+
+prefix_rule(
+    pattern = ["git", "clean"],
+    decision = "prompt",
+    justification = "git clean deletes untracked files, which nothing can restore. Ask first (AGENTS.md).",
+    match = [["git", "clean", "-fd"]],
+    not_match = [["git", "status"]],
+)
+
+prefix_rule(
+    pattern = ["rm", ["-rf", "-fr", "-r", "-R"]],
+    decision = "prompt",
+    justification = "A recursive delete is not undone. Ask first (AGENTS.md).",
+    match = [["rm", "-rf", "build"], ["rm", "-r", "tmp"]],
+    not_match = [["rm", "notes.txt"]],
+)
+
+prefix_rule(
+    pattern = ["docker", ["volume", "system"], ["rm", "prune"]],
+    decision = "prompt",
+    justification = "Removing a volume or pruning the system deletes local data. Ask first (AGENTS.md).",
+    match = [["docker", "volume", "rm", "pgdata"], ["docker", "system", "prune"]],
+    not_match = [["docker", "volume", "ls"], ["docker", "ps"]],
+)
+
+prefix_rule(
+    pattern = ["npm", "publish"],
+    decision = "prompt",
+    justification = "Publishing sends this package outside the repository. Ask first (AGENTS.md).",
+    match = [["npm", "publish"], ["npm", "publish", "--access", "public"]],
+    not_match = [["npm", "pack"]],
+)
+
+prefix_rule(
+    pattern = ["gh", "release", ["create", "delete", "upload", "edit"]],
+    decision = "prompt",
+    justification = "A release is public and tagged. Ask first (AGENTS.md).",
+    match = [["gh", "release", "create", "v1.2.3"]],
+    not_match = [["gh", "release", "list"], ["gh", "release", "view", "v1.2.3"]],
+)
+
+prefix_rule(
+    pattern = ["npm", ["install", "i", "ci"], ["--force", "--legacy-peer-deps"]],
+    decision = "forbidden",
+    justification = "Installs aren't forced here: report the failed install instead (AGENTS.md, docs/security/dependency-policy.md).",
+    match = [["npm", "install", "--force"], ["npm", "ci", "--legacy-peer-deps"]],
+    not_match = [["npm", "install"], ["npm", "ci"]],
+)
+
+# CI is the only writer of migrations and the only deployer of Edge Functions (AGENTS.md section
+# 11). These three are the commands that would write to the hosted project from a checkout.
+
+prefix_rule(
+    pattern = ["supabase", "db", "push"],
+    decision = "forbidden",
+    justification = "CI is the only writer of migrations: open a pull request instead (AGENTS.md section 11).",
+    match = [["supabase", "db", "push"], ["supabase", "db", "push", "--linked"]],
+    not_match = [["supabase", "db", "reset"], ["supabase", "db", "diff"]],
+)
+
+prefix_rule(
+    pattern = ["supabase", "functions", "deploy"],
+    decision = "forbidden",
+    justification = "CI deploys Edge Functions on merge: open a pull request instead (AGENTS.md section 11).",
+    match = [["supabase", "functions", "deploy"], ["supabase", "functions", "deploy", "import-validation"]],
+    not_match = [["supabase", "functions", "serve"]],
+)
+
+prefix_rule(
+    pattern = ["supabase", "link"],
+    decision = "prompt",
+    justification = "Linking a checkout to the hosted project is only needed to write to it, which CI does. Ask first (AGENTS.md).",
+    match = [["supabase", "link"], ["supabase", "link", "--project-ref", "abc"]],
+    not_match = [["supabase", "start"], ["supabase", "status"]],
+)

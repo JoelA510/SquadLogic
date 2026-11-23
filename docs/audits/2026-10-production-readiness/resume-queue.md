@@ -139,6 +139,10 @@ starts as a plan.
 
 ## Backlog, flagged during the plan and not scheduled
 
+> **Not planned (owner, 2026-11-23).** What this file lists as open is not scheduled work: the
+> completion plan (`docs/changes/2026-11-23-completion.md`, "Not planned") says what is left
+> and leaves this out. Take an item up only when the owner asks for it by name.
+
 Each is described where it was found, in the plan's "Discovered during execution". None blocks
 anything above.
 

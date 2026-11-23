@@ -2924,19 +2924,20 @@ section 7). **Updated 2026-11-13:** F11-2 is merged (#725, `dcb54ff`) and its mi
 on: **once F11-3's client is deployed, `score_entry` may be turned on**), and so are PR 6b's refactor G5a (#728,
 `70f443a`) and its G5 (#729, `be268be`; the import recorded as the publication baseline; no migration; see "As built"
 under PR 6b in section 7). **Updated 2026-11-13 (PR 11):** PR 10 is merged (#730, `f5110be`) and its migration deployed (the owner, 08:20 UTC).
-**In review:** PR 8 (2026-11-13; see "As built" under PR 8 in section 7) and PR 11 (the Edge validation, the
-Practices tab and its E2E; no migration; see "As built" under PR 11 in section 7). **Not merged:** PR 8, 11 and
-12, F11-4 and F11-5. PR 14 stays held.
+**Updated 2026-11-23:** PR 8 (#731, `4c572cf`), PR 11 (#732, `0687cae`) and F11-4 (#733, `d685f45`, with the migration
+`20261124010000`; #737, `8a462e5`) are merged, and so are the two import column fixes that followed (#734, `70f8a1d`;
+#739, `7405db3`). Production's ledger head is `20261124010000` (read on 2026-11-23). **Not merged:** PR 12 and F11-5.
+PR 14 stays held. **What is left, in order, is in `docs/changes/2026-11-23-completion.md`**; where that file and this
+section differ, that file is right.
 
 - **Order and the dependency rule.** Section 7 ("Dependencies and order") has the dependency table and the one priority
   rule: at most two PRs in flight; a free slot takes the first PR, in the order PR 1; PR 4; PR 2; PR 5; PR 3; PR 9;
   PR 6; PR 10; PR 7; PR 13; PR 8; PR 11; PR 12, whose dependencies are merged and deployed. There are no waves. PR 14 is
-  held (decision 28). Left, with the F11 plan's pull requests in their places (2026-11-13, PR 11): PR 11 (in review),
-  and the follow-ups of PR 6's review still open, listed under PR 6 in section 7 (the preview-stale check inside the
-  RPC at the next replacement; a SQL sweep for abandoned games jobs), none with a pull request number yet,
-  PR 8, F11-4, PR 12 (PR 10 and PR 11 are its dependencies), and the games mock's division `program_id` (PR 11's
-  decision 10). F11-5 and PR 14 are the coordinating agent's call when their turn comes (section 10, the 2026-11-10
-  answers, entry 5). Later, with no PR number: the B5.10 discovery pass and its plan-change (registration state and
+  held (decision 28). Left (2026-11-23): PR 12 (its dependencies, PR 10 and PR 11, are merged); the follow-ups of
+  PR 6's review still open, listed under PR 6 in section 7 (the preview-stale check inside the RPC at the next
+  replacement; a SQL sweep for abandoned games jobs); the games mock's division `program_id` (PR 11's decision 10);
+  and F11-5, which the coordinating agent took up on 2026-11-23 under the 2026-11-10 delegation (section 10, entry 5).
+  PR 14 stays held under the same delegation. Each has an ID, its tasks and its order in the completion plan. Later, with no PR number: the B5.10 discovery pass and its plan-change (registration state and
   optional-data features), which the owner agreed to on 2026-11-09 (section 10, the 2026-11-09 answers, entry 2). Outside
   this plan: Dependabot #716 to #718, to be batched into one dependency pull request.
 - **Gate cleared.** The F11 plan (decision 12; `docs/changes/2026-11-06-games-table-source-of-truth.md`) was approved by

@@ -487,6 +487,10 @@ field in this corpus (GAP-05). Use it; do not add a second lighting source.
 
 ## 8.10 — Reply context
 
+> **Not planned (owner, 2026-11-23).** What this file lists as open is not scheduled work: the
+> completion plan (`docs/changes/2026-11-23-completion.md`, "Not planned") says what is left
+> and leaves this out. Take an item up only when the owner asks for it by name.
+
 **Depends on:** 8.7, and 8.8 for the notice half. Build last; it is presentation
 over queries that must exist first.
 
@@ -524,6 +528,10 @@ present and separately identified.
 ---
 
 ## Carried forward from `BUILD_PLAN_STATUS.md` §3
+
+> **Not planned (owner, 2026-11-23).** What this file lists as open is not scheduled work: the
+> completion plan (`docs/changes/2026-11-23-completion.md`, "Not planned") says what is left
+> and leaves this out. Take an item up only when the owner asks for it by name.
 
 These stay open and are not superseded by anything above. Fold them into
 whichever task touches their module rather than scheduling them separately:

@@ -67,10 +67,7 @@ describe('vercel.json automatic deployments', () => {
     'claude/vibrant-allen-hr7y7s-w4',
     'codex/fix-keep-alive',
     'dependabot/npm_and_yarn/vite-8.3.4',
-  ])(
-    'does not deploy %s on push',
-    (branch) => {
-      expect(deploys(branch)).toBe(false);
-    }
-  );
+  ])('does not deploy %s on push', (branch) => {
+    expect(deploys(branch)).toBe(false);
+  });
 });

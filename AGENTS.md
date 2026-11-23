@@ -17,8 +17,9 @@ domain logic in Node.js, and Supabase (PostgreSQL, Edge Functions, RLS) behind i
 - **Entry points:** `frontend/src/main.jsx` and `frontend/src/App.jsx` (routes), the domain logic
   in `packages/core/src/`, the Edge Functions in `supabase/functions/`, the schema in
   `supabase/migrations/`.
-- **Current plan:** `docs/audits/2026-10-production-readiness/remediation-plan.md`. Work toward the
-  current milestone's exit criteria; flag anything that belongs to a later one.
+- **Current plan:** `docs/changes/2026-11-23-completion.md`: what is left, in order, with a status
+  table to resume from. Work its items in that order; flag anything outside it. The plan before it
+  (`docs/audits/2026-10-production-readiness/remediation-plan.md`) is finished.
 
 ## 2. Scope Guardrails (Hard Exclusions)
 
@@ -54,7 +55,9 @@ Within any work unit:
 
 1. **Read the relevant plan / spec and the affected docs** before editing — start with
    [`docs/LESSONS_LEARNED.md`](docs/LESSONS_LEARNED.md) if it covers your decision.
-2. **Cut a feature branch** (`feat/...`, `fix/...`, `docs/...`). One task per PR.
+2. **Cut a feature branch** (`feat/...`, `fix/...`, `docs/...`). One task per PR. An agent's
+   branch starts with its agent's prefix (`claude/...`, `codex/...`), which keeps it off Vercel's
+   automatic previews (§11).
 3. **Implement → Verify → Commit → Push → PR**. CI must be green before merge. An agent merges
    only when the owner has said so for that PR.
 
@@ -71,6 +74,25 @@ This repo's own skills, edited here (change the `.agents/skills/` copy, then the
 copy to match): `squadlogic-evaluator-designer` (teaming evaluators),
 `squadlogic-feature-guardians` (organization feature flags), `squadlogic-audit-trail-inspector`
 (the settings audit trail).
+
+### Where you are running
+
+Every session starts from what is committed: this file, the skills and the gates in the Definition
+of Done need only Node 24 (`.nvmrc`), npm 11.15 or later, and git. Nothing committed needs a
+daemon, an MCP server, or anything installed for one user, and nothing optional is used here. The
+database and Edge checks need more, which a machine may or may not have: Docker with the Supabase
+CLI version CI pins (pgTAP, the harness), Deno (the Edge mirror tests) and Playwright's Chromium
+(E2E). Where one is missing, CI runs that check: say in the pull request what you did not run.
+
+**Ask first** before: force-pushing or rewriting history; deleting a branch, a tag, data or a
+Docker volume; installing a tool on the machine (the owner has pre-authorized, for an agent on
+the owner's machine, the toolchain named above with gh and a bash shell, each at the version
+this repository pins, and nothing else); anything that writes to the hosted Supabase project
+(CI is the only writer, §11; an agent reads production only through the read-only,
+project-scoped connector); tagging, releasing or publishing; changing agent or workflow
+permissions. Reading anything here, running the gates, and edits inside the task's scope need no
+answer. For Codex, `.codex/rules/blast-radius.rules` puts a prompt or a refusal on the usual
+spelling of several of these.
 
 ### Operating rules
 

@@ -145,7 +145,7 @@ behind `scripts/ci/migrationGuard.mjs`; reverts are never automatic), then
 `deploy-edge-functions`. Both skip with a `::warning::` when their secrets are missing.
 **CI is the only writer of migrations:** never apply a repo migration by hand or through MCP
 `apply_migration`. A weekly keep-alive pings Supabase. Vercel deploys the frontend on its own
-(`main` to production; other branches to a preview, except `claude/**` and `dependabot/**`,
+(`main` to production; other branches to a preview, except `claude/**`, `codex/**` and `dependabot/**`,
 which deploy only on request: `vercel.json` `git.deploymentEnabled`). Runbook, Vercel settings and rollback:
 `docs/operations/ci-cd.md`; the 2026-09-28 ledger fix:
 `docs/operations/migration-ledger-normalisation.md`.

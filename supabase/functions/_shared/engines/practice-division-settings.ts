@@ -40,6 +40,7 @@ export interface PracticeSettings {
   practicesPerWeek: number;
   /** A practice's length in minutes, or `null` for any slot length. */
   practiceMinutes: number | null;
+  practicePairs?: string[];
 }
 
 /** What a team gets when nothing says otherwise: the solver before practices per division. */
@@ -80,7 +81,22 @@ export function parseTeamPracticeSettings(rows: readonly unknown[]): TeamPractic
           `practice_minutes ${String(minutes)}, which the table does not allow`,
       };
     }
+    const pairs = division.division_practice_pairs;
+    if (
+      pairs !== undefined &&
+      (!Array.isArray(pairs) ||
+        pairs.some((pair) => !['mon-wed', 'tue-thu', 'wed-fri'].includes(pair)) ||
+        new Set(pairs).size !== pairs.length ||
+        (count !== 2 && pairs.length > 0))
+    ) {
+      return {
+        ok: false,
+        code: DIVISION_PRACTICE_SETTINGS_UNREADABLE,
+        message: 'The division has an invalid practice pairing setting',
+      };
+    }
     byTeam.set(String(raw.id), {
+      ...(Array.isArray(pairs) && pairs.length ? { practicePairs: pairs } : {}),
       practicesPerWeek: count as number,
       practiceMinutes: minutes as number | null,
     });
@@ -101,7 +117,9 @@ export async function loadTeamPracticeSettings(
     () =>
       client
         .from('teams')
-        .select('id, divisions!inner(season_settings_id, practices_per_week, practice_minutes)')
+        .select(
+          'id, divisions!inner(season_settings_id, practices_per_week, practice_minutes, division_practice_pairs)'
+        )
         .eq('organization_id', organizationId)
         .eq('divisions.season_settings_id', seasonSettingsId)
         .order('id', { ascending: true }),

@@ -42,13 +42,13 @@ export const INPUT_CHANGED = 'INPUT_CHANGED';
 export const SOLVER_INPUT_UNENCODABLE = 'SOLVER_INPUT_UNENCODABLE';
 
 /** The encoding's version: a worker refuses an input of a version it does not know. */
-export const SOLVER_INPUT_VERSION = 1;
+export const SOLVER_INPUT_VERSION = 2;
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
 /** A solver input as `prepare` sends it. */
 export interface EncodedSolverInput {
-  version: typeof SOLVER_INPUT_VERSION;
+  version: 1 | typeof SOLVER_INPUT_VERSION;
   /** The run's organization and season: a digest from another season never matches. */
   organizationId: string;
   seasonSettingsId: string;
@@ -148,7 +148,11 @@ export function encodeSolverInput(
 ): EncodedSolverInput {
   const { preferenceGate, ...rest } = input;
   return {
-    version: SOLVER_INPUT_VERSION,
+    // A cached v1 worker cannot place pairs. Its existing version refusal tells the page to
+    // fall back to the server. Keep the encoding of unpaired inputs byte-identical.
+    version: input.teams.some((team) => team.practicesPerWeek === 2 && team.practicePairs?.length)
+      ? SOLVER_INPUT_VERSION
+      : 1,
     organizationId: scope.organizationId,
     seasonSettingsId: scope.seasonSettingsId,
     input: encodeValue(
@@ -197,8 +201,10 @@ export function reviveSolverInput(encoded: unknown): PracticeSolverInput {
   if (!candidate || typeof candidate !== 'object') {
     throw new TypeError('the solver input is not an object');
   }
-  if (candidate.version !== SOLVER_INPUT_VERSION) {
-    throw new TypeError(`the solver input is version ${String(candidate.version)}, not 1`);
+  if (candidate.version !== 1 && candidate.version !== SOLVER_INPUT_VERSION) {
+    throw new TypeError(
+      `unsupported solver input version ${String(candidate.version)} (supports 1 and 2)`
+    );
   }
   const input = reviveValue(candidate.input as Json) as Partial<PracticeSolverInput> | null;
   if (

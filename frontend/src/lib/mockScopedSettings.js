@@ -166,6 +166,7 @@ function setScopedSetting(db, p, c) {
   let season = null;
   let label = null;
   let isDefault = false;
+  let weeklyCount;
   if (scope === 'organization') {
     const row = (db.organizations || []).find((o) => same(o.id, p.p_scope_id));
     org = row?.id ?? null;
@@ -178,6 +179,7 @@ function setScopedSetting(db, p, c) {
     isDefault = Boolean(row?.is_default);
   } else {
     const row = (db.divisions || []).find((d) => same(d.id, p.p_scope_id));
+    weeklyCount = row?.practices_per_week;
     org = row?.organization_id ?? null;
     season = row?.season_settings_id ?? null;
     label = row?.name ?? null;
@@ -214,6 +216,19 @@ function setScopedSetting(db, p, c) {
     }
   }
   const value = unset ? null : canonicalScopedValue(key, p.p_value);
+  if (
+    key === 'practice_pairs' &&
+    scope === 'division' &&
+    weeklyCount !== 2 &&
+    Array.isArray(value) &&
+    value.length
+  ) {
+    return fail(
+      '22023',
+      'Paired days apply only to divisions with two practices per week',
+      'practice_pairing_count'
+    );
+  }
   db.scoped_settings = db.scoped_settings || [];
   const matches = (row) =>
     row.key === key &&

@@ -157,13 +157,14 @@ describe('practice import: the reason codes', () => {
       'hold-over-open-slot',
       'team-on-both-halves',
     ]);
-    // Declared, not enforced (AGENTS.md section 3): these six are judged by the database (PR 10),
+    // Declared, not enforced (AGENTS.md section 3): these flags are judged by the database (PR 10),
     // which reads the rows the file names. This module does not compute them, and says so.
     expect([...PRACTICE_IMPORT_DATABASE_FLAGS].sort()).toEqual([
       'capacity',
       'coach-conflict',
       'count',
       'length',
+      'pairing-differs',
       'reservation',
       'weekday',
     ]);

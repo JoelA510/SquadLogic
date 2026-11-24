@@ -312,3 +312,16 @@ Then(
     ).toEqual([]);
   }
 );
+
+When(
+  'I set paired practice days for {string} to {string}',
+  async ({ page }, division: string, pair: string) => {
+    const table = page.getByRole('table', { name: 'Paired practice days' });
+    const select = table.getByRole('combobox', {
+      name: 'Division: ' + division + ' Paired practice days',
+    });
+    await expect(select).toBeVisible();
+    await select.selectOption({ label: pair });
+    await expect(table.getByText(pair + ', set here', { exact: true })).toBeVisible();
+  }
+);

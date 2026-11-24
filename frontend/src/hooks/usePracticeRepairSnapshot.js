@@ -45,7 +45,14 @@ export async function loadPracticeRepairSnapshot(client, { organizationId, seaso
       'practice_slots',
       'id, field_id, field_subunit_id, day_of_week, start_time, end_time, valid_from, valid_until',
     ],
-    ['teams', 'teams', 'id, name'],
+    ['teams', 'teams', 'id, name, division_id'],
+    ['divisions', 'divisions', 'id, organization_id, program_id, practices_per_week'],
+    ['programs', 'programs', 'id, is_default'],
+    [
+      'scopedSettings',
+      'scoped_settings',
+      'id, organization_id, program_id, division_id, key, value',
+    ],
     [
       'teamCoachAssignments',
       'team_coach_assignments',
@@ -85,9 +92,13 @@ export async function loadPracticeRepairSnapshot(client, { organizationId, seaso
   const [reads, season] = await Promise.all([
     Promise.all(
       tables.map(([key, table, columns]) =>
-        fetchAllPages(() =>
-          client.from(table).select(columns).eq('organization_id', organizationId)
-        ).then(
+        fetchAllPages(() => {
+          const query = client.from(table).select(columns).eq('organization_id', organizationId);
+          if (table === 'scoped_settings') return query.eq('key', 'practice_pairs');
+          if (table === 'divisions' || table === 'programs')
+            return query.eq('season_settings_id', seasonSettingsId);
+          return query;
+        }).then(
           (data) => ({ key, table, data, error: null }),
           (err) => ({ key, table, data: null, error: err })
         )

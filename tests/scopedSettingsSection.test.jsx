@@ -128,13 +128,14 @@ function seed() {
 
 const table = (timeout = 1000) => screen.findByRole('table', { name: CAPTION }, { timeout });
 /** The select of a row, by its accessible name (the row's header, then the caption). */
+const standingsTable = () => within(screen.getByRole('table', { name: CAPTION }));
 const select = (rowName) =>
   /** @type {HTMLSelectElement} */ (
     screen.getByRole('combobox', { name: `${rowName} ${CAPTION}` })
   );
 /** The "Applies now" cell of a row, by its row header. */
 function appliesNow(rowName) {
-  const header = screen.getByRole('rowheader', { name: rowName });
+  const header = standingsTable().getByRole('rowheader', { name: rowName });
   const cells = within(/** @type {HTMLElement} */ (header.closest('tr'))).getAllByRole('cell');
   return cells[cells.length - 1].textContent.trim();
 }
@@ -227,7 +228,7 @@ describe('the scoped settings panel :: one table per setting, every level, what 
 
   it('shows "No program" as not settable, says why in words, and gives it no control', async () => {
     await ready();
-    const header = screen.getByRole('rowheader', { name: 'No program' });
+    const header = standingsTable().getByRole('rowheader', { name: 'No program' });
     const row = /** @type {HTMLElement} */ (header.closest('tr'));
     expect(within(row).queryByRole('combobox')).not.toBeInTheDocument();
     expect(row.textContent).toMatch(
@@ -392,7 +393,7 @@ describe('labels and keyboard', () => {
   it('every select has an accessible name naming its row and the setting, and is in the tab order', async () => {
     await ready();
     const selects = screen.getAllByRole('combobox');
-    expect(selects).toHaveLength(5);
+    expect(selects).toHaveLength(10);
     for (const control of selects) {
       expect(control.tagName).toBe('SELECT');
       expect(control.getAttribute('tabindex')).not.toBe('-1');
@@ -406,13 +407,17 @@ describe('labels and keyboard', () => {
         .map((id) => document.getElementById(id)?.textContent?.trim())
         .join(' ')
     );
-    expect(names).toEqual([
-      `Organization: Synthetic FC ${CAPTION}`,
-      `Program: Juniors ${CAPTION}`,
-      `Division: U10 ${CAPTION}`,
-      `Division: U8 ${CAPTION}`,
-      `Division: U12 ${CAPTION}`,
-    ]);
+    expect(names).toEqual(
+      [CAPTION, 'Paired practice days'].flatMap((caption) =>
+        [
+          'Organization: Synthetic FC',
+          'Program: Juniors',
+          'Division: U10',
+          'Division: U8',
+          'Division: U12',
+        ].map((header) => header + ' ' + caption)
+      )
+    );
   });
 
   it.each(['light', 'dark'])('axe finds no violation in the %s theme', async (theme) => {
@@ -504,13 +509,15 @@ describe('an organization switch (Codex C1 on #737) :: nothing of the organizati
       status: 'active',
     };
     view.rerender(<ScopedSettingsSection />);
-    await screen.findByRole('rowheader', { name: 'Organization: Other United' });
     await waitFor(() =>
-      expect(screen.getAllByRole('rowheader').map((h) => h.textContent.trim())).toEqual([
-        'Organization: Other United',
-        'No program',
-        'Division: U9',
-      ])
+      standingsTable().getByRole('rowheader', { name: 'Organization: Other United' })
+    );
+    await waitFor(() =>
+      expect(
+        standingsTable()
+          .getAllByRole('rowheader')
+          .map((h) => h.textContent.trim())
+      ).toEqual(['Organization: Other United', 'No program', 'Division: U9'])
     );
   });
 
@@ -526,10 +533,12 @@ describe('an organization switch (Codex C1 on #737) :: nothing of the organizati
     };
     view.rerender(<ScopedSettingsSection />);
     held.release();
-    await screen.findByRole('rowheader', { name: 'Organization: Other United' });
+    await waitFor(() =>
+      standingsTable().getByRole('rowheader', { name: 'Organization: Other United' })
+    );
     await waitFor(() => expect(screen.queryByText('Loading settings…')).not.toBeInTheDocument());
     expect(screen.queryByText(/Synthetic FC|Juniors|U8|U10|U12/)).not.toBeInTheDocument();
-    expect(screen.getAllByRole('combobox')).toHaveLength(2);
+    expect(standingsTable().getAllByRole('combobox')).toHaveLength(2);
   });
 });
 
@@ -653,11 +662,14 @@ describe('a change in the Programs section above (Codex C4 on #737)', () => {
     );
     fireEvent.change(screen.getByLabelText('Program for U8'), { target: { value: '' } });
     await waitFor(() => expect(appliesNow('Division: U8')).toBe('Not counted, by default'));
-    const headers = () => screen.getAllByRole('rowheader').map((h) => h.textContent.trim());
+    const headers = () =>
+      standingsTable()
+        .getAllByRole('rowheader')
+        .map((h) => h.textContent.trim());
     expect(headers().indexOf('Division: U8')).toBeGreaterThan(headers().indexOf('No program'));
     fireEvent.change(screen.getByLabelText('New program name'), { target: { value: 'Seniors' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add program' }));
-    await screen.findByRole('rowheader', { name: 'Program: Seniors' });
+    await waitFor(() => standingsTable().getByRole('rowheader', { name: 'Program: Seniors' }));
     expect(select('Program: Seniors').value).toBe('');
   });
 });
@@ -723,7 +735,7 @@ describe('more than 1,000 divisions in a season (Codex C6 on #737)', SLOW, () =>
     // 1,004 rows over paged reads take longer than the default 1 s wait on CI's runner (it failed
     // there at 1 s while passing locally), so this case waits up to 20 s.
     await ready(20000);
-    const divisionHeaders = screen
+    const divisionHeaders = standingsTable()
       .getAllByRole('rowheader')
       .filter((h) => h.textContent.startsWith('Division: '));
     // 1,001 plus the seed's U8, U10 and U12
@@ -767,12 +779,30 @@ describe('a save that finishes after an organization switch (Codex C7 on #737)',
     await settle();
     // then the new organization's read lands, and is shown
     held.release();
-    await screen.findByRole('rowheader', { name: 'Organization: Other United' });
+    await waitFor(() =>
+      standingsTable().getByRole('rowheader', { name: 'Organization: Other United' })
+    );
     await waitFor(() => expect(screen.queryByText('Loading settings…')).not.toBeInTheDocument());
-    expect(screen.getAllByRole('combobox')).toHaveLength(2);
+    expect(standingsTable().getAllByRole('combobox')).toHaveLength(2);
     // the save itself went through, for the organization it was made in
     expect(storedRows().find((r) => r.division_id === 'd-u8')?.value).toBe(true);
     // and nothing of the save is said under the new organization
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
+});
+
+it('saves inherited paired weekdays, lets a division turn them off, and explains dormant settings', async () => {
+  mutateDb((db) => {
+    db.divisions.find((row) => row.id === 'd-u8').practices_per_week = 2;
+  });
+  await ready();
+  const controls = within(screen.getByRole('table', { name: 'Paired practice days' }));
+  const program = controls.getByRole('combobox', { name: 'Program: Juniors Paired practice days' });
+  fireEvent.change(program, { target: { value: '["mon-wed"]' } });
+  const row = controls.getByRole('rowheader', { name: 'Division: U8' }).closest('tr');
+  await waitFor(() => expect(row).toHaveTextContent(/Mon\/Wed, from the program Juniors/));
+  const dormant = controls.getByRole('rowheader', { name: 'Division: U10' }).closest('tr');
+  expect(dormant).toHaveTextContent(/does not apply/i);
+  fireEvent.change(within(row).getByRole('combobox'), { target: { value: '[]' } });
+  await waitFor(() => expect(row).toHaveTextContent(/No pairing, set here/));
 });

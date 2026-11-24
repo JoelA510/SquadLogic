@@ -88,8 +88,8 @@ numbers are as of `7405db3` and will move: search by name.
 | C5  | Games import: cleaned headers, one header helper, mock `program_id`, the discard pre-read | done                     | #747         | 2026-11-23 |
 | C6  | Retire the flags nothing reads                                                            | done                     | #748         | 2026-11-23 |
 | C8  | Games import: two SQL guards                                                              | done                     | #749         | 2026-11-24 |
-| C9  | Retire the legacy `games` table (F11-5)                                                   | done                     | this change  | 2026-11-24 |
-| C7  | Paired practice days (PR 12)                                                              | not started              |              |            |
+| C9  | Retire the legacy `games` table (F11-5)                                                   | done                     | #750         | 2026-11-24 |
+| C7  | Paired practice days (PR 12)                                                              | done                     | this change  | 2026-11-24 |
 | C10 | Manual QA workbook                                                                        | not started              |              |            |
 | C11 | Registration state (B5.10): plan only                                                     | not started              |              |            |
 | O1  | Owner: manual testing and the owner-only items                                            | owner                    |              |            |
@@ -304,6 +304,15 @@ Each is _read_ at the lines given. Each gets a component test, shown failing fir
 
 The design is `2026-11-03-schedule-expansion.md` 5.7 and its "PR 12" tasks, amended as decided above. Built last, as
 that plan says. Read 5.7 in full first; what changes is where the setting lives.
+
+**M0 decision, 2026-11-24 (owner delegated).** The actual browser worker and Edge endpoint both call
+`runPracticeOptimizer`. On unmodified main the demo has 128 teams, including 124 needing two practices.
+Core `schedulePractices` explicitly refuses that input. Widening its public contract would change existing
+callers and cannot produce a pre-change demo schedule. Keep that refusal and exercise the worker message
+handler and the server optimizer on the full demo and season fixture. The baseline uses a fixed clock,
+seed and iteration count and hashes each complete result separately (the worker sends a smaller result).
+The runs placed 252 and 132 practices respectively. The setting lives in the existing scoped registry.
+The count may change freely. At counts other than two a saved value lies dormant and the control explains why.
 
 - **M0.** Confirm the amendment against the code and write down what you find in this file: the registry row
   `('practice_pairs', 'text_set', '["mon-wed","tue-thu","wed-fri"]', '[]', 'Paired practice days')`; the gate reads

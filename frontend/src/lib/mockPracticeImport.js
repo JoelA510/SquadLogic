@@ -29,6 +29,7 @@
  * catalogue. Pure over `db`; `mockSupabaseClient.js` saves it.
  */
 
+import { scopedValueForDivision } from './mockScopedSettings.js';
 import { carryTeamRunResults } from '@squadlogic/core/utils/teamRunResults.js';
 import { practiceLabelKey } from '@squadlogic/core/practiceImport/slotKey.js';
 import {
@@ -174,6 +175,11 @@ const isodow = (n) => ((new Date(n * DAY_MS).getUTCDay() + 6) % 7) + 1;
 const dowOf = (day) => DAYS.indexOf(day) + 1;
 /** Minutes past midnight of `HH:MM` or `HH:MM:SS`. */
 const mins = (t) => Number(String(t).slice(0, 2)) * 60 + Number(String(t).slice(3, 5));
+// PostgreSQL compares time values, including seconds, regardless of how a client spelled them.
+const secondsOf = (time) => {
+  const [hour, minute, second = '0'] = String(time).split(':');
+  return Number(hour) * 3600 + Number(minute) * 60 + Number(second);
+};
 const clock = (t) => String(t).slice(0, 5);
 const isDate = (v) =>
   typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && fromDay(toDay(v)) === v;
@@ -320,6 +326,30 @@ export function mockPracticeNewAutoRowRefusals(db, org, ids) {
       top = Math.max(
         top,
         mine.filter((o) => ws + (o.dow - 1) >= o.first && ws + (o.dow - 1) <= o.last).length
+      );
+    }
+    const pairs = ppw === 2 ? scopedValueForDivision(db, j.teamDiv, 'practice_pairs') : [];
+    if (
+      Array.isArray(pairs) &&
+      pairs.length &&
+      mine.some(
+        (o) =>
+          o.id !== j.id &&
+          wk0 <= o.last - (o.dow - 1) &&
+          o.first - (o.dow - 1) <= j.last - (j.dow - 1) &&
+          (!same(j.ps.field_id, o.ps.field_id) ||
+            (j.ps.field_subunit_id ?? null) !== (o.ps.field_subunit_id ?? null) ||
+            secondsOf(j.ps.start_time) !== secondsOf(o.ps.start_time) ||
+            secondsOf(j.ps.end_time) !== secondsOf(o.ps.end_time) ||
+            !(
+              pairs.includes(`${j.ps.day_of_week}-${o.ps.day_of_week}`) ||
+              pairs.includes(`${o.ps.day_of_week}-${j.ps.day_of_week}`)
+            ))
+      )
+    ) {
+      push(
+        'pairing',
+        'the two practices do not share a surface and clock window on an allowed pair of weekdays'
       );
     }
     if (top > ppw)
@@ -1503,8 +1533,8 @@ function planAndWrite(db, jobId, season, map, ctx, env) {
       rowno: a.rowno,
       row_key: a.row_key,
       team_id: a.team_ref,
-      code: g.rule,
-      detail: ['capacity', 'length', 'count'].includes(g.rule)
+      code: g.rule === 'pairing' ? 'pairing-differs' : g.rule,
+      detail: ['capacity', 'length', 'count', 'pairing'].includes(g.rule)
         ? g.detail
         : g.rule === 'weekday'
           ? 'the team has another practice on this weekday on a shared date'
@@ -1784,6 +1814,7 @@ function planAndWrite(db, jobId, season, map, ctx, env) {
         'reservation',
         'length',
         'weekday',
+        'pairing-differs',
         'count',
         'coach-conflict',
         'team-on-both-halves',

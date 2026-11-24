@@ -84,6 +84,7 @@ export const PRACTICE_IMPORT_REASON = Object.freeze({
   RESERVATION: 'reservation',
   LENGTH: 'length',
   WEEKDAY: 'weekday',
+  PAIRING_DIFFERS: 'pairing-differs',
   COUNT: 'count',
   COACH_CONFLICT: 'coach-conflict',
 });
@@ -163,6 +164,7 @@ export const PRACTICE_IMPORT_DATABASE_FLAGS = Object.freeze([
   R.RESERVATION,
   R.LENGTH,
   R.WEEKDAY,
+  R.PAIRING_DIFFERS,
   R.COUNT,
   R.COACH_CONFLICT,
 ]);
@@ -240,6 +242,8 @@ const DESCRIPTIONS = Object.freeze({
   [R.CAPACITY]: 'More teams are in a cell than its capacity.',
   [R.RESERVATION]: 'The slot is reserved to another division.',
   [R.LENGTH]: 'The division’s practice length is not the slot’s.',
+  [R.PAIRING_DIFFERS]:
+    'The imported practices differ from the division’s paired weekday or surface setting.',
   [R.WEEKDAY]: 'A team has two practices on one weekday.',
   [R.COUNT]: 'A team has more practices in a week than its division’s count.',
   [R.COACH_CONFLICT]: 'A coach has two teams in overlapping slots on one weekday.',

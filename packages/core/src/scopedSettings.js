@@ -28,6 +28,12 @@ export const SCOPED_SETTING_KEYS = Object.freeze({
     defaultValue: false,
     label: 'Count results against outside clubs',
   }),
+  practice_pairs: Object.freeze({
+    type: 'text_set',
+    allowed: Object.freeze(['mon-wed', 'tue-thu', 'wed-fri']),
+    defaultValue: Object.freeze([]),
+    label: 'Paired practice days',
+  }),
 });
 
 /**

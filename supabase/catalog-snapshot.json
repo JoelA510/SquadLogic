@@ -75,6 +75,7 @@
     "demo_fence_player_write() returns trigger",
     "demo_health() returns jsonb",
     "division_age_rule_differs(p_old divisions, p_new divisions) returns boolean",
+    "division_practice_pairs(p_division divisions) returns jsonb",
     "divisions_age_rule_revision() returns trigger",
     "divisions_default_program() returns trigger",
     "divisions_program_guard() returns trigger",

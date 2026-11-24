@@ -35,8 +35,20 @@ const COMPLETED_REASON =
   'This season is completed: its programs’ and divisions’ settings are history and cannot be changed. The organization’s setting applies to the seasons to come.';
 
 /** `value` of a select from a stored value: '' is Inherit. */
-const optionValue = (value) => (typeof value === 'boolean' ? String(value) : '');
-const fromOption = (option) => (option === '' ? null : option === 'true');
+const optionValue = (value) =>
+  Array.isArray(value) ? JSON.stringify(value) : typeof value === 'boolean' ? String(value) : '';
+const fromOption = (option, key) =>
+  option === ''
+    ? null
+    : SCOPED_SETTING_KEYS[key].type === 'text_set'
+      ? JSON.parse(option)
+      : option === 'true';
+const dayPairNames = { 'mon-wed': 'Mon/Wed', 'tue-thu': 'Tue/Thu', 'wed-fri': 'Wed/Fri' };
+const pairWords = (values) =>
+  values.length ? values.map((pair) => dayPairNames[pair]).join(', ') : 'No pairing';
+const pairOptions = Object.keys(dayPairNames)
+  .reduce((sets, pair) => [...sets, ...sets.map((set) => [...set, pair])], [[]])
+  .map((set) => ({ value: JSON.stringify(set), text: pairWords(set) }));
 const lowerFirst = (text) => text.charAt(0).toLowerCase() + text.slice(1);
 
 /** @param {number} n */
@@ -117,7 +129,7 @@ export default function ScopedSettingsSection() {
   /**
    * The rows of the table, in order: the organization, each program and its divisions, then "No program" and its.
    * @type {Array<{ id: string, scope: 'organization' | 'program' | 'division' | 'none', header: string,
-   *   programId?: string | null, programName?: string, inProgram?: boolean }>}
+   *   programId?: string | null, programName?: string, inProgram?: boolean, weeklyCount?: number }>}
    */
   const levels = [
     { id: organizationId, scope: 'organization', header: `Organization: ${orgName}` },
@@ -128,6 +140,7 @@ export default function ScopedSettingsSection() {
       levels.push({
         id: String(division.id),
         scope: 'division',
+        weeklyCount: division.practices_per_week,
         header: `Division: ${division.name}`,
         programId: String(program.id),
         programName: program.name,
@@ -141,6 +154,7 @@ export default function ScopedSettingsSection() {
       levels.push({
         id: String(division.id),
         scope: 'division',
+        weeklyCount: division.practices_per_week,
         header: `Division: ${division.name}`,
         programId: division.program_id ?? null,
         inProgram: false,
@@ -178,7 +192,14 @@ export default function ScopedSettingsSection() {
 
   const appliesWords = (level, key, words) => {
     const { value, source } = applied(level, key);
-    const what = value === true ? words.appliedOn : words.appliedOff;
+    if (key === 'practice_pairs' && level.scope === 'division' && level.weeklyCount !== 2) {
+      return `Does not apply at this practice count. Stored or inherited choice: ${pairWords(value)}.`;
+    }
+    const what = Array.isArray(value)
+      ? pairWords(value)
+      : value === true
+        ? words.appliedOn
+        : words.appliedOff;
     if (source === level.scope) {
       return ownRow(level, key)?.frozen_from_organization
         ? `${what}, kept from the organization’s earlier value when it changed`
@@ -189,14 +210,20 @@ export default function ScopedSettingsSection() {
     return `${what}, by default`;
   };
 
-  const optionsFor = (level, words) => [
-    {
-      value: '',
-      text: level.scope === 'organization' ? `Default (${lowerFirst(words.off)})` : 'Inherit',
-    },
-    { value: 'true', text: words.on },
-    { value: 'false', text: words.off },
-  ];
+  const optionsFor = (level, words, key) =>
+    key === 'practice_pairs'
+      ? [
+          { value: '', text: level.scope === 'organization' ? 'Default (no pairing)' : 'Inherit' },
+          ...pairOptions,
+        ]
+      : [
+          {
+            value: '',
+            text: level.scope === 'organization' ? `Default (${lowerFirst(words.off)})` : 'Inherit',
+          },
+          { value: 'true', text: words.on },
+          { value: 'false', text: words.off },
+        ];
 
   const onChange = async (level, key, words, option) => {
     if (busy || loading || error) return;
@@ -205,13 +232,13 @@ export default function ScopedSettingsSection() {
     setBusy(true);
     setPending((p) => ({ ...p, [slot]: option }));
     setMessage(null);
-    const chosen = optionsFor(level, words).find((o) => o.value === option)?.text ?? option;
+    const chosen = optionsFor(level, words, key).find((o) => o.value === option)?.text ?? option;
     try {
       const result = await setValue({
         key,
         scope: /** @type {'organization' | 'program' | 'division'} */ (level.scope),
         scopeId: level.id,
-        value: fromOption(option),
+        value: fromOption(option, key),
       });
       const outcome =
         result?.changed === false
@@ -305,14 +332,6 @@ export default function ScopedSettingsSection() {
         keys.map((key) => {
           const entry = SCOPED_SETTING_KEYS[key];
           const captionId = `${baseId}-${key}-caption`;
-          if (entry.type !== 'boolean') {
-            // Declared, not yet settable here: a set-valued setting (PR 12's) needs its own control.
-            return (
-              <p key={key} className="text-sm text-text-muted">
-                {entry.label}: this screen cannot set this kind of setting yet.
-              </p>
-            );
-          }
           const words = BOOLEAN_WORDS[key] ?? GENERIC_WORDS;
           return (
             <div key={key} className="space-y-2">
@@ -379,8 +398,18 @@ export default function ScopedSettingsSection() {
                               onChange={(e) => onChange(level, key, words, e.target.value)}
                               className="bg-bg-app border border-border-subtle rounded-lg px-2 py-1 text-text-primary disabled:opacity-60"
                             >
-                              {optionsFor(level, words).map((o) => (
-                                <option key={o.value} value={o.value}>
+                              {optionsFor(level, words, key).map((o) => (
+                                <option
+                                  key={o.value}
+                                  value={o.value}
+                                  disabled={
+                                    key === 'practice_pairs' &&
+                                    level.scope === 'division' &&
+                                    level.weeklyCount !== 2 &&
+                                    o.value !== '' &&
+                                    o.value !== '[]'
+                                  }
+                                >
                                   {o.text}
                                 </option>
                               ))}

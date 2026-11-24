@@ -35,6 +35,9 @@
  * Import-free (no Deno std, no esm.sh), so Vitest can execute it directly.
  */
 
+import type { StoredSlot } from './practice-daylight.ts';
+import type { OutsideHold } from './auto-scheduler-solver.ts';
+
 /** One `practice_assignments` row, as loaded for the lock. */
 export interface LoadedPracticeRow {
   id: string;
@@ -274,40 +277,47 @@ export function planTeamsForRun(
  * must not give a team that already practises on a Tuesday a second Tuesday, or the writer's gate
  * refuses the apply. `unchecked` names the teams whose hold cannot be dated -- a row with no slot,
  * a slot the store did not return, or one without readable dates -- so the run is refused for
- * them rather than run blind. Only teams in `needing` are examined: a team needing one practice
- * has no second to misplace, so a run at one a week reads and refuses nothing it did not before.
+ * them rather than run blind. A fully assigned paired team also needs its saved weekdays for the
+ * warning. Other teams without a further practice to place need no outside-slot read.
  */
 export function outsideHoldsFor(
   rows: readonly LoadedPracticeRow[],
   runSlotIds: ReadonlySet<string>,
-  stored: ReadonlyMap<string, { firstDate?: string | null; validUntil?: string | null }>,
-  needing: ReadonlySet<string>
+  stored: ReadonlyMap<string, Partial<StoredSlot>>,
+  needing: ReadonlySet<string>,
+  pairedTeams: ReadonlySet<string> = new Set()
 ): {
-  holds: Array<{
-    teamId: string;
-    firstDate: string;
-    lastDate: string;
-    effectiveDateRange: string | null;
-  }>;
+  holds: OutsideHold[];
   unchecked: Array<{ teamId: string; slotId: string | null }>;
 } {
-  const holds: Array<{
-    teamId: string;
-    firstDate: string;
-    lastDate: string;
-    effectiveDateRange: string | null;
-  }> = [];
+  const holds: OutsideHold[] = [];
   const unchecked: Array<{ teamId: string; slotId: string | null }> = [];
   for (const row of rows) {
-    if (!needing.has(row.teamId)) continue;
+    if (!needing.has(row.teamId) && !pairedTeams.has(row.teamId)) continue;
     if (row.slotId !== null && runSlotIds.has(row.slotId)) continue;
     const slot = row.slotId === null ? undefined : stored.get(row.slotId);
     if (!slot || slot.firstDate == null || slot.validUntil == null) {
       unchecked.push({ teamId: row.teamId, slotId: row.slotId });
       continue;
     }
+    const paired = pairedTeams.has(row.teamId);
+    if (paired && (!slot.fieldId || slot.startSeconds == null || slot.endSeconds == null)) {
+      unchecked.push({ teamId: row.teamId, slotId: row.slotId });
+      continue;
+    }
     holds.push({
       teamId: row.teamId,
+      ...(paired
+        ? {
+            surface: {
+              fieldId: slot.fieldId!,
+              subunitId: slot.subunitId ?? null,
+              startSec: slot.startSeconds!,
+              endSec: slot.endSeconds!,
+              ...(slot.pairWindow ? { pairWindow: slot.pairWindow } : {}),
+            },
+          }
+        : {}),
       firstDate: slot.firstDate,
       lastDate: slot.validUntil,
       effectiveDateRange: row.effectiveDateRange,

@@ -93,10 +93,13 @@ export type SchedulerTeam = PreparedTeam & {
    * one. Read only to score coverage by practice and to say why a practice is missing.
    */
   practicesPerWeek?: number;
+  practicePairs?: readonly string[];
 };
 
 export interface SchedulerSlot {
   id: string;
+  fieldId?: string | null;
+  subunitId?: string | null;
   day?: string | null;
   start: Date;
   end: Date;
@@ -112,6 +115,7 @@ export interface SchedulerSlot {
  * silent). A `DaylightSlot` is one.
  */
 export interface SlotDatingInput {
+  pairWindow?: string;
   /** The slot's first occurrence, `YYYY-MM-DD` on the season's clock. */
   firstDate: string | null;
   /** The last date the slot runs, inclusive. */
@@ -243,6 +247,7 @@ export function undatableSlotIds(
 
 /** A run slot with its dating read (M4.8). */
 export interface DatedSchedulerSlot extends SchedulerSlot {
+  pairWindow?: string;
   firstDay: number;
   lastDay: number;
   startSec: number;
@@ -291,6 +296,7 @@ export function dateSchedulerSlots(
     return {
       ...slot,
       ...read,
+      ...(raw.pairWindow ? { pairWindow: raw.pairWindow } : {}),
       span: span.status === LIVE_SPAN_STATUS.LIVE ? { first: span.first, last: span.last } : null,
       firstDate: raw.firstDate as string,
       lastDate: raw.effectiveUntil as string,
@@ -452,6 +458,7 @@ export function createPRNG(seed: number): () => number {
 // ---------------------------------------------------------------------------
 
 export interface BaseOccupancy {
+  pairedHolds: Map<string, PairSlot[]>;
   /** Each slot's capacity: what the occupants below are judged against, per date. */
   slotCapacity: Map<string, number>;
   /** Who holds each slot, on which dates: locked rows and relocations (M4.8). */
@@ -504,7 +511,12 @@ function wholeValidity(slot: DatedSchedulerSlot): LiveDays | null {
  * PR B): the team's weekday hold, never its capacity. `effectiveDateRange` null is the slot's whole
  * validity, as for a row inside the run.
  */
+type PairSlot = Pick<
+  DatedSchedulerSlot,
+  'fieldId' | 'subunitId' | 'startSec' | 'endSec' | 'pairWindow' | 'firstDay' | 'span'
+>;
 export interface OutsideHold {
+  surface?: Pick<PairSlot, 'fieldId' | 'subunitId' | 'startSec' | 'endSec' | 'pairWindow'>;
   teamId: string;
   /** The first date on the slot's weekday, and its last date: `YYYY-MM-DD`. */
   firstDate: string;
@@ -532,6 +544,12 @@ export function buildLockedOccupancy(
   const slotOccupants = new Map<string, SlotOccupant[]>();
   const coachAssignments = new Map<string, TimeWindow[]>();
   const teamHolds = new Map<string, TeamHold[]>();
+  const pairedHolds = new Map<string, PairSlot[]>();
+  const holdPair = (teamId: string, shape: PairSlot) => {
+    const held = pairedHolds.get(teamId) ?? [];
+    held.push(shape);
+    pairedHolds.set(teamId, held);
+  };
   const inRun: LockedOccupant[] = [];
   const outsideRun: LockedOccupant[] = [];
   const relocatedOutsideRun: LoadedRelocation[] = [];
@@ -540,6 +558,7 @@ export function buildLockedOccupancy(
   // One unit of the slot on these dates, and the team's coaches there then.
   const hold = (teamId: string, slot: DatedSchedulerSlot, days: LiveDays, ownRow = false) => {
     if (ownRow) {
+      if (configuredPairs(teamsById.get(teamId)).length) holdPair(teamId, { ...slot, span: days });
       const held = teamHolds.get(teamId) ?? [];
       held.push({ first: days.first, last: days.last });
       teamHolds.set(teamId, held);
@@ -600,6 +619,8 @@ export function buildLockedOccupancy(
     if (span.status === LIVE_SPAN_STATUS.UNREADABLE)
       span = assignmentLiveSpan({ firstDay, lastDay });
     if (span.status !== LIVE_SPAN_STATUS.LIVE) continue;
+    if (outside.surface && span.last < today) continue;
+    if (outside.surface) holdPair(outside.teamId, { ...outside.surface, firstDay, span });
     const held = teamHolds.get(outside.teamId) ?? [];
     held.push({ first: span.first, last: span.last });
     teamHolds.set(outside.teamId, held);
@@ -625,6 +646,7 @@ export function buildLockedOccupancy(
     slotOccupants,
     coachAssignments,
     teamHolds,
+    pairedHolds,
     inRun,
     outsideRun,
     relocatedOutsideRun,
@@ -741,6 +763,8 @@ function scoreSchedule(
 // ---------------------------------------------------------------------------
 
 interface OptimizerState {
+  base: BaseOccupancy;
+  pairedUnits: Map<string, PracticeUnit[]>;
   /** Practice units, keyed by unit id (a team's id when it needs one). A locked row is never a key here. */
   assignmentMap: Map<string, string>;
   autoUnits: string[];
@@ -810,11 +834,18 @@ function buildState(
   gate: PreferenceGate
 ): OptimizerState {
   const unitsById = new Map(units.map((u) => [u.unitId, u]));
+  const pairedUnits = new Map<string, PracticeUnit[]>();
+  for (const unit of units) {
+    if (!configuredPairs(teamsById.get(unit.teamId)).length) continue;
+    const group = pairedUnits.get(unit.teamId) ?? [];
+    group.push(unit);
+    pairedUnits.set(unit.teamId, group);
+  }
   const assignmentMap = new Map<string, string>();
   const autoUnits: string[] = [];
   for (const a of placements) {
     assignmentMap.set(unitIdOf(a), a.slotId);
-    autoUnits.push(unitIdOf(a));
+    if (!configuredPairs(teamsById.get(a.teamId)).length) autoUnits.push(unitIdOf(a));
   }
 
   const slotOccupants = cloneWindows(base.slotOccupants);
@@ -828,6 +859,8 @@ function buildState(
   }
 
   return {
+    base,
+    pairedUnits,
     assignmentMap,
     autoUnits,
     slotsById,
@@ -839,7 +872,11 @@ function buildState(
     gate,
     units,
     unitsById,
-    unassignedUnitIds: units.map((u) => u.unitId).filter((id) => !assignmentMap.has(id)),
+    unassignedUnitIds: units
+      .filter(
+        (u) => !configuredPairs(teamsById.get(u.teamId)).length && !assignmentMap.has(u.unitId)
+      )
+      .map((u) => u.unitId),
   };
 }
 
@@ -853,7 +890,8 @@ function tryMutate(
 
   const r = rand();
   let mutationType: string;
-  if (hasUnassigned && r < 0.4) mutationType = 'relocate';
+  if (state.pairedUnits.size && rand() < 0.4) mutationType = 'paired-relocate';
+  else if (hasUnassigned && r < 0.4) mutationType = 'relocate';
   else if (hasMultipleAuto && r < 0.85) mutationType = 'swap';
   else if (hasMultipleAuto && autoUnits.length >= 3) mutationType = 'chain-swap';
   else if (hasMultipleAuto) mutationType = 'swap';
@@ -904,7 +942,48 @@ function tryMutate(
     return true;
   };
 
-  if (mutationType === 'swap') {
+  if (mutationType === 'paired-relocate') {
+    // Remove only generated units from this proposal. A saved partner lives in base and
+    // continues to constrain its one movable unit. A rejected proposal is discarded whole.
+    const paired = [...state.pairedUnits.values()];
+    const groupForSingle = (id: string) => [unitsById.get(id)!];
+    const waiting = [
+      ...paired.filter((group) => !newMap.has(group[0].unitId)),
+      ...unassignedUnitIds.map(groupForSingle),
+    ];
+    const placed = [
+      ...paired.filter((group) => newMap.has(group[0].unitId)),
+      ...autoUnits.map(groupForSingle),
+    ];
+    const sample = <T>(items: T[]) => items[Math.floor(rand() * items.length)];
+    const first = waiting.length ? sample(waiting) : sample(paired);
+    const firstIsPaired = state.pairedUnits.has(first[0].teamId);
+    const partners = placed.filter(
+      (group) => group !== first && (firstIsPaired || state.pairedUnits.has(group[0].teamId))
+    );
+    if (!firstIsPaired && !partners.length) return null;
+    const groups = partners.length ? [first, sample(partners)] : [first];
+    for (const group of groups) for (const unit of group) remove(unit.unitId);
+    const slots = [...slotsById.values()];
+    const start = Math.floor(rand() * slots.length);
+    const ordered = [...slots.slice(start), ...slots.slice(0, start)];
+    for (const group of groups) {
+      const team = teamsById.get(group[0].teamId)!;
+      const available = ordered.filter((slot) =>
+        admissible(gate, team, slot, newCoach, newOcc, state.slotCapacity, newHolds)
+      );
+      const pairs = configuredPairs(team);
+      const candidates = pairs.length
+        ? pairedCandidates(available, group.length, state.base, team.id, pairs)
+        : available.map((slot) => [slot]);
+      const choice = leastBreachedChoice(candidates, gate, team.id);
+      if (
+        choice.length !== group.length ||
+        !group.every((unit, i) => add(unit.unitId, choice[i].id))
+      )
+        return null;
+    }
+  } else if (mutationType === 'swap') {
     const i = Math.floor(rand() * autoUnits.length);
     let j = Math.floor(rand() * (autoUnits.length - 1));
     if (j >= i) j++;
@@ -961,6 +1040,125 @@ function tryMutate(
 // Greedy seed (server-side — replicate practiceScheduling.js core logic)
 // ---------------------------------------------------------------------------
 
+function configuredPairs(team?: SchedulerTeam): readonly string[] {
+  return team?.practicesPerWeek === 2 ? (team.practicePairs ?? []) : [];
+}
+
+/** Week starts on Monday. Day zero in the date model is a Thursday. */
+function pairingWeek(day: number): number {
+  return Math.floor((day + 3) / 7);
+}
+
+const WEEKDAYS_FROM_EPOCH = ['thu', 'fri', 'sat', 'sun', 'mon', 'tue', 'wed'];
+function weekdayOf(day: number) {
+  return WEEKDAYS_FROM_EPOCH[((day % 7) + 7) % 7];
+}
+
+/** Saved rows are immutable, including a weekday no configured pair contains. */
+function heldPairWarnings(teams: SchedulerTeam[], base: BaseOccupancy) {
+  const heldOutsidePairs = teams
+    .filter((team) => {
+      const pairs = configuredPairs(team);
+      return (
+        pairs.length &&
+        base.teamHolds
+          .get(team.id)
+          ?.some((hold) => !pairs.some((pair) => pair.split('-').includes(weekdayOf(hold.first))))
+      );
+    })
+    .map((team) => team.id)
+    .sort();
+  return heldOutsidePairs.length ? { heldOutsidePairs } : {};
+}
+
+function samePair(a: PairSlot, b: PairSlot, pairs: readonly string[]) {
+  if (
+    !a.span ||
+    !b.span ||
+    !a.fieldId ||
+    a.fieldId !== b.fieldId ||
+    (a.subunitId ?? null) !== (b.subunitId ?? null) ||
+    a.startSec !== b.startSec ||
+    a.endSec !== b.endSec ||
+    a.pairWindow !== b.pairWindow ||
+    pairingWeek(a.span.first) > pairingWeek(b.span.last) ||
+    pairingWeek(b.span.first) > pairingWeek(a.span.last)
+  )
+    return false;
+  const first = weekdayOf(a.firstDay);
+  const second = weekdayOf(b.firstDay);
+  return pairs.includes(`${first}-${second}`) || pairs.includes(`${second}-${first}`);
+}
+
+/** Compare a missing second practice to the actual range of its held row. */
+function matchesHeld(
+  base: BaseOccupancy,
+  teamId: string,
+  slot: DatedSchedulerSlot,
+  pairs: readonly string[]
+) {
+  const rows = base.pairedHolds.get(teamId) ?? [];
+  return rows.length === 1 && samePair(rows[0], slot, pairs);
+}
+
+// Group by pitch, half and clock window before comparing weekdays. A busy league has many
+// slots but only the small group on this surface at this time can ever provide a twin.
+function* pairedCandidates(
+  available: DatedSchedulerSlot[],
+  needed: number,
+  base: BaseOccupancy,
+  teamId: string,
+  pairs: readonly string[]
+) {
+  if (needed === 1) {
+    for (const slot of available) if (matchesHeld(base, teamId, slot, pairs)) yield [slot];
+    return;
+  }
+  if (needed !== 2) return;
+  const groups = new Map<string, DatedSchedulerSlot[]>();
+  for (const slot of available) {
+    if (!slot.fieldId) continue;
+    const key = JSON.stringify([
+      slot.fieldId,
+      slot.subunitId ?? null,
+      slot.startSec,
+      slot.endSec,
+      slot.pairWindow,
+    ]);
+    const group = groups.get(key) ?? [];
+    group.push(slot);
+    groups.set(key, group);
+  }
+  for (const group of groups.values()) {
+    for (const [i, first] of group.entries()) {
+      for (let j = i + 1; j < group.length; j++) {
+        if (samePair(first, group[j], pairs)) yield [first, group[j]];
+      }
+    }
+  }
+}
+
+function leastBreachedChoice(
+  candidates: Iterable<DatedSchedulerSlot[]>,
+  gate: PreferenceGate,
+  teamId: string
+) {
+  let choice: DatedSchedulerSlot[] = [];
+  let fewest = Infinity;
+  for (const candidate of candidates) {
+    const breaches = candidate.reduce(
+      (total, slot) => total + breachesOf(gate, teamId, slot.id),
+      0
+    );
+    if (breaches < fewest) {
+      choice = candidate;
+      fewest = breaches;
+    }
+    if (fewest === 0) break;
+  }
+  return choice;
+}
+
 function generateGreedySeed(
   base: BaseOccupancy,
   teams: SchedulerTeam[],
@@ -1015,6 +1213,21 @@ function generateGreedySeed(
   for (const unit of sorted) {
     if (assignedUnitIds.has(unit.unitId)) continue;
     const team = teamsById.get(unit.teamId) as SchedulerTeam;
+    const pairs = configuredPairs(team);
+    if (pairs.length) {
+      const siblings = sorted.filter((u) => u.teamId === team.id);
+      if (siblings[0] !== unit) continue;
+      const available = slots.filter((slot) =>
+        admissible(gate, team, slot, coachAssignments, slotOccupants, base.slotCapacity, teamHolds)
+      );
+      const choice = leastBreachedChoice(
+        pairedCandidates(available, siblings.length, base, team.id, pairs),
+        gate,
+        team.id
+      );
+      for (const [i, slot] of choice.entries()) assign(siblings[i], team, slot.id);
+      continue;
+    }
     let bestSlot: SchedulerSlot | undefined;
     let bestBreaches = Infinity;
     for (const slot of slots) {
@@ -1101,6 +1314,43 @@ function explainUnplaced(
   return unassigned.map((entry) => {
     const team = teamsById.get(entry.teamId);
     if (!team) return entry;
+    const pairs = configuredPairs(team);
+    if (pairs.length) {
+      const legal = [...slotsById.values()].filter((slot) =>
+        checkHardConstraints(
+          team,
+          slot,
+          final.coachAssignments,
+          final.slotOccupants,
+          final.slotCapacity,
+          final.teamHolds
+        )
+      );
+      const needed = units.filter((unit) => unit.teamId === team.id).length;
+      let hasCandidate = false;
+      const dimensions = new Set<string>();
+      const rules = new Set<string>();
+      for (const candidate of pairedCandidates(legal, needed, base, team.id, pairs)) {
+        hasCandidate = true;
+        const violated = candidate
+          .map((slot) => gate.verdicts.get(team.id)?.get(slot.id))
+          .filter((v) => v?.mustKeepViolated);
+        if (!violated.length) return { ...entry, reason: NO_SLOT_REASON, rule: 'pairing' };
+        for (const verdict of violated) {
+          for (const dim of verdict?.violatedDimensions ?? []) dimensions.add(dim);
+          for (const rule of verdict?.violatedRules ?? []) rules.add(rule);
+        }
+      }
+      if (hasCandidate)
+        return {
+          ...entry,
+          reason: COACH_PREFERENCE_TBD_REASON,
+          rule: 'pairing',
+          dimensions: [...dimensions].sort(),
+          rules: [...rules].sort(),
+        };
+      return { ...entry, reason: NO_SLOT_REASON, rule: 'pairing' };
+    }
     if (team.practiceMinutes != null && !weekdaysOf(team).anyLength) {
       return { ...entry, reason: PRACTICE_LENGTH_REASON };
     }
@@ -1154,6 +1404,7 @@ export interface OptimizerResult {
   /** `prefer` breaches (one per unmet rule) across the returned placements (0 with no rules). */
   preferKeepBreaches: number;
   /** Locked rows whose slot is not in this run (still locked). */
+  heldOutsidePairs?: string[];
   lockedOutsideRun: LockedOccupant[];
   /** Live relocations whose slot is not in this run (11d-0): still held, nothing here to hold. */
   relocatedOutsideRun: LoadedRelocation[];
@@ -1453,6 +1704,7 @@ export async function runPracticeOptimizer(params: {
     placements,
     unassigned,
     preferKeepBreaches,
+    ...heldPairWarnings(teams, base),
     lockedOutsideRun: base.outsideRun,
     relocatedOutsideRun: base.relocatedOutsideRun,
     unreadableRange: base.unreadableRange,
@@ -1507,6 +1759,7 @@ export const VERIFY_REFUSED_REASON = 'verify-refused';
 export const VERIFY_REFUSAL_RULE = Object.freeze({
   ...HARD_CONSTRAINT_RULE,
   MUST_KEEP: MUST_KEEP_RULE,
+  PAIRING: 'pairing',
   /** The proposal names a practice this run has none to place (a locked team, an unknown unit). */
   UNKNOWN_PRACTICE: 'unknown-practice',
   /** The proposal names a slot that is not in the run. */
@@ -1607,7 +1860,55 @@ export function verifyPracticePlacements(
   const sorted = [...params.placements].sort(
     (a, b) => unitIdOf(a).localeCompare(unitIdOf(b)) || a.slotId.localeCompare(b.slotId)
   );
+  const handledPairTeams = new Set<string>();
   for (const p of sorted) {
+    const pairTeam = teamsById.get(p.teamId);
+    const pairs = configuredPairs(pairTeam);
+    if (pairTeam && pairs.length) {
+      if (handledPairTeams.has(p.teamId)) continue;
+      handledPairTeams.add(p.teamId);
+      const expected = units.filter((u) => u.teamId === p.teamId);
+      const group = sorted.filter((q) => q.teamId === p.teamId);
+      const seen = new Set<string>();
+      const checked = group.map((q) => {
+        const id = unitIdOf(q);
+        const sibling = unitsById.get(id);
+        const slot = slotsById.get(q.slotId);
+        let rule: string | null;
+        if (!sibling || sibling.teamId !== p.teamId) rule = VERIFY_REFUSAL_RULE.UNKNOWN_PRACTICE;
+        else if (seen.has(id)) rule = VERIFY_REFUSAL_RULE.DUPLICATE_PRACTICE;
+        else if (!slot) rule = VERIFY_REFUSAL_RULE.UNKNOWN_SLOT;
+        else
+          rule = admissibleRefusal(
+            gate,
+            pairTeam,
+            slot,
+            coachAssignments,
+            occupants,
+            base.slotCapacity,
+            holds
+          );
+        seen.add(id);
+        return { q, sibling, slot, rule };
+      });
+      const complete =
+        expected.length === checked.length && checked.every((row) => row.rule === null);
+      const first = checked[0]?.slot;
+      const second = checked[1]?.slot;
+      const coherent =
+        complete &&
+        first &&
+        (second ? samePair(first, second, pairs) : matchesHeld(base, p.teamId, first, pairs));
+      // Every original hard refusal keeps its own reason. A legal partner cannot be seated on its own.
+      for (const { q, sibling, slot, rule } of checked) {
+        if (!coherent || !sibling || !slot) refuse(q, rule ?? VERIFY_REFUSAL_RULE.PAIRING);
+        else {
+          seat(occupants, coachAssignments, holds, pairTeam, sibling, slot);
+          seated.push(placementOf(sibling, slot.id));
+        }
+      }
+      continue;
+    }
     const unitId = unitIdOf(p);
     const unit = unitsById.get(unitId);
     const team = unit ? teamsById.get(unit.teamId) : undefined;
@@ -1682,6 +1983,7 @@ export function verifyPracticePlacements(
     placements,
     unassigned,
     preferKeepBreaches: totalBreaches(gate, seated),
+    ...heldPairWarnings(teams, base),
     lockedOutsideRun: base.outsideRun,
     relocatedOutsideRun: base.relocatedOutsideRun,
     unreadableRange: base.unreadableRange,

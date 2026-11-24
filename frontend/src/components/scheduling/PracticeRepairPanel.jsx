@@ -440,6 +440,14 @@ function Recommendations({
                       <span data-testid="practice-repair-to">
                         {row.to}
                         {row.tier === 'cross-venue' ? ' (another venue)' : ''}
+                        {row.pairingBroken && (
+                          <p>
+                            <span className="badge warning" data-reason="pairing-broken">
+                              Paired practice days
+                            </span>{' '}
+                            This move breaks the team’s practice pair. You can still enact it.
+                          </p>
+                        )}
                         {row.pastSunset && (
                           <span className="text-sm block" data-testid="practice-repair-past-sunset">
                             <span className="badge warning">Past sunset</span> {row.pastSunset}

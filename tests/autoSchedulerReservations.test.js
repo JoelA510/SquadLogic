@@ -256,6 +256,9 @@ describe('auto-scheduler/index.ts wiring (source pin)', () => {
     assert.match(source, /practiceMinutes: t\.practiceMinutes,/);
     assert.match(source, /\s*slots,\s*reservations\s*\)/);
     assert.match(source, /const teams = reserved\.teams;/);
-    assert.match(source, /slots: reserved\.slots,/);
+    assert.match(
+      source,
+      /slots: teams\.some\([\s\S]*?\? reserved\.slots\.map\([\s\S]*?: reserved\.slots,/
+    );
   });
 });

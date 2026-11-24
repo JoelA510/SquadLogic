@@ -4,6 +4,10 @@ import { useOrganization } from '../../contexts/OrganizationContext.jsx';
 import { Loader2, Search, AlertCircle, Clock, User, ArrowRight } from 'lucide-react';
 import { logger } from '../../lib/logger.js';
 import { isAdminRole } from '../../constants/permissions.js';
+import { SCOPED_SETTING_KEYS } from '@squadlogic/core/scopedSettings.js';
+
+const scopedLabel = (metadata) =>
+  metadata?.setting === 'scoped_setting' ? SCOPED_SETTING_KEYS[metadata.field]?.label : undefined;
 
 /**
  * @typedef {Object} AuditLogEntry
@@ -73,7 +77,7 @@ const SettingsAuditLog = () => {
         log.actor_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         log.actor_email?.toLowerCase().includes(searchQuery.toLowerCase());
 
-      const contentMatch = JSON.stringify(log.metadata)
+      const contentMatch = `${scopedLabel(log.metadata) ?? ''} ${JSON.stringify(log.metadata)}`
         .toLowerCase()
         .includes(searchQuery.toLowerCase());
 
@@ -109,14 +113,29 @@ const SettingsAuditLog = () => {
 
     const { old: oldVal, new: newVal, field } = metadata;
     const scoped = metadata.setting === 'scoped_setting';
+    const scope = scoped && typeof metadata.scope === 'string' ? metadata.scope : '';
+    const frozen = scoped ? metadata.frozen_completed_divisions : 0;
 
     // If we have a standard field diff (common in our settings/flags updates)
     if (field && (oldVal !== undefined || newVal !== undefined)) {
       return (
         <div className="flex flex-col gap-1">
           <div className="text-[10px] font-bold text-text-muted uppercase tracking-tighter opacity-50">
-            Property: {field}
+            Property: {scopedLabel(metadata) ?? field}
           </div>
+          {scope && (
+            <div className="text-xs text-text-secondary">
+              {scope.charAt(0).toUpperCase() + scope.slice(1)}
+              {metadata.scope_name ? `: ${metadata.scope_name}` : ''}
+            </div>
+          )}
+          {Number.isInteger(frozen) && frozen > 0 && (
+            <div className="text-xs text-text-secondary">
+              {frozen === 1
+                ? '1 division in a completed season keeps its old value.'
+                : `${frozen} divisions in completed seasons keep their old value.`}
+            </div>
+          )}
           <div className="flex items-center gap-2 text-xs">
             <span className="px-1.5 py-0.5 rounded bg-red-500/10 text-status-error-text line-through border border-red-500/10">
               {formatValue(oldVal, scoped)}

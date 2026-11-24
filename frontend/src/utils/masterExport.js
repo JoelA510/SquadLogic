@@ -82,7 +82,7 @@ function normalizeTeamForExport(team) {
 
 function getDateFromRange(range) {
   const match = String(range ?? '').match(/\d{4}-\d{2}-\d{2}/);
-  return match?.[0] ?? '2026-01-01';
+  return match?.[0] ?? null;
 }
 
 function getDateForDay(baseDate, day) {
@@ -116,16 +116,16 @@ function normalizePracticeForExport(assignment) {
   const range = assignment?.effectiveDateRange ?? assignment?.effective_date_range;
   const day =
     assignment?.dayOfWeek ?? assignment?.day_of_week ?? slot.dayOfWeek ?? slot.day_of_week;
-  const date = getDateForDay(getDateFromRange(range), day);
-
-  if (!teamId || (!assignment?.start && !startTime) || (!assignment?.end && !endTime)) {
-    return null;
-  }
+  const rangeDate = getDateFromRange(range);
+  const date = rangeDate && getDateForDay(rangeDate, day);
+  const start = assignment?.start ?? (date && startTime ? `${date}T${startTime}` : null);
+  const end = assignment?.end ?? (date && endTime ? `${date}T${endTime}` : null);
+  if (!teamId || !start || !end) return null;
 
   return {
     teamId,
-    start: assignment.start ?? `${date}T${startTime}`,
-    end: assignment.end ?? `${date}T${endTime}`,
+    start,
+    end,
     fieldId:
       assignment.fieldId ??
       assignment.field_id ??

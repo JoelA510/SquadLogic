@@ -130,6 +130,33 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe('generateMasterExport makes the rows the Exports page records as its baseline', () => {
+  it('counts a clock-only practice without a date as untimed and keeps a practice with explicit timestamps', async () => {
+    seedLeague();
+    const made = await generateMasterExport(
+      mockSupabase,
+      params({
+        practiceAssignments: [
+          {
+            teamId: 't-1',
+            slotId: 'undated',
+            dayOfWeek: 'monday',
+            startTime: '10:00',
+            endTime: '11:00',
+          },
+          {
+            teamId: 't-1',
+            slotId: 'dated',
+            start: '2026-10-05T10:00:00Z',
+            end: '2026-10-05T11:00:00Z',
+          },
+        ],
+      })
+    );
+    expect(made.status).toBe('generated');
+    if (made.status !== 'generated') return;
+    expect(made.payload.untimed.practices).toBe(1);
+    expect(made.payload.practiceAssignments.map((p) => p.slotId)).toEqual(['dated']);
+  });
   it('for one seeded league, its rows equal the rows the page uploads and records', async () => {
     seedLeague();
     render(

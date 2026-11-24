@@ -242,7 +242,11 @@ async function exportedFor(seed, exceptions = []) {
   await new Promise((resolve) => setTimeout(resolve, 250));
   await waitFor(() => expect(button).toBeEnabled());
   fireEvent.click(button);
-  await screen.findByText('CSVs generated successfully.');
+  await waitFor(() =>
+    expect(screen.getByTestId('output-generation-status')).toHaveTextContent(
+      'CSVs generated successfully.'
+    )
+  );
   const calls = /** @type {any} */ (generateScheduleExports).mock.calls;
   const practices = calls[calls.length - 1][0].practiceAssignments;
   return practices.map((p) => keyOf(p.teamId, p.slotId, p.start.slice(0, 10))).sort();
@@ -254,6 +258,15 @@ beforeEach(() => {
 });
 
 describe('exports read the current practice schedule, not the latest run', () => {
+  it('tells the admin when a practice has slot times but no date to export', async () => {
+    const current = row('dated', 'team-a', 'slot-mon', FULL, RUN2, '2026-09-07');
+    const undated = { ...current, id: 'undated', effective_date_range: null, team_id: 'team-b' };
+    const practices = await exportedFor([current, undated]);
+    expect(practices).toHaveLength(1);
+    expect(screen.getByTestId('output-generation-status')).toHaveTextContent(
+      '1 practice assignment(s)'
+    );
+  });
   it('each case holds a live row a latest-run reader cannot see (meta, can fail)', () => {
     for (const seed of [ENACT, RETAINED, SUPERSEDED]) {
       expect(olderRunRows(seed).length).toBeGreaterThan(0);

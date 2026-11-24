@@ -575,7 +575,8 @@ text above, each a decision of the build:
     save that finishes after an organization switch) returns without touching the counter or the state, so the new
     pair's first read is never superseded. The first-read effect no longer bumps on cleanup.
 - **Not done here (S8):** the program delete and merge dialogs do not yet say that a program's values go with it; neither
-  task list names it, and the stop condition forbids markup changes outside the panel. A follow-up.
+  task list names it, and the stop condition forbids markup changes outside the panel. C4 of the
+  [completion plan](2026-11-23-completion.md) adds both notices and displays the full scoped audit row.
 
 ## Owner decisions
 

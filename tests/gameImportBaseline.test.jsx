@@ -182,6 +182,36 @@ afterEach(() => {
 });
 
 describe('(1) the baseline recorded at import is the Exports page’s baseline for the same schedule, row for row', () => {
+  it('reports the undated practice left out of the baseline it records', async () => {
+    seedMockDb({
+      practice_slots: [
+        {
+          id: 'undated-slot',
+          organization_id: ORG,
+          day_of_week: 'mon',
+          start_time: '15:00',
+          end_time: '16:00',
+        },
+      ],
+      practice_assignments: [
+        {
+          id: 'undated-practice',
+          organization_id: ORG,
+          team_id: TEAMS.t1,
+          practice_slot_id: 'undated-slot',
+          effective_date_range: null,
+        },
+      ],
+    });
+    render(<ScheduleImportPanel />);
+    await toConfirm();
+    await confirm();
+    const notice = await baselineNotice();
+    expect(notice).toHaveTextContent(/recorded .* as published baseline v1/i);
+    expect(notice).toHaveTextContent(
+      '1 practice assignment was omitted because its date or time was incomplete.'
+    );
+  });
   it('records at import, then the Exports page records over the same schedule: the two are equal', async () => {
     const panel = render(<ScheduleImportPanel />);
     await toConfirm();

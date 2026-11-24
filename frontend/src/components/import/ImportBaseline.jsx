@@ -53,10 +53,19 @@ const RECORD_WAIT_MS = 60000;
 const WHERE_TO_CHECK =
   '"Changes since publication" on the Exports page lists every baseline: one labelled "Schedule import" with this file\'s name is this import\'s. "Record the baseline again" checks first and records only if there is none.';
 
+/** @param {number} count */
+function omittedPracticeNote(count) {
+  if (count === 1)
+    return '1 practice assignment was omitted because its date or time was incomplete';
+  return count > 1
+    ? `${count} practice assignments were omitted because their dates or times were incomplete`
+    : '';
+}
+
 /** @param {number} version */
-const recorded = (version) => ({
+const recorded = (version, omitted = '') => ({
   status: /** @type {const} */ ('recorded'),
-  message: `Recorded the schedule as it now stands as published baseline v${version}, for "Changes since publication" on the Exports page.`,
+  message: `Recorded the schedule as it now stands as published baseline v${version}, for "Changes since publication" on the Exports page.${omitted ? ` ${omitted}.` : ''}`,
 });
 
 /** Known: nothing was recorded. @param {string} why */
@@ -155,7 +164,15 @@ export function ImportBaselineRecorder({ jobId, fileName, checkFirst = false, on
         return failed(`the season's teams could not be read (${made.table}: ${made.message})`);
       }
       if (made.status !== 'generated') {
-        return failed('the saved schedule holds nothing the master export can write');
+        const omitted =
+          made.status === 'nothing-writable'
+            ? omittedPracticeNote(made.payload.untimed.practices)
+            : '';
+        return failed(
+          ['the saved schedule holds nothing the master export can write', omitted]
+            .filter(Boolean)
+            .join('. ')
+        );
       }
       // Given up while the rows were made: nothing is written after the screen said nothing was.
       if (settled.current) return null;
@@ -171,7 +188,10 @@ export function ImportBaselineRecorder({ jobId, fileName, checkFirst = false, on
           publishedBy: user?.id ? String(user.id) : 'unknown-actor',
           rows,
         });
-        return recorded(written.baseline_version);
+        return recorded(
+          written.baseline_version,
+          omittedPracticeNote(made.payload.untimed.practices)
+        );
       } catch (err) {
         // A refusal and a lost answer look alike here: the write may have been made. The baseline is asked after.
         let there;

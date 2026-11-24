@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabaseClient.js';
 import { logger } from '../lib/logger.js';
 import { fetchAllPages } from '../lib/pagedFetch.js';
+import { sortByNameThenId } from '../utils/programGroups.js';
 import { REFRESH_TOPICS, subscribeRefresh } from '../lib/refreshBus.js';
 import { SetScopedSettingSchema } from '../utils/scopedSettingSchemas.js';
 
@@ -81,13 +82,6 @@ export async function readScopedSettingRows(
   return (await Promise.all(reads)).flat();
 }
 
-/** Name order, then id, for the levels' lists. @template {{ id: string, name: string }} T @param {T[]} list */
-const byName = (list) =>
-  [...list].sort(
-    (a, b) =>
-      String(a.name).localeCompare(String(b.name)) || String(a.id).localeCompare(String(b.id))
-  );
-
 /**
  * One read of what the panel shows: the season's programs and divisions, then the scoped setting rows of the
  * organization and of those programs and divisions. Answers which organization and season it was read for, so a read
@@ -118,8 +112,8 @@ async function readScopedSettings(organizationId, seasonId) {
           ),
         ])
       : [[], []];
-    const programs = byName(programRows);
-    const divisions = byName(divisionRows);
+    const programs = sortByNameThenId(programRows);
+    const divisions = sortByNameThenId(divisionRows);
     const rows = await readScopedSettingRows(supabase, {
       organizationId,
       programIds: programs.map((p) => String(p.id)),

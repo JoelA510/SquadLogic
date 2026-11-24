@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabaseClient.js';
 import { logger } from '../lib/logger.js';
+import { fetchAllPages } from '../lib/pagedFetch.js';
+import { sortByNameThenId } from '../utils/programGroups.js';
 import { REFRESH_TOPICS, emitRefresh } from '../lib/refreshBus.js';
 import {
   CreateProgramSchema,
@@ -17,36 +19,30 @@ import {
  * @param {string} seasonId
  */
 async function readSeasonPrograms(seasonId) {
-  const [programRead, divisionRead] = await Promise.all([
-    supabase
-      .from('programs')
-      .select('id, name, is_default')
-      .eq('season_settings_id', seasonId)
-      .order('name', { ascending: true }),
-    supabase
-      .from('divisions')
-      .select('id, name, program_id')
-      .eq('season_settings_id', seasonId)
-      .order('name', { ascending: true }),
-  ]);
-  const missing = (error) => ['42P01', 'PGRST205', '42703'].includes(error?.code);
-  if (missing(programRead.error) || missing(divisionRead.error)) {
-    return { forSeason: seasonId, available: false, error: null };
+  try {
+    const [programs, divisions] = await Promise.all([
+      fetchAllPages(() =>
+        supabase.from('programs').select('id, name, is_default').eq('season_settings_id', seasonId)
+      ),
+      fetchAllPages(() =>
+        supabase.from('divisions').select('id, name, program_id').eq('season_settings_id', seasonId)
+      ),
+    ]);
+    return {
+      forSeason: seasonId,
+      available: true,
+      error: null,
+      defaultProgram: programs.find((p) => p.is_default) ?? null,
+      programs: sortByNameThenId(programs.filter((p) => !p.is_default)),
+      divisions: sortByNameThenId(divisions),
+    };
+  } catch (error) {
+    if (['42P01', 'PGRST205', '42703'].includes(error?.code)) {
+      return { forSeason: seasonId, available: false, error: null };
+    }
+    logger.warn('[usePrograms] programs not read', { code: error?.code, message: error?.message });
+    return { forSeason: seasonId, error: error?.message || 'Programs could not be loaded.' };
   }
-  const error = programRead.error || divisionRead.error;
-  if (error) {
-    logger.warn('[usePrograms] programs not read', { code: error.code, message: error.message });
-    return { forSeason: seasonId, error: error.message || 'Programs could not be loaded.' };
-  }
-  const rows = programRead.data || [];
-  return {
-    forSeason: seasonId,
-    available: true,
-    error: null,
-    defaultProgram: rows.find((p) => p.is_default) ?? null,
-    programs: rows.filter((p) => !p.is_default),
-    divisions: divisionRead.data || [],
-  };
 }
 
 /**

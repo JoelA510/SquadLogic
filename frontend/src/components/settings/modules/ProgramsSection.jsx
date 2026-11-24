@@ -370,9 +370,11 @@ export default function ProgramsSection() {
                 confirm.kind === 'merge'
                   ? `Merging "${confirm.program.name}" into ${where} removes "${confirm.program.name}"`
                   : `Deleting "${confirm.program.name}" removes the program`;
-              return moved.length > 0
-                ? `${verb}. These divisions move to ${where}: ${names(moved)}.`
-                : `${verb}. It has no divisions, so none move.`;
+              const divisionsMessage =
+                moved.length > 0
+                  ? `${verb}. These divisions move to ${where}: ${names(moved)}.`
+                  : `${verb}. It has no divisions, so none move.`;
+              return `${divisionsMessage} Settings saved for ${confirm.program.name} will be deleted.`;
             })()}
           </p>
         )}

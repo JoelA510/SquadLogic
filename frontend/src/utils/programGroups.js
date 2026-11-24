@@ -13,6 +13,16 @@ export const NO_PROGRAM_LABEL = 'No program';
 /** The `key` of the heading for the divisions in no program of their own. */
 export const NO_PROGRAM_KEY = 'none';
 
+/** Display order for a season's programs and divisions after all pages have been read.
+ * @template {{ id: string, name: string }} T
+ * @param {T[]} list
+ */
+export const sortByNameThenId = (list) =>
+  [...list].sort(
+    (a, b) =>
+      String(a.name).localeCompare(String(b.name)) || String(a.id).localeCompare(String(b.id))
+  );
+
 /**
  * The program of the league's own a division is in, or null when it is in none: a program that is
  * not listed, and the season's default ("No program"), are both "in none". One rule for the headings

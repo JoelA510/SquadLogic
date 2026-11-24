@@ -2110,14 +2110,12 @@ export default function GameSchedulingPage() {
       // booking: what "Move to" does not offer, a drop does not stage either
       // (`isSlotOnField`, the one rule for both).
       if (!isSlotOnField(targetSlot, targetFieldId)) {
-        const fieldName = (id) =>
-          fields.find((field) => String(field.id) === String(id))?.name ?? String(id);
         setApplyError(null);
         setStatusMessage(
           `${currentAssignment.homeTeamId} vs ${currentAssignment.awayTeamId} was not moved: ` +
             (targetSlot
-              ? `that time slot is booked on ${fieldName(targetSlot.fieldId)}, ` +
-                `not ${fieldName(targetFieldId)}.`
+              ? `that time slot is booked on ${fieldNameOf(targetSlot.fieldId)}, ` +
+                `not ${fieldNameOf(targetFieldId)}.`
               : 'that time slot is not one of this season\u2019s game slots.')
         );
         return;
@@ -2140,8 +2138,10 @@ export default function GameSchedulingPage() {
       const updatedAssignment = {
         ...currentAssignment,
         fieldId: targetFieldId,
+        fieldName: fieldNameOf(targetFieldId),
         slotId: targetSlotId,
         gameSlotId: targetSlotId,
+        kickoff: targetSlot.start,
         start: targetSlot?.start ?? currentAssignment.start,
         end: targetSlot?.end ?? currentAssignment.end,
         weekIndex: targetSlot?.weekIndex ?? currentAssignment.weekIndex,
@@ -2164,7 +2164,7 @@ export default function GameSchedulingPage() {
           : 'Manual game move staged. Apply the schedule to persist it.'
       );
     },
-    [applyWaitsForRead, canEditSchedule, fields, slotByCellSlotId]
+    [applyWaitsForRead, canEditSchedule, fieldNameOf, slotByCellSlotId]
   );
 
   const handleDragEnd = useCallback(

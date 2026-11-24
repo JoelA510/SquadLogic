@@ -6,7 +6,7 @@
  * cannot patch a function, so `20261122010000_game_scores.sql` (F11-2) replaced `apply_game_import_job`,
  * `rollback_game_import_job`, `cancel_ready_import_job` and the guard whole, and a test still reading the old file
  * would hold everything to a body the database no longer runs (the F11 plan's finding 2: a census by file finds stale
- * bodies; read the latest definition). The statement keeps the header it had in the old file (`CREATE FUNCTION` or
+ * bodies; read the latest definition). The statement keeps the CREATE spelling it had in the old file (`CREATE FUNCTION` or
  * `CREATE OR REPLACE FUNCTION`), so a test that finds a function by that text still does.
  */
 import { readFileSync, readdirSync } from 'node:fs';
@@ -54,8 +54,10 @@ export function gameImportSqlAsItStands() {
     const newer = latest.get(span.name);
     if (!newer) continue;
     out.push(...baseLines.slice(cursor, span.start));
-    // The header as the old file wrote it, then the newer statement's own lines after its first.
-    out.push(baseLines[span.start], ...newer.lines.slice(1));
+    // Keep the CREATE spelling that these checks locate, including the latest signature and body.
+    const declaration = baseLines[span.start].split('public.')[0];
+    const signature = newer.lines[0].slice(newer.lines[0].indexOf('public.'));
+    out.push(declaration + signature, ...newer.lines.slice(1));
     cursor = span.end + 1;
     replaced[span.name] = newer.file;
   }

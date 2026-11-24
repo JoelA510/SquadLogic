@@ -23,6 +23,7 @@ BEGIN;
 
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
+\ir fixtures/confirm_game_import.psql
 
 SELECT plan(47);
 
@@ -140,6 +141,7 @@ SELECT pg_temp.stage(pg_temp.j('ja'), 1, 'ok', 'A-1', 'RD1', 'Round Park', 'Pitc
 SELECT pg_temp.stage(pg_temp.j('ja'), 2, 'ok', 'A-2', 'RD2', 'Round Park', 'Pitch 2', 'Cedar',  'Fir',   '2027-03-06', '09:00', '10:00', 1);
 SELECT pg_temp.stage(pg_temp.j('ja'), 3, 'ok', 'A-3', 'RD1', 'Round Park', 'Pitch 1', 'Birch',  'Gulls', '2027-03-13', '09:00', '10:00', 2);
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SELECT public.mark_import_job_ready_to_apply(pg_temp.j('ja'), 'games', '[]'::jsonb);
 SELECT is(pg_temp.val($$SELECT (public.map_game_import_job(pg_temp.j('ja'), jsonb_build_object(
     'divisions', jsonb_build_object('rd1', jsonb_build_object('action', 'map', 'id', pg_temp.u(1)), 'rd2', jsonb_build_object('action', 'map', 'id', pg_temp.u(2))),
     'venues', jsonb_build_object('round park', jsonb_build_object('action', 'map', 'id', pg_temp.u(30))),
@@ -152,7 +154,7 @@ SELECT is(pg_temp.val($$SELECT (public.map_game_import_job(pg_temp.j('ja'), json
         pg_temp.k2('RD1', 'Gulls'), jsonb_build_object('action', 'outside'),
         pg_temp.k2('RD2', 'Cedar'), jsonb_build_object('action', 'map', 'id', pg_temp.u(21)),
         pg_temp.k2('RD2', 'Fir'), jsonb_build_object('action', 'create')))) ) ->> 'job_id'$$), pg_temp.j('ja')::text, 'control: the mapping is stored');
-INSERT INTO marks VALUES ('apply_ja', (public.apply_game_import_job(pg_temp.j('ja'), false))::text);
+INSERT INTO marks VALUES ('apply_ja', (pg_temp.confirm_game_import(pg_temp.j('ja')))::text);
 SELECT is(pg_temp.num((SELECT v::jsonb FROM marks WHERE name = 'apply_ja'), 'created,teams') || ' ' || pg_temp.num((SELECT v::jsonb FROM marks WHERE name = 'apply_ja'), 'created,outside_teams'), '2 1',
     'control: the apply created two shells (one per division) and one outside club');
 SELECT is(pg_temp.val($$SELECT count(*) FROM public.scheduler_runs WHERE run_type = 'team' AND parameters ->> 'import_job_id' = pg_temp.j('ja')::text$$), '1',
@@ -321,6 +323,7 @@ BEGIN
         v_key := CASE p_kind WHEN 'outside' THEN 'outside_teams' ELSE 'teams' END;
     END IF;
     PERFORM set_config('request.jwt.claims', '{"sub":"11111111-1111-1111-1111-111111111111"}', true);
+    PERFORM public.mark_import_job_ready_to_apply(v_job, 'games', '[]'::jsonb);
     PERFORM public.map_game_import_job(v_job, v_map);
     v_res := public.apply_game_import_job(v_job, true);
     PERFORM set_config('request.jwt.claims', '{}', true);
@@ -446,10 +449,11 @@ CREATE FUNCTION pg_temp.mapping_tb() RETURNS jsonb LANGUAGE sql AS $f$
             pg_temp.k2('TB', 'T5'), jsonb_build_object('action', 'map', 'id', pg_temp.u(305)), pg_temp.k2('TB', 'T6'), jsonb_build_object('action', 'map', 'id', pg_temp.u(306))))
 $f$;
 GRANT EXECUTE ON FUNCTION pg_temp.mapping_tb() TO PUBLIC;
+SELECT public.mark_import_job_ready_to_apply(pg_temp.j('jc'), 'games', '[]'::jsonb);
 SELECT is(pg_temp.val($$SELECT (public.map_game_import_job(pg_temp.j('jc'), pg_temp.mapping_tb())) ->> 'job_id'$$), pg_temp.j('jc')::text, 'control: the mapping is stored');
 INSERT INTO marks VALUES ('dry_jc', (public.apply_game_import_job(pg_temp.j('jc'), true))::text);
 SELECT is(pg_temp.fpg(), (SELECT v FROM marks WHERE name = 'c_seed_fp'), 'C.0 the dry run wrote nothing (the games and the TIME TBD rows are as seeded)');
-INSERT INTO marks VALUES ('apply_jc', (public.apply_game_import_job(pg_temp.j('jc'), false))::text);
+INSERT INTO marks VALUES ('apply_jc', (pg_temp.confirm_game_import(pg_temp.j('jc')))::text);
 SELECT is((SELECT v::jsonb -> 'time_tbd' FROM marks WHERE name = 'apply_jc'), '{"inserted": 2, "updated": 2, "unchanged": 0, "removed": 1, "converted": 1}'::jsonb,
     'C.1 the TIME TBD counts: two inserted (a new one, and the converted game''s), two updated in place, one removed (the file placed it), one game converted');
 SELECT is(pg_temp.num((SELECT v::jsonb FROM marks WHERE name = 'apply_jc'), 'games,inserted') || ' ' || pg_temp.num((SELECT v::jsonb FROM marks WHERE name = 'apply_jc'), 'games,skipped,skipped-published')
@@ -486,9 +490,10 @@ SET LOCAL "request.jwt.claims" TO '{}';
 INSERT INTO public.staging_import_rows (organization_id, import_job_id, import_type, source_row_number, raw_payload, normalized_payload, validation_errors)
     SELECT organization_id, pg_temp.j('jc2'), import_type, source_row_number, raw_payload, normalized_payload, validation_errors FROM public.staging_import_rows WHERE import_job_id = pg_temp.j('jc');
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SELECT public.mark_import_job_ready_to_apply(pg_temp.j('jc2'), 'games', '[]'::jsonb);
 SELECT is(pg_temp.val($$SELECT (public.map_game_import_job(pg_temp.j('jc2'), pg_temp.mapping_tb())) ->> 'job_id'$$), pg_temp.j('jc2')::text, 'control: the second job is mapped as the first');
 INSERT INTO marks VALUES ('fp_before_jc2', pg_temp.fpg()), ('runs_before_jc2', (SELECT count(*)::text FROM public.scheduler_runs WHERE run_type = 'game'));
-INSERT INTO marks VALUES ('apply_jc2', (public.apply_game_import_job(pg_temp.j('jc2'), false))::text);
+INSERT INTO marks VALUES ('apply_jc2', (pg_temp.confirm_game_import(pg_temp.j('jc2')))::text);
 SELECT is(pg_temp.num((SELECT v::jsonb FROM marks WHERE name = 'apply_jc2'), 'nothing_to_apply') || ' ' || ((SELECT v FROM marks WHERE name = 'fp_before_jc2') = pg_temp.fpg())::text
           || ' ' || ((SELECT v FROM marks WHERE name = 'runs_before_jc2') = (SELECT count(*)::text FROM public.scheduler_runs WHERE run_type = 'game'))::text, 'true true true',
     'C.13 the same file again is nothing to apply: nothing written, no new run (the TIME TBD rows are found by their Game IDs and are unchanged)');
@@ -540,10 +545,11 @@ SELECT pg_temp.stage(pg_temp.j('jd'), 7, 'ok', 'D-8', 'TB', 'Round Park', 'Pitch
 SELECT pg_temp.stage(pg_temp.j('jd'), 8, 'tbd', 'D-9', 'TB', '', '', 'T1', 'T3', '2027-06-12', NULL, NULL, 11);                          -- a placed game given no time: taken out
 SELECT pg_temp.stage(pg_temp.j('jd'), 9, 'ok', 'D-10', 'TB', 'Round Park', 'Pitch 2', 'T1', 'T3', '2027-06-12', '10:00', '11:00', 11);  -- a NEW game on the place that game leaves
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SELECT public.mark_import_job_ready_to_apply(pg_temp.j('jd'), 'games', '[]'::jsonb);
 SELECT is(pg_temp.val($$SELECT (public.map_game_import_job(pg_temp.j('jd'), pg_temp.mapping_tb())) ->> 'job_id'$$), pg_temp.j('jd')::text, 'control: the swap file is mapped');
 INSERT INTO marks VALUES ('dry_jd', (public.apply_game_import_job(pg_temp.j('jd'), true))::text);
 SELECT is(pg_temp.fpg(), (SELECT v FROM marks WHERE name = 'd_seed_fp'), 'D.0 the dry run wrote nothing');
-INSERT INTO marks VALUES ('apply_jd', (public.apply_game_import_job(pg_temp.j('jd'), false))::text);
+INSERT INTO marks VALUES ('apply_jd', (pg_temp.confirm_game_import(pg_temp.j('jd')))::text);
 SELECT is(pg_temp.num((SELECT v::jsonb FROM marks WHERE name = 'apply_jd'), 'games,updated') || ' ' || pg_temp.num((SELECT v::jsonb FROM marks WHERE name = 'apply_jd'), 'games,inserted')
           || ' ' || ((SELECT v::jsonb -> 'refused_by_reason' FROM marks WHERE name = 'apply_jd'))::text || ' ' || pg_temp.num((SELECT v::jsonb FROM marks WHERE name = 'apply_jd'), 'games,skipped,skipped-published'),
     '3 2 {"duplicate-row": 2} 1',

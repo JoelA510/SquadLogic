@@ -16,6 +16,7 @@
  *      `game_import_changed`, naming the record) or KEEP it and say so in `kept`, as the scenario says, and what the
  *      later writer did must still be there afterwards.
  */
+import { confirmGameImport } from './helpers/confirmGameImport.js';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -197,7 +198,7 @@ function addJob(db, rows, mapping) {
     id,
     organization_id: ORG,
     job_type: 'games',
-    status: 'importing',
+    status: 'ready_to_apply',
     season_settings_id: SEASON,
     warning_summary: {},
   });
@@ -695,7 +696,7 @@ describe('the rollback judges every record it undoes (the class)', () => {
   const seedFingerprint = fingerprint(seed);
   const applied = world();
   const jobId = addJob(applied, fileQ(), mappingQ());
-  const out = rpc(applied, 'apply_game_import_job', { p_import_job_id: jobId });
+  const out = confirmGameImport(rpc, applied, jobId);
   const runId = applied.scheduler_runs.find(
     (r) => r.parameters?.import_job_id === jobId && r.run_type === 'game'
   )?.id;
@@ -803,9 +804,9 @@ describe('the finding as reported: a season with no placed games', () => {
     ),
   });
   const a = addJob(db, [tbd(1, 'R-G1', '2027-03-06', 1)], map());
-  rpc(db, 'apply_game_import_job', { p_import_job_id: a });
+  confirmGameImport(rpc, db, a);
   const b = addJob(db, [tbd(1, 'R-G1', '2027-03-13', 2)], map());
-  rpc(db, 'apply_game_import_job', { p_import_job_id: b });
+  confirmGameImport(rpc, db, b);
   const g1 = () => db.schedule_tbd.filter((s) => s.external_ref === 'R-G1');
 
   it('import B corrected the row in place', () => {

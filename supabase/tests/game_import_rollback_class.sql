@@ -30,6 +30,7 @@ BEGIN;
 
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
+\ir fixtures/confirm_game_import.psql
 
 SELECT plan(26);
 
@@ -151,13 +152,15 @@ CREATE FUNCTION pg_temp.mapping_r() RETURNS jsonb LANGUAGE sql AS $f$
                                     pg_temp.k2('RR', 'R2'), jsonb_build_object('action', 'map', 'id', pg_temp.u(912))))
 $f$;
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SELECT public.mark_import_job_ready_to_apply(pg_temp.j('ra'), 'games', '[]'::jsonb);
+SELECT public.mark_import_job_ready_to_apply(pg_temp.j('rb'), 'games', '[]'::jsonb);
 INSERT INTO marks VALUES ('map_ra', (public.map_game_import_job(pg_temp.j('ra'), pg_temp.mapping_r()))::text),
                          ('map_rb', (public.map_game_import_job(pg_temp.j('rb'), pg_temp.mapping_r()))::text);
-INSERT INTO marks VALUES ('apply_ra', (public.apply_game_import_job(pg_temp.j('ra'), false))::text);
+INSERT INTO marks VALUES ('apply_ra', (pg_temp.confirm_game_import(pg_temp.j('ra')))::text);
 SELECT is(pg_temp.num((SELECT v::jsonb FROM marks WHERE name = 'apply_ra'), 'time_tbd,inserted') || ' '
           || pg_temp.val($$SELECT game_date::text || ' w' || week_index FROM public.schedule_tbd WHERE external_ref = 'R-G1'$$),
     '1 2027-03-06 w1', 'R.1 control: import A inserted the TIME TBD game R-G1 (2027-03-06, week 1) and no placed game was written');
-INSERT INTO marks VALUES ('apply_rb', (public.apply_game_import_job(pg_temp.j('rb'), false))::text);
+INSERT INTO marks VALUES ('apply_rb', (pg_temp.confirm_game_import(pg_temp.j('rb')))::text);
 SELECT is(pg_temp.num((SELECT v::jsonb FROM marks WHERE name = 'apply_rb'), 'time_tbd,updated') || ' '
           || pg_temp.val($$SELECT count(*)::text || ' ' || min(game_date)::text || ' w' || min(week_index) FROM public.schedule_tbd WHERE external_ref = 'R-G1'$$),
     '1 1 2027-03-13 w2', 'R.2 control: import B corrected it IN PLACE by its Game ID (one row, 2027-03-13, week 2)');
@@ -226,8 +229,9 @@ CREATE FUNCTION pg_temp.mapping_q() RETURNS jsonb LANGUAGE sql AS $f$
             pg_temp.k2('QNEW', 'Shell B'), jsonb_build_object('action', 'create', 'name', 'Shell B'),
             pg_temp.k2('QNEW', 'Outside FC'), jsonb_build_object('action', 'outside')))
 $f$;
+SELECT public.mark_import_job_ready_to_apply(pg_temp.j('jq'), 'games', '[]'::jsonb);
 SELECT is(pg_temp.val($$SELECT (public.map_game_import_job(pg_temp.j('jq'), pg_temp.mapping_q())) ->> 'job_id'$$), pg_temp.j('jq')::text, 'control: the class file is mapped');
-INSERT INTO marks VALUES ('apply_jq', (public.apply_game_import_job(pg_temp.j('jq'), false))::text);
+INSERT INTO marks VALUES ('apply_jq', (pg_temp.confirm_game_import(pg_temp.j('jq')))::text);
 
 -- ── The universe, derived. ──────────────────────────────────────────────────
 -- universe(src): the (table, operation) pairs the apply's SOURCE writes into import_application_records, as 'table:operation'
@@ -242,7 +246,7 @@ CREATE FUNCTION pg_temp.written(p_src text) RETURNS text LANGUAGE sql AS $f$
       FROM regexp_matches(p_src, '(?:DELETE FROM|UPDATE|INSERT INTO) public\.([a-z_]+)', 'g') AS m
 $f$;
 CREATE FUNCTION pg_temp.apply_src() RETURNS text LANGUAGE sql AS $f$
-    SELECT p.prosrc FROM pg_proc p WHERE p.oid = 'public.apply_game_import_job(uuid, boolean)'::regprocedure
+    SELECT p.prosrc FROM pg_proc p WHERE p.oid = 'public.apply_game_import_job(uuid, boolean, jsonb)'::regprocedure
 $f$;
 CREATE FUNCTION pg_temp.rollback_src() RETURNS text LANGUAGE sql AS $f$
     SELECT p.prosrc FROM pg_proc p WHERE p.oid = 'public.rollback_game_import_job(uuid)'::regprocedure

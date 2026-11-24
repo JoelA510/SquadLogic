@@ -1084,15 +1084,8 @@ export type GameImportApplyOutcome =
     };
 
 /**
- * The confirm of a games import: run the dry run again AS THE CALLER, compare its counts with the ones the admin
- * confirmed, and apply only when every one of them still holds. When any differs nothing is written, and the answer
- * carries both sets of counts and the fresh preview, so the screen can show what changed.
- *
- * A job that already finished answers with the result it stored (`replayed: true`): a retry after a lost response is
- * not a stale preview.
- *
- * Declared: the dry run and the apply are two statements, so a change that lands between them (milliseconds) is not
- * seen here; the apply then plans against what it finds and its result says what it did.
+ * The guarded apply compares the confirmed counts under the database writer locks. If it refuses,
+ * fetch the current preview for the admin. A completed job replays its earlier result without a second write.
  */
 export async function applyGameImportConfirmed({
   rpc,
@@ -1103,24 +1096,27 @@ export async function applyGameImportConfirmed({
   jobId: string;
   confirmed: ConfirmCounts;
 }): Promise<GameImportApplyOutcome> {
+  const applied = await rpc('apply_game_import_job', {
+    p_import_job_id: jobId,
+    p_dry_run: false,
+    p_confirmed_counts: confirmed,
+  });
+  if (!applied.error) return { kind: 'applied', result: applied.data };
+  if (applied.error.code !== '22023' || applied.error.details !== GAME_IMPORT_PREVIEW_STALE) {
+    return { kind: 'error', stage: 'apply', error: applied.error };
+  }
   const preview = await rpc('apply_game_import_job', { p_import_job_id: jobId, p_dry_run: true });
   if (preview.error) return { kind: 'error', stage: 'preview', error: preview.error };
   if (record(preview.data).replayed === true) return { kind: 'applied', result: preview.data };
   const current = gameImportConfirmCounts(preview.data);
-  const differing = diffGameImportConfirmCounts(confirmed, current);
-  if (differing.length > 0) {
-    return {
-      kind: 'stale',
-      code: GAME_IMPORT_PREVIEW_STALE,
-      message:
-        'The schedule changed after this preview was made, so the import would no longer do what was confirmed. Nothing was written. Review the new preview and confirm again.',
-      differing,
-      confirmed,
-      current,
-      preview: preview.data,
-    };
-  }
-  const applied = await rpc('apply_game_import_job', { p_import_job_id: jobId, p_dry_run: false });
-  if (applied.error) return { kind: 'error', stage: 'apply', error: applied.error };
-  return { kind: 'applied', result: applied.data };
+  return {
+    kind: 'stale',
+    code: GAME_IMPORT_PREVIEW_STALE,
+    message:
+      'The schedule changed after this preview was made, so the import would no longer do what was confirmed. Nothing was written. Review the new preview and confirm again.',
+    differing: diffGameImportConfirmCounts(confirmed, current),
+    confirmed,
+    current,
+    preview: preview.data,
+  };
 }

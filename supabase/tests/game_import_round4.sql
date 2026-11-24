@@ -18,6 +18,7 @@ BEGIN;
 
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
+\ir fixtures/confirm_game_import.psql
 
 SELECT plan(13);
 
@@ -140,9 +141,10 @@ $f$;
 CREATE FUNCTION pg_temp.go(p_name text) RETURNS void LANGUAGE plpgsql AS $f$
 BEGIN
     PERFORM set_config('request.jwt.claims', '{"sub":"11111111-1111-1111-1111-111111111111"}', true);
+    PERFORM public.mark_import_job_ready_to_apply(pg_temp.j(p_name), 'games', '[]'::jsonb);
     PERFORM public.map_game_import_job(pg_temp.j(p_name), pg_temp.mapping_f());
     INSERT INTO marks VALUES ('dry_' || p_name, pg_temp.val(format('SELECT public.apply_game_import_job(%L, true)::text', pg_temp.j(p_name))));
-    INSERT INTO marks VALUES ('apply_' || p_name, pg_temp.val(format('SELECT public.apply_game_import_job(%L, false)::text', pg_temp.j(p_name))));
+    INSERT INTO marks VALUES ('apply_' || p_name, pg_temp.val(format('SELECT pg_temp.confirm_game_import(%L)::text', pg_temp.j(p_name))));
     PERFORM set_config('request.jwt.claims', '{}', true);
 END
 $f$;

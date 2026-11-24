@@ -72,6 +72,8 @@ const DASHBOARD = vi.hoisted(() => ({
         id: 'ga-1',
         slotId: 'gs-1',
         fieldId: 'v1',
+        fieldName: 'North Field',
+        kickoff: '2026-04-04T15:00:00Z',
         homeTeamId: 'lions',
         awayTeamId: 'bulls',
         start: '2026-04-04T15:00:00Z',
@@ -227,6 +229,34 @@ describe('GameSchedulingPage :: a game moved with the keyboard (M4.3)', () => {
       });
   });
   afterEach(() => rectSpy.mockRestore());
+
+  it('shows the target field and kickoff in the staged schedule before Apply', async () => {
+    TABLES.game_slots.push({
+      id: 'later-south',
+      field_id: 'v2',
+      start: '2026-04-04T20:30:00Z',
+      end: '2026-04-04T21:30:00Z',
+      week_index: 1,
+      capacity: 1,
+    });
+    try {
+      const from = await renderEditableGrid();
+      const select = within(from).getByRole('combobox', { name: /^Move lions vs bulls/ });
+      fireEvent.focus(select);
+      expect(within(select).getByRole('option', { name: /South Field.*1:30/i })).toHaveValue(
+        'v2:later-south'
+      );
+      fireEvent.change(select, { target: { value: 'v2:later-south' } });
+      fireEvent.click(within(from).getByRole('button', { name: 'Move' }));
+      expect(await screen.findByText(STAGED)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Exit Manual Override' }));
+      const moved = await screen.findByRole('row', { name: /lions vs bulls/i });
+      expect(within(moved).getByRole('cell', { name: 'South Field' })).toBeInTheDocument();
+      expect(within(moved).getByRole('cell', { name: /1:30\s*PM/i })).toBeInTheDocument();
+    } finally {
+      TABLES.game_slots.pop();
+    }
+  });
 
   it('stages a Move to through the page handler and keeps focus on the moved game', async () => {
     const from = await renderEditableGrid();

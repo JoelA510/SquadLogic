@@ -1,8 +1,9 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ProgramsSection from '../frontend/src/components/settings/modules/ProgramsSection.jsx';
 import ProgramOverview from '../frontend/src/components/teaming/ProgramOverview.jsx';
+import { usePrograms } from '../frontend/src/hooks/usePrograms.js';
 import {
   CreateProgramSchema,
   MergeProgramsSchema,
@@ -31,15 +32,22 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
     rpc: (...args) => mocks.rpc(...args),
     from: (table) => {
+      const read = (from, to, orderBy) => {
+        const rows = mocks.tables[table];
+        if (rows === 'missing')
+          return { data: null, error: { code: 'PGRST205', message: `no table ${table}` } };
+        const sorted = [...rows].sort((a, b) =>
+          a[orderBy] < b[orderBy] ? -1 : a[orderBy] > b[orderBy] ? 1 : 0
+        );
+        return { data: sorted.slice(from, Math.min(to + 1, from + 1000)), error: null };
+      };
       const builder = {
         select: () => builder,
         eq: () => builder,
-        order: () =>
-          Promise.resolve(
-            mocks.tables[table] === 'missing'
-              ? { data: null, error: { code: 'PGRST205', message: `no table ${table}` } }
-              : { data: mocks.tables[table], error: null }
-          ),
+        order: (column) => ({
+          then: (resolve) => resolve(read(0, 999, column)),
+          range: (from, to) => Promise.resolve(read(from, to, column)),
+        }),
       };
       return builder;
     },
@@ -70,6 +78,34 @@ async function ready() {
 }
 
 describe('the Programs section', () => {
+  it('shows programs in the same name order as the scoped settings panel', async () => {
+    mocks.tables.programs = [DEFAULT, { ...JUNIOR, name: 'Zulu' }, { ...MINI, name: 'alpha' }];
+    render(<ProgramsSection />);
+    await screen.findByRole('heading', { name: 'Zulu' });
+    expect(screen.getAllByRole('heading', { level: 4 }).map((h) => h.textContent)).toEqual([
+      'alpha',
+      'Zulu',
+    ]);
+  });
+
+  it('reads beyond the hosted cap for both lists, then orders names and breaks ties by id', async () => {
+    const many = Array.from({ length: 1001 }, (_, i) => ({
+      id: String(i).padStart(4, '0'),
+      name: i === 1000 ? 'alpha' : 'Zulu',
+    }));
+    mocks.tables.programs = [DEFAULT, ...many.toReversed()];
+    mocks.tables.divisions = many.toReversed().map((row) => ({ ...row, program_id: 'p-default' }));
+    const { result } = renderHook(() => usePrograms('season-1'));
+    await waitFor(() => expect(result.current.defaultProgram?.id).toBe('p-default'));
+    for (const rows of [result.current.programs, result.current.divisions]) {
+      expect(rows).toHaveLength(1001);
+      expect(rows.map((row) => row.id)).toEqual([
+        '1000',
+        ...many.slice(0, 1000).map((row) => row.id),
+      ]);
+    }
+  });
+
   it('says programs are optional, lists them with their divisions, and offers each division a program', async () => {
     await ready();
     expect(screen.getByText(/Programs are optional/)).toBeTruthy();
@@ -122,6 +158,7 @@ describe('the Programs section', () => {
     const dialog = await screen.findByRole('dialog');
     expect(dialog.textContent).toContain('U7B, U7G');
     expect(dialog.textContent).toContain('No program');
+    expect(dialog).toHaveTextContent('Settings saved for Junior will be deleted.');
     expect(mocks.rpc).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
     await waitFor(() =>
@@ -136,6 +173,7 @@ describe('the Programs section', () => {
     const dialog = await screen.findByRole('dialog');
     expect(dialog.textContent).toContain('U7B, U7G');
     expect(dialog.textContent).toContain('"Mini"');
+    expect(dialog).toHaveTextContent('Settings saved for Junior will be deleted.');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Merge' }));
     await waitFor(() =>
       expect(mocks.rpc).toHaveBeenCalledWith('admin_merge_programs', {

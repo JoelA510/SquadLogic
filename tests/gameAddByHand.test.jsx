@@ -1827,12 +1827,6 @@ describe('Codex re-review of #731, round 7: every partner of a clash, and a roll
     end: at('2026-10-03', end),
     ...extra,
   });
-  const place = (g) => ({
-    homeTeamId: g.homeTeamId,
-    awayTeamId: g.awayTeamId,
-    slotId: g.slotId,
-    weekIndex: g.weekIndex,
-  });
   const names = {
     isExternal: (id) => id === 'club-x',
     fieldName: (id) => id,

@@ -26,8 +26,9 @@ How to read the settings audit trail and spot configuration anomalies.
   with `resource_type = 'scoped_setting'` and `metadata = { setting: 'scoped_setting', field: <key>,
   scope, scope_id, scope_name, season_settings_id, old, new, frozen_completed_divisions }`; a
   null `old` or `new` means "inherited" (no value at that level), and the page shows it as
-  "Inherited" (F11-4b). The page shows the key (`field`), not its label, and not the scope's name
-  or the frozen count: those are in the metadata, which the page's search covers.
+  "Inherited" (F11-4b). The page shows the registry label when known, the scope and its recorded
+  name, and how many completed-season divisions kept their old value when that count is positive.
+  The search covers the label and the recorded metadata.
 
 ## Inspecting
 

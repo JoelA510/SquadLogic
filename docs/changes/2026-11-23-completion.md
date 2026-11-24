@@ -83,8 +83,8 @@ numbers are as of `7405db3` and will move: search by name.
 | C17 | Skill scan in CI                                                                          | done                     | #743         | 2026-11-23 |
 | C1  | Close issue #364                                                                          | done                     | issue #364   | 2026-11-23 |
 | C2  | The weekly keep-alive fails                                                               | done                     | #744         | 2026-11-23 |
-| C3  | Docs match the system                                                                     | done                     | this change  | 2026-11-23 |
-| C4  | UI follow-ups                                                                             | not started              |              |            |
+| C3  | Docs match the system                                                                     | done                     | #745         | 2026-11-23 |
+| C4  | UI follow-ups                                                                             | done                     | this change  | 2026-11-23 |
 | C5  | Games import: cleaned headers, one header helper, mock `program_id`, the discard pre-read | not started              |              |            |
 | C6  | Retire the flags nothing reads                                                            | not started              |              |            |
 | C8  | Games import: two SQL guards                                                              | not started              |              |            |

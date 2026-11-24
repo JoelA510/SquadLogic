@@ -77,6 +77,7 @@ When(
     const dialog = page.getByRole('dialog');
     await expect(dialog).toContainText(division);
     await expect(dialog).toContainText('No program');
+    await expect(dialog).toContainText(`Settings saved for ${program} will be deleted.`);
     await dialog.getByRole('button', { name: 'Delete' }).click();
     await expect(page.getByText(`Program "${program}" deleted.`)).toBeVisible();
   }

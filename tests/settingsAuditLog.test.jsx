@@ -72,9 +72,42 @@ describe('SettingsAuditLog :: a scoped setting row', () => {
     await set(null);
     render(<SettingsAuditLog />);
     expect(await changes()).toEqual([
-      `Property: ${KEY}InheritedEnabled`,
-      `Property: ${KEY}EnabledInherited`,
+      'Property: Count results against outside clubsOrganization: Synthetic FCInheritedEnabled',
+      'Property: Count results against outside clubsOrganization: Synthetic FCEnabledInherited',
     ]);
+  });
+
+  it('names a program and counts the divisions whose old value was frozen on an organization change', async () => {
+    seedMockDb({
+      season_settings: [
+        { id: 'finished', organization_id: ORG, status: 'completed' },
+        { id: 'current', organization_id: ORG, status: 'active' },
+      ],
+      divisions: [
+        { id: 'older', organization_id: ORG, season_settings_id: 'finished', name: 'U8' },
+      ],
+      programs: [
+        { id: 'junior', organization_id: ORG, season_settings_id: 'current', name: 'Junior' },
+      ],
+    });
+    await set(true);
+    const { error } = await mockSupabase.rpc('admin_set_scoped_setting', {
+      p_key: KEY,
+      p_scope: 'program',
+      p_scope_id: 'junior',
+      p_value: false,
+    });
+    expect(error).toBeNull();
+    render(<SettingsAuditLog />);
+    const details = await changes();
+    expect(details).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(
+          /Organization: Synthetic FC.*1 division in a completed season keeps its old value/
+        ),
+        expect.stringContaining('Program: Junior'),
+      ])
+    );
   });
 
   it('CONTROL: a field diff that is not a scoped setting still reads a null side as "None"', async () => {

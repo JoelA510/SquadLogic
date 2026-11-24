@@ -62,6 +62,7 @@
 
 ## Testing
 
+- [Manual QA workbook](testing/manual-qa.md) — Owner walkthrough for the Phase 1 sign-off.
 - [E2E Master Plan](testing/e2e_master_plan.md) — Playwright-BDD scope, Gherkin feature map, mock/live split.
 - [pgTAP](testing/pgtap.md) — Database-level RLS/RBAC regression testing.
 - [Test Helpers & Factories](testing/test-helpers.md) — Shared test factory/helper usage, hoisted auth-mock idiom, and migration patterns.

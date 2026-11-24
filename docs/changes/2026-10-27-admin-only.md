@@ -244,78 +244,84 @@ admin's own).
 **PR 1, frontend, mock and tests (no migration).** Merges first; nothing it changes needs the
 server change, and nothing it leaves calls an object PR 2 drops.
 
-- [ ] F1 Remove the coach role from `permissions.js`, `navigation.js`, SideNav, Members and
+- [x] F1 (#673) Remove the coach role from `permissions.js`, `navigation.js`, SideNav, Members and
   Invites; invite roles admin and staff — `tests/usePermission.test.js` and
   `tests/adminRolesParity.test.js`: no role outside `ADMIN_ROLES` has a permission or a nav;
   `tests/InvitesSettings.test.jsx`: the role options are exactly Admin and Staff (planted: coach
   left in `ASSIGNABLE_ROLES` fails).
-- [ ] F2 Remove the coach home, its cards, My Team, `useMyCoachedTeams`, the preference request
+- [x] F2 (#673) Remove the coach home, its cards, My Team, `useMyCoachedTeams`, the preference request
   UI, the role preview and impersonation, the link call — `tests/dashboardHomeRole.test.jsx`
   (new): an admin, staff and tenant_admin get the admin home, any other role `NoRoleHome`;
   `tests/organizationContextSeasonDefault.test.jsx` asserts no `link_my_coach_record` call; knip
   green proves nothing left orphaned.
-- [ ] F3 `/permits` as the admins' "Field Permits" page in the Scheduling nav, linking to Fields
+- [x] F3 (#673) `/permits` as the admins' "Field Permits" page in the Scheduling nav, linking to Fields
   & Venues for upload — `tests/coachPermitsPage.test.jsx` renamed `permitsPage.test.jsx`: an admin
   sees every permit with Open and Download; a non-admin route redirects.
-- [ ] F4 Calendar rotate and lighting names admin-only; `useScorableGames` admin-only —
-  `tests/useScorableGames.test.jsx`, `tests/practiceLightingOverridesUi.test.jsx`.
-- [ ] F5 Multi-organization gaps 1 and 2 — `tests/organizationSwitch.test.jsx` (new): a two-org
+- [x] F4 (#673) Calendar rotation, lighting requester names and scoring are admin-only. The Scores
+  page applies the permission directly. Coverage lives in `tests/scoresPage.test.jsx`,
+  `tests/TeamPortalCalendarModal.test.jsx` and `tests/practiceLightingOverridesUi.test.jsx`.
+- [x] F5 (#673) Multi-organization gaps 1 and 2 — `tests/organizationSwitch.test.jsx` (new): a two-org
   admin switches and each page read carries the switched organization's id; a redeemed invite
   lands in the redeemed organization (planted: the old refetch); every audit call from Account
   and Season settings and the password change names the active organization. E2E
   `multi_org_admin.feature` (new): an admin of Org A and Org B switches and sees each one's teams.
-- [ ] F6 Mock: coach persona and coach arms out; the coach account becomes a non-member —
+- [x] F6 (#673) Mock: coach persona and coach arms out; the coach account becomes a non-member —
   `tests/mockReadPolicies.test.js`, `tests/mockServerSideReads.test.js`,
   `tests/mockFacilityPermits.test.js`: a non-member reads nothing.
-- [ ] F7 E2E features and steps as inventoried; `TEST_COACH_EMAIL` out of `ci.yml` and docs —
+- [x] F7 (#673) E2E features and steps as inventoried; `TEST_COACH_EMAIL` out of `ci.yml` and docs —
   `npm run test:e2e` (mock) and the real-backend permits scenario as admin.
 
 **PR 2, server.**
 
-- [ ] S1 `20261103010000` as designed — pgTAP `supabase/tests/admin_only.sql` (new): the role checks
+- [x] S1 (#675) `20261104010000` as built — pgTAP `supabase/tests/admin_only.sql`: the role checks
   refuse `coach` (23514) and `create_org_invite(..., 'coach')` raises 22023; each dropped function
   is absent; each narrowed policy and `get_facility_permits` admit an admin and refuse an
   authenticated non-member and another organization's admin; the coach-read storage object is
   refused to a non-admin; `reconcile_prod_rls_drift()` runs clean; a catalogue check that every
   role `organization_members_role_check` admits is in `ADMIN_ROLES` (so `is_org_member` stays an
   admin test).
-- [ ] S2 Coach email per organization — pgTAP `import_allowlist.sql` gains: one email imported
+- [x] S2 (#675) Coach email per organization — pgTAP `import_allowlist.sql` gains: one email imported
   into two organizations makes two rows; a re-import in one organization updates its row; a
   mixed-case email is stored lower-case; `ON CONFLICT (organization_id, email)` in `seed.sql`.
-- [ ] S3 `20261103020000` — pgTAP: `coaches` has no `user_id` or `profile_id`.
-- [ ] S4 Existing pgTAP moved off the coach persona: `_fixtures.sql`, `rls_policy_matrix.sql`,
+- [x] S3 (#675) `20261104020000` — `supabase/tests/admin_only.sql` checks that the two coach
+  identity columns are absent.
+- [x] S4 (#675) Existing pgTAP moved off the coach persona: `_fixtures.sql`, `rls_policy_matrix.sql`,
   `identity_guards.sql`, `server_side_reads.sql`, `facility_permits.sql`,
   `storage_facility_permits_bucket.sql`, `coach_practice_preferences_rpc.sql`, `game_score_rpc.sql`,
-  `staff_is_admin.sql`, `definer_function_grants.sql`; deleted `coach_view.sql`.
-- [ ] S5 Harness `scripts/dbharness/prove.sh`: `M53`/`R53` and `M54`/`R54`; plants, each run and
+  `staff_is_admin.sql`, `definer_function_grants.sql`; deleted `coach_view.sql`. The later preference
+  rules in #683 retired `coach_practice_preferences_rpc.sql`.
+- [ ] S5 (#675, partial verification; see “S5 plants” below) Harness `scripts/dbharness/prove.sh`: `M53`/`R53` and `M54`/`R54`; plants, each run and
   failing: a coach arm back in `get_facility_permits`; `coach` left in the role check; the
   finalizer's lookup unscoped by organization; `reconcile_prod_rls_drift`'s spec still naming
   `user_id`; an md5 guard skipped on a changed body; reverts checked by catalogue fingerprint
   against a build at `20261102010000`. Older smokes that call dropped objects reduced to "stays
   gone", their plants retired or re-aimed, as R2 did.
-- [ ] S6 `supabase/catalog-snapshot.json` regenerated; docs listed above.
+- [x] S6 (#675) `supabase/catalog-snapshot.json` regenerated; docs listed above.
 
-- [ ] S7 **Coach-to-child link in the coach import** (owner, 2026-10-27). Today nothing in
+- [x] S7 (#675) **Coach-to-child link in the coach import** (owner, 2026-10-27). Today nothing in
   production writes `coach_team_requests`, so no coach anchors a team. The coach import gains an
   optional column naming the coach's children by player registration id (one or more, separated by
-  `;` or `,`; header aliases such as `Child Registration ID`, `Player ID`), on the import
+  `;` or `,`; headers `Child Registration ID` and `Child ID`), on the import
   allowlist. `finalize_coach_import_job` writes one `coach_team_requests` row per id that matches a
   player of the same organization (the same season once E3a lands); an id that matches nothing is
   listed in the import's result and is never fatal; a re-import replaces that coach's imported
   links. Players are imported before coaches; the import screen says so. pgTAP: two ids make two
   links; an unknown id is reported and writes nothing; another organization's player is never
-  linked; a re-import replaces the links. Mock twin and an E2E: import players, then coaches with a
-  child column, then generate teams: the coach's child anchors the coach's team.
+  linked; a re-import replaces the links. The mock and `ingestion_hardening.feature` cover importing
+  players and then coaches with a child column. `tests/teamAnalysisEligibility.test.jsx` covers the
+  resulting coach-to-child team anchor.
 
 ## Done when
 
 - [ ] Every task's test passes on its branch and every new check was shown failing first.
-- [ ] Unchanged, each tested: an admin's per-team CSV, XLSX and calendar downloads and the master
+  The #675 build notes identify the plants that were only statically reviewed.
+- [x] (#673, #675) Unchanged, each tested: an admin's per-team CSV, XLSX and calendar downloads and the master
   XLSX (`teamScheduleExport.test.js`, `schedule_exports.feature` admin scenarios); admin permit
   upload and delete (`facility_permits.sql`); score entry and standings behind their settings
   (`game_score_rpc.sql`); the coach import and rollback (`ingestion_hardening.feature`); team
   coach assignment (`teamCoaches.test.js`); the season fixture suite.
-- [ ] The Definition of Done gates (AGENTS.md section 3), and the full gate, pass.
+- [x] (#673, #675) Both PRs passed their required CI checks, including Build & Test, pgTAP and
+  the real-backend E2E. The PR descriptions record the local Definition of Done results.
 
 ## Decisions for the owner (each with a recommendation)
 

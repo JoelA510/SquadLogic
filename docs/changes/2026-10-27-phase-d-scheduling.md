@@ -296,40 +296,41 @@ Each PR runs the season fixture suite and the full Definition of Done.
 
 **PR A, home/away** (no migration): the three tasks of the 2026-10-22 plan in one PR.
 
-- [ ] A1 Warning — `tests/gameMetrics.test.js`: A hosting B, C and D gives one
+- [x] A1 (#674) Warning — `tests/gameMetrics.test.js`: A hosting B, C and D gives one
       `home-away-imbalance` for A (3-0); the season extract gives 0; `tests/countUnits.test.js` and
       `tests/scoringEngineDrift.test.js` declare it. Fails today (no such type).
-- [ ] A2 `keepSides` and page wiring — `tests/gameScheduling.test.js` (team-2 hosts when kept; bad
+- [x] A2 (#674) `keepSides` and page wiring — `tests/gameScheduling.test.js` (team-2 hosts when kept; bad
       entries throw) and `tests/gameSchedulingKeepSides.test.jsx` (a saved team-2 home game stays).
-- [ ] A3 Index parity — `tests/gameScheduling.test.js`: n=2..16 ordered and shuffled UUIDs, spread
+- [x] A3 (#674) Index parity — `tests/gameScheduling.test.js`: n=2..16 ordered and shuffled UUIDs, spread
       <= 1, odd n exactly (n-1)/2, longest run <= 2; identical (week, slot, field, pair) sets to today;
       shown failing against the loose rule and with matchups re-sorted by home id.
 
 **PR B, practices per division and practice TIME TBD** (migration 1).
 
-- [ ] B1 Columns, RPC, form — pgTAP `supabase/tests/practices_per_division.sql`: defaults 1 / NULL
+- [x] B1 (#676) Columns, RPC, form — pgTAP `supabase/tests/practices_per_division.sql`: defaults 1 / NULL
       on an existing division; 8 and 14 refused (23514); the RPC keeps on NULL, clears on 0, audits
-      before and after, refuses a non-admin; `tests/divisionPracticeSettings.test.jsx`: the two fields
-      save and read back (axe, keyboard).
-- [ ] B2 Units and the two checks — `tests/autoSchedulerPracticeUnits.test.js` (new, executes the
+      before and after, refuses a non-admin. `tests/teamingConfigurationAdvice.test.jsx` exercises
+      the two fields on the Teams page, including invalid values and the save.
+- [x] B2 (#676) Units and the two checks — `tests/autoSchedulerPracticeUnits.test.js` (new, executes the
       solver): a division at 2 with 5 open weekdays places 2 per team on 2 weekdays; a 60-minute
       division never takes a 45-minute slot; a team holding 1 of 2 rows gets 1 unit and its new one
       avoids that weekday; slots on one weekday only give `not-enough-days`; no slot of the length
       gives `practice-length`; N=0 places nothing and reports nothing. Shown failing against
       today's solver. `tests/autoSchedulerDatedSweep.test.js` stays byte-identical (unchanged).
-- [ ] B3 Run results per unit — `tests/practiceMetrics.test.js` (`buildPracticeRunResults`): a team
+- [x] B3 (#676) Run results per unit — `tests/practiceMetrics.test.js` (`buildPracticeRunResults`): a team
       given 1 of 2 keeps an `unassigned` entry (fails today: it is filtered out); the panel shows "1 of 2".
-- [ ] B4 Writer gate — pgTAP `practice_writer_v3.sql` gains: a new auto row over capacity, in
+- [x] B4 (#676) Writer gate — pgTAP `practice_writer_v3.sql` gains: a new auto row over capacity, in
       another division's slot, of the wrong length, on a weekday the team holds, or past N is refused
       naming the row; the same rows `manual` are accepted (unchanged); `tests/practiceWriterV3.test.js`
       pins the reason list to core and Deno.
-- [ ] B5 `schedule_tbd` and the practice shortfall — pgTAP `schedule_tbd.sql`: a save leaving a
+- [x] B5 (#678) `schedule_tbd` and the practice shortfall — pgTAP `schedule_tbd.sql`: a save leaving a
       team at 1 of 2 writes `missing_count 1` with the payload's reason; a team absent from the payload
       is still counted (roster subject set; planted: derived from the payload fails); a later full save
       removes it; RLS: another organization's admin and a non-member read nothing.
-- [ ] B6 Core `schedulePractices` refusal — `tests/practiceScheduling.test.js`: `practicesPerWeek: 2`
+- [x] B6 (#676) Core `schedulePractices` refusal — `tests/practiceScheduling.test.js`: `practicesPerWeek: 2`
       throws by name.
-- [ ] B7 Mock twin, E2E — `tests/e2e/features/practices_per_division.feature`: set U10 to 2 x 60,
+- [ ] B7 (#676, #678) The mock and `tests/e2e/features/practices_per_division.feature` shipped.
+      The PRs record individual plants, with incomplete evidence for the full set below. Set U10 to 2 x 60,
       run, stage, apply; each U10 team shows two practices on two days; a forced shortfall shows TIME
       TBD with its reason. Harness plants (each run, each failing): the length check skipped, the
       weekday check skipped, the shortfall derived from the payload, the md5 guard skipped; revert by
@@ -338,37 +339,40 @@ Each PR runs the season fixture suite and the full Definition of Done.
 **E, the master export:** inside PR B if its review stays one sitting, else its own small PR after B
 (decision 11).
 
-- [ ] E1 Game TBD persistence — pgTAP: `persist_game_schedule` writes the run's unscheduled games;
-      bad entries refused; md5 guard planted.
-- [ ] E2 Export rows — `tests/outputGeneration.test.js`: a practice item with `missing_count 2` gives
+- [ ] E1 (#678) `supabase/tests/schedule_tbd.sql` covers persistence of the run's unscheduled
+      games and refusal of malformed entries. The migration has an md5 guard. The PR's executed
+      plant list leaves the requested guard plant unverified.
+- [x] E2 (#678) Export rows — `tests/outputGeneration.test.js`: a practice item with `missing_count 2` gives
       two `TIME TBD` rows; a game item a home and an away row; `tests/publicationBaseline.test.js`:
       2 TBD then 1 now is reported, not ambiguous (fails today: `PARITY_KEY_AMBIGUOUS`);
       `tests/scheduleExportsUi.test.jsx`: the master lists them and no longer says they are missing.
 
 **PR F, the demo** (migration 2; after B).
 
-- [ ] F1 Seed and grid — `tests/demoSeed.test.js` and `tests/demoPracticeSeed.test.js`: U4 0, U5-U12
-      2 x 60, U14+ 2 x 90; every slot Monday to Friday; 128 seeded rows, two per U5-U8 team on two
+- [x] F1 (#681) Seed and grid — `tests/demoSeed.test.js` and `tests/demoPracticeSeed.test.js`: U4
+      keeps four 30-minute Saturday sessions under owner answer 5. U5-U12 have 2 x 60, U14+ have
+      2 x 90. The 132 seeded rows include two per U5-U8 team on two
       weekdays, none overlapping a coach's other team; the solver run on the rest (executed in the test)
       places all 120 with 0 TIME TBD. pgTAP `demo_practice_schedule.sql`: a started demo holds them and
       a completed practice run; a seed row with no slot refuses the start (planted).
-- [ ] F2 Real-backend demo scenario: start, see U5-U8 scheduled, run the auto-scheduler, apply, the
-      master CSV has every team's two practices; the CPU measurement in the PR body.
+- [x] F2 (#681) `real_backend_demo.feature` covers starting a demo, the seeded U5-U8 schedule,
+      running the auto-scheduler, applying it and reading the master CSV. The PR F build notes
+      record the Node CPU measurement.
 
 **PR D, the browser optimizer** (no migration; after B).
 
-- [ ] D1 `prepare` and `verify` — Deno tests: `verify` refuses a changed input (409), refuses an
+- [x] D1 (#682) `prepare` and `verify` — Deno tests: `verify` refuses a changed input (409), refuses an
       over-capacity placement, a coach double-booking and a must breach as `verify-refused`, and
       persists the evaluation run; a body carrying its own lock or preferences is ignored (planted).
-- [ ] D2 Worker — `tests/practiceOptimizerWorker.test.js`: the worker module and `verify` on one
+- [x] D2 (#682) Worker — `tests/practiceOptimizerWorker.test.js`: the worker module and `verify` on one
       input give equal placements and score; cancel stops it; an error falls back to `solve`;
       `config/bundle-budget.json` rule shown failing at a 1 KB cap, then set.
-- [ ] D3 Panel — `tests/autoSchedulerPanelTermination.test.jsx`: progress, cancel, "ran in your
+- [x] D3 (#682) Panel — `tests/autoSchedulerPanelTermination.test.jsx`: progress, cancel, "ran in your
       browser" or "ran on the server" said; E2E `auto_scheduler.feature` runs through the worker in mock mode.
 
 **PR C1, preference rules: server and import** (migration 3; after admin-only PR 2).
 
-- [ ] C1 The prefs plan's P1 tests (pgTAP CHECKs, admin-only RPCs, Accept all's expected count,
+- [x] C1 (#683) The prefs plan's P1 tests (pgTAP CHECKs, admin-only RPCs, Accept all's expected count,
       backfill on planted rows) plus: per-unit judging (`tests/coachPreferenceRules.test.js`: {Tue, Thu}
       must at N=2 lands Tue and Thu; a must no slot meets gives TIME TBD naming the rule); the drift
       test over the new shape; pgTAP `practice_preference_import.sql` (blank team for a two-team coach
@@ -376,7 +380,7 @@ Each PR runs the season fixture suite and the full Definition of Done.
 
 **PR C2, preference screens** (no migration; after C1).
 
-- [ ] C2 Import preview, Pending musts with Accept all, rules list and editor, conflicts —
+- [x] C2 (#685) Import preview, Pending musts with Accept all, rules list and editor, conflicts —
       `tests/preferenceImport.test.jsx`, `tests/pendingMusts.test.jsx` (Accept all's dialog names the
       count and conflicts; keyboard and axe); E2E `practice_preferences_import.feature`.
 
@@ -384,7 +388,8 @@ Each PR runs the season fixture suite and the full Definition of Done.
 
 - [ ] Every task's test passes on its branch and was shown failing first; the Unchanged list's
       tests pass; the season fixture suite and the Definition of Done gates pass on every PR.
-- [ ] `docs/LESSONS_LEARNED.md`, `docs/MODEL_GAPS.md` (GAP-28's export half closed),
+      #676 records two cases that were only statically reviewed for plant coverage.
+- [x] (#676, #678, #681, #682, #683, #685) `docs/LESSONS_LEARNED.md`, `docs/MODEL_GAPS.md` (GAP-28's export half closed),
       `docs/operations/edge-function-budget.md` (the modes), `bundle-budget.md`,
       `fixtures/demo-2026/README.md`, and the two folded plans point here.
 

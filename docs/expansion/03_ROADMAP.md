@@ -112,7 +112,8 @@ Operator-owned (pre-release verification):
 
 Engineering backlog:
 
-- [ ] Automated accessibility checks in E2E (`@axe-core/playwright`) and a post-redesign WCAG 2.2 AA re-certification pass (the pre-redesign certification was retired with the redesign).
+- [x] (#580, #604) Playwright runs axe on the routes and dialogs in `tests/e2e/features/accessibility.feature` in both themes. `tests/accessibilityRoutes.test.js` checks route coverage.
+- [ ] Complete the post-redesign WCAG 2.2 AA re-certification.
 - [ ] Lighthouse CI performance budget for the production bundle.
 - [ ] One-click snapshot-aware teaming re-run from the co-ed merge/split modal (currently players move and rosters are rebuilt in the Team Builder).
 - [ ] v1.1 feature areas — import write-through completion (team promotion), placeholder coaches/admin swap — see [`v1.1-planning.md`](v1.1-planning.md).

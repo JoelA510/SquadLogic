@@ -65,8 +65,10 @@ was checked on the date above; each item says how.
   2026-10-22, and a manual dry run (run 183) passed both jobs (*executed*). Both buckets held no
   objects (*executed*, `storage.objects`), so that run proved the secrets are present and the list
   call is accepted, not a deletion ([storage-retention.md](./storage-retention.md)).
-- **Phases B to E:** planned (`docs/changes/2026-10-22-phase-*.md`), not built; each waits for the
-  owner's approval. They are not part of 1.2.0.
+- **Phases B to E** shipped on `main` after 1.2.0. The merged work includes teaming (#647, #651,
+  #652, #654, #656, #658),
+  field permits (#669, #670, with admin-only access in #673 and #675), scheduling (#674, #676,
+  #678, #681–#683, #685), and seasons and programs (#666, #679, #680, #684).
 
 ## Operator Checks Before Tagging
 

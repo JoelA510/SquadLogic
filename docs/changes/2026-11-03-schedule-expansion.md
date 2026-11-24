@@ -1355,16 +1355,16 @@ migration is needed; the audit row for 2,400 ids is over 100 KB (then store a co
 
 Depends on: PR 1. Review (c) because it changes the solver (`pinned`).
 
-- [ ] B1 (M) `scheduleGames({ pinned })` and the `carried` output, as 3.5. Test `tests/gameSchedulingPinned.test.js`,
+- [x] B1 (#709) (M) `scheduleGames({ pinned })` and the `carried` output, as 3.5. Test `tests/gameSchedulingPinned.test.js`,
       the worked cases: no `pinned` equals the base (taken first); a pinned game on the only slot leaves the new
       matchup TIME TBD (`no-slot-available`) rather than double-booked; a matchup is consumed, preferring the same week; a
       pair outside the round robin occupies its slot and consumes none; a new game cannot clash with a pinned game's
       team or coach time; sides are kept; `freeze` still throws.
-- [ ] B2 (M) The page passes the saved Published games as `pinned`, merges `carried` into the review and says "N Published
+- [x] B2 (#709) (M) The page passes the saved Published games as `pinned`, merges `carried` into the review and says "N Published
       games kept as they are". Test `tests/gameSchedulingPublishedRegenerate.test.jsx`: three Published, three
       unpublished; after regenerating, the three are byte-equal (id, slot, time) and the staged list satisfies
       `publishedOmissions` (PR 1's helper is the oracle); nothing Published moved.
-- [ ] B3 (S) Docs: one line in AGENTS.md "Working conventions" ("regeneration never moves a Published game", beside the
+- [x] B3 (#709) (S) Docs: one line in AGENTS.md "Working conventions" ("regeneration never moves a Published game", beside the
       roster line), `docs/FREEZE_SCOPES.md` (a pointer to `pinned`).
 
 Plants: `pinned` ignored (the "carried unchanged" case); a pinned slot's capacity not consumed (the double-booking
@@ -1403,8 +1403,8 @@ dialog's Confirm enabled with no reason.
 Depends on: nothing. Review (c) because it holds the matching and conflict-audit logic in core (label matching, "not
 judged" versus clear coverage); rule 14 does not name it because it persists nothing.
 
-- [ ] D1 (M) `scripts/build-schedule-fixture.mjs`, `fixtures/schedule-2026/` and `tests/scheduleFixture.test.js`, as 4.9.
-- [ ] D2 (L) `packages/core/src/scheduleImport/` (`parseRows`, `mapping`, `audit`, `reasonCodes`, `index`): dates and
+- [x] D1 (#706) (M) `scripts/build-schedule-fixture.mjs`, `fixtures/schedule-2026/` and `tests/scheduleFixture.test.js`, as 4.9.
+- [x] D2 (#706) (L) `packages/core/src/scheduleImport/` (`parseRows`, `mapping`, `audit`, `reasonCodes`, `index`): dates and
       times, label normalisation (importing `normaliseExternalLabel` makes `externalImport` **wired for the first time**;
       the unwired-layer census is updated in the same PR and says so), mapping proposals, the week rule, the conflict
       audit with its coverage sentence. Tests: `tests/scheduleImportParse.test.js` (both date forms, 24-hour and 12-hour
@@ -1821,11 +1821,11 @@ Rule 14: no (pure code and fixtures; nothing is persisted). Owner cost: none ope
 (the fixture is invented). Review (c) because it holds the matching, alias and settings-proposal logic in core and the
 probable-move pairing.
 
-- [ ] J1 (M) `scripts/build-practice-fixture.mjs`, `fixtures/practice-schedule-2026/` and
+- [x] J1 (#708) (M) `scripts/build-practice-fixture.mjs`, `fixtures/practice-schedule-2026/` and
       `tests/practiceScheduleFixture.test.js`, as 4.11.7: the shape counts; every name placeholder-shaped; every plant
       counted independently from the CSV; the pre-plant copy counts none; `--check` clean; `practice-invalid.csv`
       reaches every refusal reason.
-- [ ] J2 (L) `packages/core/src/practiceImport/` (`parseRows`, `slotKey`, `mapping`, `aliases`, `probableMoves`, `reasonCodes`,
+- [x] J2 (#708) (L) `packages/core/src/practiceImport/` (`parseRows`, `slotKey`, `mapping`, `aliases`, `probableMoves`, `reasonCodes`,
       `index`), registered in the core index: days, times (both forms, `12:00 AM`, `12:30 PM`), `End` versus `Length`, a blank
       `Team` as an open slot, `Use = hold`, the closed refusal reasons of 4.11.4, label normalisation through
       `normaliseExternalLabel` (shared with PR 4), mapping and alias proposals (4.11.5), the division-settings proposal, and the probable-move pairing (4.11.6): a pure
@@ -1838,7 +1838,7 @@ probable-move pairing.
       level, "team X: N rows leaving, N arriving"; **the swap case**: two days exchanged give one team-level pair and
       never an ambiguous 1:1 pairing; the new rows of a probable move are **unticked by default**; a team with rows on one
       side only is not paired).
-- [ ] J3 (S) Docs: the fixture README, and one dated paragraph in `docs/operations/ingestion-pipeline.md` (the practice
+- [x] J3 (#708) (S) Docs: the fixture README, and one dated paragraph in `docs/operations/ingestion-pipeline.md` (the practice
       file's columns).
 
 Plants: the parser reads a stray-space label as a second team; an alias proposal applied over an exact match; a team on

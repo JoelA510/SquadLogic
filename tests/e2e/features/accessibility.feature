@@ -22,6 +22,16 @@ Feature: Every top-level route passes an automated accessibility scan
     When I switch the sign-in page to the dark theme
     Then axe finds no serious or critical violations on "/login" in the "dark" theme
 
+  Scenario: The Features panel offers the current switches in both themes
+    Given I am logged into SquadLogic as an admin
+    When I open "/settings" and see its "Settings" heading
+    And I open the Features settings tab
+    Then the Features panel offers Player Rating and omits the retired switches
+    And axe finds no serious or critical violations on "/settings" in the "light" theme
+    When I switch to the dark theme on this page
+    Then the Features panel offers Player Rating and omits the retired switches
+    And axe finds no serious or critical violations on "/settings" in the "dark" theme
+
   Scenario: Arrow keys move within the players grid and Tab leaves it (WCAG 2.1.2)
     Given I am logged into SquadLogic as an admin
     When I open "/players" and see its "Players" heading

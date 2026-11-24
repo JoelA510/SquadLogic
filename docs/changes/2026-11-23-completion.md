@@ -85,8 +85,8 @@ numbers are as of `7405db3` and will move: search by name.
 | C2  | The weekly keep-alive fails                                                               | done                     | #744         | 2026-11-23 |
 | C3  | Docs match the system                                                                     | done                     | #745         | 2026-11-23 |
 | C4  | UI follow-ups                                                                             | done                     | #746         | 2026-11-23 |
-| C5  | Games import: cleaned headers, one header helper, mock `program_id`, the discard pre-read | done                     | this change  | 2026-11-23 |
-| C6  | Retire the flags nothing reads                                                            | not started              |              |            |
+| C5  | Games import: cleaned headers, one header helper, mock `program_id`, the discard pre-read | done                     | #747         | 2026-11-23 |
+| C6  | Retire the flags nothing reads                                                            | done                     | this change  | 2026-11-23 |
 | C8  | Games import: two SQL guards                                                              | not started              |              |            |
 | C9  | Retire the legacy `games` table (F11-5)                                                   | not started              |              |            |
 | C7  | Paired practice days (PR 12)                                                              | not started              |              |            |

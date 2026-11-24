@@ -12,7 +12,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { FEATURE_FLAGS } from '../frontend/src/constants/featureFlags.js';
+import { FEATURE_CATALOG, FEATURE_FLAGS } from '../frontend/src/constants/featureFlags.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'frontend', 'src');
 const REFERENCE = /FEATURE_FLAGS\.([A-Za-z_][A-Za-z0-9_]*)/g;
@@ -33,6 +33,25 @@ function unknownKeys(text) {
 }
 
 describe('FEATURE_FLAGS references', () => {
+  it('retires the nine unused keys and keeps the dashboard accessibility flag', () => {
+    const retired = [
+      'advanced_fairness',
+      'coach_overlap_strict',
+      'spatial_canvas',
+      'schedule_minimap',
+      'enterprise_overlays',
+      'list_view_toggle',
+      'ghost_rosters',
+      'pim_guardrails',
+      'fuzzy_import_mapping',
+    ];
+    const registered = Object.values(FEATURE_FLAGS);
+    const offered = FEATURE_CATALOG.map((entry) => entry.key);
+    expect(registered).toContain('accessibility_list_view');
+    expect(offered).toContain('player_rating');
+    expect(retired.filter((key) => registered.includes(key) || offered.includes(key))).toEqual([]);
+  });
+
   it('every key the frontend names is defined in the registry', () => {
     let references = 0;
     const unknown = [];

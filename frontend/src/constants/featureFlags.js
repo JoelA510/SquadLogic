@@ -21,23 +21,8 @@ import { IS_DEV_SERVER } from '../env.js';
  */
 
 export const FEATURE_FLAGS = {
-  // Advanced scheduling complexities (Phase 1.2+)
-  ADVANCED_FAIRNESS: 'advanced_fairness',
-  COACH_OVERLAP_STRICT: 'coach_overlap_strict',
-
-  // High-impact UI features (Phase 4)
-  SPATIAL_CANVAS: 'spatial_canvas',
-  SCHEDULE_MINIMAP: 'schedule_minimap',
-  ENTERPRISE_OVERLAYS: 'enterprise_overlays',
-
-  // Accessibility & Fallbacks (User Feedback)
-  LIST_VIEW_TOGGLE: 'list_view_toggle',
+  // The dashboard reads this flag when it offers the accessible list view.
   ACCESSIBILITY_LIST_VIEW: 'accessibility_list_view',
-
-  // Management & Automation
-  GHOST_ROSTERS: 'ghost_rosters',
-  PIM_GUARDRAILS: 'pim_guardrails',
-  FUZZY_IMPORT_MAPPING: 'fuzzy_import_mapping',
 
   // Org feature configuration ("Choose your tools" — redesign)
   YEARS_PLAYED: 'years_played',
@@ -251,8 +236,14 @@ export const FEATURE_CATALOG = [
  * each be one of their known strings, exactly (anything else is refused, not
  * coerced). Unknown keys are ignored (selective ignore).
  */
+const storedValue = z.union([z.boolean(), z.string()]).optional();
+const storedFlagShape = Object.fromEntries(
+  [...ALL_FLAGS, GENDER_MODEL_KEY, BUDDY_RULE_KEY].map((key) => [key, storedValue])
+);
+
 export const FeatureFlagSchema = z
-  .record(z.string(), z.union([z.boolean(), z.string()]))
+  .object(storedFlagShape)
+  .catchall(z.unknown())
   .transform((flags) => {
     const validated = {};
     Object.keys(flags).forEach((key) => {

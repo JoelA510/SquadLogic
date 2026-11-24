@@ -33,14 +33,22 @@ numbers are as of `7405db3` and will move: search by name.
 **The owner's answers of 2026-11-23:**
 
 - An agent merges its own pull requests under the standing rule below, migrations included.
-- An agent on the owner's machine may install the toolchain AGENTS.md names ("Where you are running"), and nothing
-  else.
+- An agent on the owner's machine may install the toolchain AGENTS.md names ("Where you are running") and what T0
+  below lists, and nothing else.
 - The feature flags that nothing reads are retired (C6). The owner approved ten; the code shows nine (C6 says why).
 - The registration-state feature (expansion B5.10) gets a plan only (C11). The owner decides on the build later.
 - The older scheduling-engine backlog is not planned ("Not planned" below).
 - The process template is released first and then applied here; it is applied from its `main` only if a release
   cannot be cut (T1, C15).
 - The desktop build comes last, and its structure is open (C16).
+
+**The owner's answers of 2026-11-24**, after the template's v1.1.0 release:
+
+- **The continuity gate and the agent-configuration check are deferred.** The release delivers the continuity reader
+  and stages both workflows; nothing here turns them on. Do not seed a ledger or install either workflow.
+- **The skill scan is adopted** (C17).
+- **The local power pack is set up on the owner's machine** under WSL2, which the agent installs if it is missing
+  (T0). Docker is on the machine; the agent configures it as the work needs.
 
 ## Rules for the run
 
@@ -66,29 +74,30 @@ numbers are as of `7405db3` and will move: search by name.
 
 ## Status
 
-| ID  | Item                                                                                      | Status                   | PR          | Date       |
-| --- | ----------------------------------------------------------------------------------------- | ------------------------ | ----------- | ---------- |
-| P   | Prep: this plan, the AGENTS.md pointer, the Codex rules, `codex/**` off Vercel            | done                     | this change | 2026-11-23 |
-| T0  | Toolchain and baseline on the machine                                                     | not started              |             |            |
-| T1  | Release agent-ready-template                                                              | not started              |             |            |
-| C15 | Take that release here                                                                    | not started              |             |            |
-| C1  | Close issue #364                                                                          | not started              |             |            |
-| C2  | The weekly keep-alive fails                                                               | not started              |             |            |
-| C3  | Docs match the system                                                                     | not started              |             |            |
-| C4  | UI follow-ups                                                                             | not started              |             |            |
-| C5  | Games import: cleaned headers, one header helper, mock `program_id`, the discard pre-read | not started              |             |            |
-| C6  | Retire the flags nothing reads                                                            | not started              |             |            |
-| C8  | Games import: two SQL guards                                                              | not started              |             |            |
-| C9  | Retire the legacy `games` table (F11-5)                                                   | not started              |             |            |
-| C7  | Paired practice days (PR 12)                                                              | not started              |             |            |
-| C10 | Manual QA workbook                                                                        | not started              |             |            |
-| C11 | Registration state (B5.10): plan only                                                     | not started              |             |            |
-| O1  | Owner: manual testing and the owner-only items                                            | owner                    |             |            |
-| C12 | Fixes from manual testing                                                                 | gated on O1              |             |            |
-| C13 | Test-suite audit                                                                          | gated on O1; plan first  |             |            |
-| C14 | Cut a release                                                                             | gated on C12             |             |            |
-| C16 | Desktop build                                                                             | gated on C13; plan first |             |            |
-| -   | PR 14, a stored slot hold                                                                 | held                     |             |            |
+| ID  | Item                                                                                      | Status                   | PR           | Date       |
+| --- | ----------------------------------------------------------------------------------------- | ------------------------ | ------------ | ---------- |
+| P   | Prep: this plan, the AGENTS.md pointer, the Codex rules, `codex/**` off Vercel            | done                     | this change  | 2026-11-23 |
+| T0  | Toolchain and baseline on the machine                                                     | not started              |              |            |
+| T1  | Release agent-ready-template                                                              | done                     | template #63 | 2026-11-23 |
+| C15 | Take that release here                                                                    | not started              |              |            |
+| C17 | Skill scan in CI                                                                          | not started              |              |            |
+| C1  | Close issue #364                                                                          | not started              |              |            |
+| C2  | The weekly keep-alive fails                                                               | not started              |              |            |
+| C3  | Docs match the system                                                                     | not started              |              |            |
+| C4  | UI follow-ups                                                                             | not started              |              |            |
+| C5  | Games import: cleaned headers, one header helper, mock `program_id`, the discard pre-read | not started              |              |            |
+| C6  | Retire the flags nothing reads                                                            | not started              |              |            |
+| C8  | Games import: two SQL guards                                                              | not started              |              |            |
+| C9  | Retire the legacy `games` table (F11-5)                                                   | not started              |              |            |
+| C7  | Paired practice days (PR 12)                                                              | not started              |              |            |
+| C10 | Manual QA workbook                                                                        | not started              |              |            |
+| C11 | Registration state (B5.10): plan only                                                     | not started              |              |            |
+| O1  | Owner: manual testing and the owner-only items                                            | owner                    |              |            |
+| C12 | Fixes from manual testing                                                                 | gated on O1              |              |            |
+| C13 | Test-suite audit                                                                          | gated on O1; plan first  |              |            |
+| C14 | Cut a release                                                                             | gated on C12             |              |            |
+| C16 | Desktop build                                                                             | gated on C13; plan first |              |            |
+| -   | PR 14, a stored slot hold                                                                 | held                     |              |            |
 
 ## Gates
 
@@ -114,6 +123,14 @@ numbers are as of `7405db3` and will move: search by name.
   load, fix it in the first pull request. Its `rm -r` rule prompts: prefer `npm` scripts and `git worktree remove` to
   a recursive delete, or the run waits for an answer.
 - Check the Supabase connector answers a SELECT.
+- **Docker.** It is installed. Start it and give it what the local Supabase stack needs (`supabase start` pulls and
+  runs about a dozen containers); change its settings only as far as a failing step requires, and say what you changed.
+- **WSL2 and the local power pack** (owner, 2026-11-24). The pack runs on Linux x86-64 or WSL2 only. Use WSL2 if it
+  is set up; if it is not, install it (`wsl --install` needs an administrator and may need a restart: if either needs
+  the owner, say so and carry on without the pack). In a checkout of agent-ready-template at `v1.1.0` inside WSL2,
+  follow `packs/local-power/README.md`: `bash packs/local-power/bootstrap.sh --plan` first, then install what the plan
+  selects, then `--check`. The pack is per machine and commits nothing here. No provider key goes into it. It is
+  never a blocker: if a step fails, record it and continue with the committed toolchain.
 - Done: the baseline results and every installed tool and version are in the report.
 
 ### T1. Release agent-ready-template (in that repository)
@@ -124,16 +141,45 @@ numbers are as of `7405db3` and will move: search by name.
 - Tasks: the template's CONTRIBUTING.md release section. If it asks for a release candidate and a trial, C15 is the
   trial. If a release cannot be cut, record why here and use the template's `main` at a named commit.
 - Done: a release tag newer than `v1.0.0`, or the recorded exception.
+- **Done 2026-11-23:** `v1.1.0` is tagged at the template's `e54d9c3` and published (_executed_ 2026-11-24). It is
+  larger than the dry run above: it also carries the template plan's stages 2 to 5.
 
 ### C15. Take that release here (docs and process; no review class)
 
-- Tasks: the `template-update` skill, including what each CHANGELOG entry asks of a project. `.agents/platforms.json`,
-  the AGENTS.md "Where you are running" section and `.codex/rules/` are already here (prep).
+- Evidence (_executed_ 2026-11-24, `v1.1.0` applied to a copy of `d3a9925`): 16 files copied, 30 updated in place,
+  none parked; `--check` then reports current and `check:instructions` passes; `npm run typecheck` and
+  `npm run check:unused` pass. **`npm run lint` fails: 270 Prettier errors, all in the delivered
+  `continuity/gate.mjs`**, which is in the template's style. The test suite was not run on the copy.
+- Tasks: the `template-update` skill, from the `v1.1.0` tag, including what each CHANGELOG entry asks of a project.
+  `.agents/platforms.json`, the AGENTS.md "Where you are running" section and `.codex/rules/` are already here (prep).
+  **Keep `continuity/` out of ESLint and Prettier** (`eslint.config.js` ignores and `.prettierignore`), as `prompts/`
+  and the delivered skills are: reformatting a delivered file makes the next apply treat it as edited. Add
+  `continuity` to the delivered-files rule in AGENTS.md ("Don't") in the same change.
+- The five live files the release adds (`continuity/gate.mjs`, its type file and README, the `continuity` skill and
+  `prompts/continuity.md`) are committed as delivered and left unused.
 - Tests: the template's `process:apply -- --target <this repo> --check` reports current; its
-  `check:instructions -- --root <this repo>` passes.
-- Not adopted, and why: the continuity ledger and the agent-configuration gate (the template does not deliver them
-  to a project yet), the local power pack (per machine), the template's "Ownership" line (it conflicts with operating
-  rule 2; the owner's call).
+  `check:instructions -- --root <this repo>` passes; this repository's Definition of Done gates pass.
+- Not adopted, and why: the continuity gate and the agent-configuration check (deferred by the owner, 2026-11-24:
+  no ledger is seeded, and `continuity.yml` and `agentshield.yml` stay under `prompts/skeletons/`); the template's
+  "Ownership" line (it conflicts with operating rule 2; the owner's call). The skill scan is C17; the local power
+  pack is T0.
+- Report upstream: the template's upgrade guide does not say a project's linter will pick up `continuity/gate.mjs`.
+
+### C17. Skill scan in CI (class (a); a workflow; after C15)
+
+- Evidence (_read_ in the `v1.1.0` delivery): `prompts/skeletons/.github/README.md` is the activation guide;
+  `prompts/skeletons/.github/workflows/skill-eval-ci.yml` holds two jobs, "Skill content (SkillEvaluator Tier 1)" and
+  "SkillEvaluator rejects invalid skills"; its helper is `prompts/skeletons/scripts/ci/skill-tier1.mjs`. The scan
+  uses Docker on the runner.
+- Tasks: follow the guide's steps for SkillEvaluator only. Copy the workflow to `.github/workflows/` with the default
+  branch filled in, and the helper to `scripts/ci/`. This repository has both skill homes, so the scan root is
+  `.agents/skills`, which holds the delivered skills and the three `squadlogic-*` ones. The copied helper is this
+  repository's file from then on: format it with Prettier. Rehearse both jobs locally with Docker before pushing.
+- Tests: `Workflow audit (zizmor)` passes; `tests/workflowPins.test.js` and `tests/rulesetRequiredChecks.test.js`
+  pass; on the pull request the scan job passes and the controls job shows it rejects its planted defects.
+- Done: both jobs report on the pull request. They are **not** added to the ruleset: the owner adds a required check,
+  so report the two check names. A finding the scan raises against one of the three `squadlogic-*` skills is fixed in
+  this pull request (both copies); one against a delivered skill is reported upstream, not edited here.
 
 ## Phase 1: build
 
@@ -372,6 +418,9 @@ A function not listed here is read from production when its pull request needs i
 - Lint: `npx eslint . --max-warnings=1`, 0 errors and 1 warning.
 - Code evidence: read by search agents at `7405db3` and spot-checked; nothing here was copied from a private note
   without a file to open.
+- Template `v1.1.0` (2026-11-24): the tag and release read with `git` and `gh api`; `apply-process.mjs --list`, a
+  real apply and `--check` on a scratch copy of `d3a9925`; `check-instructions`; `eslint`, `tsc` and `knip` on that
+  copy with this repository's installed packages.
 - Not run for this plan: the test suite beyond what the prep change touches, pgTAP, the Edge mirror tests, a build.
 - Dropped from the private hand-off notes, with the reason: the practice import's `MAX_HEADERS` naming (fixed by
   #739); the "score entry may be turned on" note (it is the owner's setting, under O1).

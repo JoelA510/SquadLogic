@@ -33,8 +33,8 @@ schedule.
   test tooling runs with CI credentials and on every contributor's machine.
 - **Moderate and low are reported, not blocked**, and cleared in the regular dependency-update
   batch.
-- **The audit has to run.** No report (offline, registry outage) fails the gate. "Couldn't
-  check" is not "clean".
+- **The audit has to run.** No report (offline, registry outage) fails the gate, and so does a
+  report of zero dependencies audited. "Couldn't check" is not "clean".
 - **It runs on a schedule, not just on PRs.** Advisories are published against code that has
   already merged. Don't rely on an update bot for this: if its jobs stop running, nothing tells
   you.

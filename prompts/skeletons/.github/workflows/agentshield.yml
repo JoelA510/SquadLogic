@@ -1,0 +1,97 @@
+name: AgentShield
+
+on:
+  pull_request:
+    branches: ['[DEFAULT BRANCH]']
+  push:
+    branches: ['[DEFAULT BRANCH]']
+  workflow_dispatch:
+
+permissions: {}
+concurrency:
+  group: agentshield-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: Agent configuration (AgentShield)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Prepare tracked configuration for scanning
+        run: node scripts/ci/agent-config-canary.mjs project "$RUNNER_TEMP/agent-config"
+      - id: scan
+        uses: affaan-m/agentshield@b0891303bdcd6037376a94263d45cfd2ff3dfb98 # v1.6.0
+        with:
+          path: ${{ runner.temp }}/agent-config
+          min-severity: high
+          fail-on-findings: 'true'
+          supply-chain: 'true'
+          supply-chain-online: 'false'
+          fail-on-supply-chain: 'true'
+          format: sarif
+          sarif-output: ${{ runner.temp }}/project.sarif
+      - name: Confirm the scanner examined configuration and completed supply-chain analysis
+        env:
+          SCAN_SUPPLY_CHAIN: ${{ steps.scan.outputs.supply-chain-status }}
+        run: node scripts/ci/agent-config-canary.mjs assert-scan "$RUNNER_TEMP"
+
+  controls:
+    name: AgentShield detects planted configuration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - run: node scripts/ci/agent-config-canary.mjs prepare "$RUNNER_TEMP/agent-controls"
+      - id: clean
+        uses: affaan-m/agentshield@b0891303bdcd6037376a94263d45cfd2ff3dfb98 # v1.6.0
+        with:
+          path: ${{ runner.temp }}/agent-controls/clean
+          min-severity: high
+          fail-on-findings: 'true'
+          format: sarif
+          sarif-output: ${{ runner.temp }}/clean.sarif
+      - id: permission
+        uses: affaan-m/agentshield@b0891303bdcd6037376a94263d45cfd2ff3dfb98 # v1.6.0
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/agent-controls/permission
+          min-severity: high
+          fail-on-findings: 'true'
+          format: sarif
+          sarif-output: ${{ runner.temp }}/permission.sarif
+      - id: secret
+        uses: affaan-m/agentshield@b0891303bdcd6037376a94263d45cfd2ff3dfb98 # v1.6.0
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/agent-controls/secret
+          min-severity: high
+          fail-on-findings: 'true'
+          format: sarif
+          sarif-output: ${{ runner.temp }}/secret.sarif
+      - name: Require each planted finding at its expected location
+        env:
+          CLEAN_OUTCOME: ${{ steps.clean.outcome }}
+          PERMISSION_OUTCOME: ${{ steps.permission.outcome }}
+          SECRET_OUTCOME: ${{ steps.secret.outcome }}
+          CLEAN_SUPPLY_CHAIN: ${{ steps.clean.outputs.supply-chain-status }}
+          PERMISSION_SUPPLY_CHAIN: ${{ steps.permission.outputs.supply-chain-status }}
+          SECRET_SUPPLY_CHAIN: ${{ steps.secret.outputs.supply-chain-status }}
+        run: node scripts/ci/agent-config-canary.mjs assert "$RUNNER_TEMP"

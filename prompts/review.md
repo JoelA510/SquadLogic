@@ -25,12 +25,19 @@ you examined.
   or fully validated.
 - Don't report style the linter owns, taste, or issues outside the diff. List
   pre-existing problems you noticed separately, marked as such.
+- A finding that is itself sensitive (an exploitable vulnerability, a secret,
+  personal data) goes through the repository's `SECURITY.md`, not a public
+  review comment; the public comment says only that one was reported.
+- A review adds no rounds: it is one pass over what was asked.
 
 ## Pass 1 - Correctness and safety (blocking)
 
 Logic errors, unhandled errors and edge cases, authorization gaps, data loss,
 injection and secrets, race conditions, broken contracts with callers, and
-migrations that can't be reverted or recovered from.
+migrations that can't be reverted or recovered from. A new dependency, network
+call, or change to the shape of stored data that the description doesn't
+mention, and a change outside the description's stated purpose, are findings
+too.
 
 ## Pass 2 - Hollow guarantees (blocking)
 

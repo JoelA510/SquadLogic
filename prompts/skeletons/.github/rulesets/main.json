@@ -2,6 +2,19 @@
   "name": "[DEFAULT BRANCH] requires pull requests with green CI",
   "target": "branch",
   "enforcement": "active",
+  "[OPTIONAL CHECKS: MOVE ONLY QUALIFIED GROUPS INTO required_status_checks AND DELETE THIS KEY BEFORE IMPORT]": {
+    "continuity.yml": [
+      { "context": "Continuity ledger and cited decisions", "integration_id": 15368 }
+    ],
+    "agentshield.yml": [
+      { "context": "Agent configuration (AgentShield)", "integration_id": 15368 },
+      { "context": "AgentShield detects planted configuration", "integration_id": 15368 }
+    ],
+    "skill-eval-ci.yml": [
+      { "context": "Skill content (SkillEvaluator Tier 1)", "integration_id": 15368 },
+      { "context": "SkillEvaluator rejects invalid skills", "integration_id": 15368 }
+    ]
+  },
   "conditions": {
     "ref_name": {
       "include": ["~DEFAULT_BRANCH"],

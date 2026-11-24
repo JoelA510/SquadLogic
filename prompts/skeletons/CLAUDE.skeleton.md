@@ -1,7 +1,8 @@
 @AGENTS.md
 
-<!-- GUIDANCE: Claude Code reads CLAUDE.md and, when one exists, ignores AGENTS.md unless it's
-     imported. The import on the first line is what makes Claude read the shared rules, on every
+<!-- GUIDANCE: Only for a repo whose `.agents/platforms.json` selects Claude Code; without it,
+     don't create this file. Claude Code reads CLAUDE.md and, when one exists, ignores AGENTS.md
+     unless it's imported. The import on the first line is what makes Claude read the shared rules, on every
      Claude Code version and setting. Keep the rules in AGENTS.md; put only Claude-Code-specific
      notes below. If there are none, delete this comment and the section and keep the import.
      Don't replace this file with a symlink to AGENTS.md: Windows checkouts without

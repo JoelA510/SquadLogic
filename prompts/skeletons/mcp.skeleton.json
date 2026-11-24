@@ -1,0 +1,13 @@
+{
+  "$comment": "[ADAPT, THEN DELETE THIS KEY: only for a project that wants every Claude Code session, cloud ones included, to reach one remote MCP server; without that need, don't create the file]",
+  "$comment-2": "[DELETE THIS KEY TOO: it is the guidance] Instantiated as .mcp.json at the repository root, which Claude Code reads at project scope. A single-repository session on Claude Code on the web loads it without an approval prompt, so list only a server you'd want every cloud session to call: a remote one, over HTTPS, that you run or trust. Never a stdio server started with an auto-installing command, which runs whatever that package is on the day. The token is named, never written: ${MEMORY_MCP_TOKEN} expands from the environment (a cloud environment's variable, or the developer's shell), and an unset one leaves the server failing to connect, not the session failing to start. Codex doesn't read this file: its equivalent is the codex-config skeleton beside this one, and the two name the same server and the same variable.",
+  "mcpServers": {
+    "memory": {
+      "type": "http",
+      "url": "[MEMORY MCP URL, HTTPS]",
+      "headers": {
+        "Authorization": "Bearer ${MEMORY_MCP_TOKEN}"
+      }
+    }
+  }
+}

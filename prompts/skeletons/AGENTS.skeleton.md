@@ -1,15 +1,22 @@
 # AGENTS.md
 
-Guidance for coding agents working in this repository.
+Guidance for coding agents working in this repository. [SELECTED AGENTS AND HOW EACH READS IT]
+Keep every rule here, not in a per-tool file, and this file under [SIZE BUDGET AND WHOSE LIMIT].
 
-<!-- GUIDANCE: The one instruction file every agent reads: Codex, Antigravity, Cursor, and
-     Copilot read it directly, Gemini CLI through `.gemini/settings.json` (new-project Phase 2.1
-     gives its content), and Claude Code through the `@AGENTS.md` import in CLAUDE.md (skeleton:
-     CLAUDE.skeleton.md). Keep every rule here, not in a second file per tool. Fill in every
+<!-- GUIDANCE: The one instruction file every agent reads. The agents this repo uses are recorded in
+     `.agents/platforms.json`, and `prompts/agent-platforms.md` says how each one reaches this
+     file (natively, through an import, through a setting) and what limits it: wire up and name
+     only those. For example: "Codex reads it directly, and Claude Code through the `@AGENTS.md`
+     import in CLAUDE.md." The budget is the strictest hard limit among them, for example "32 KiB,
+     Codex's limit for all its AGENTS.md files combined"; with none, say so. Claude Code needs
+     CLAUDE.md's `@AGENTS.md` import (skeleton: CLAUDE.skeleton.md), Gemini CLI a
+     `.gemini/settings.json` (new-project Phase 2.1 gives its content); Codex, Antigravity,
+     Cursor, and Copilot read it as it is. Fill in every
      [BRACKETED] placeholder, then delete comments like this one. Keep this file short enough to
      be read in full at the start of every session — one screen of project facts, one screen of
-     rules — and in any case under 24,000 bytes, Antigravity's per-file limit. Everything longer
-     belongs in docs/ with a pointer from here. Paths you name here are checked, by
+     rules — and in any case within the budget above; with Claude Code selected, near its
+     guidance of 200 lines, counting what CLAUDE.md imports. Everything longer belongs in docs/
+     with a pointer from here. The budget and paths you name here are checked, by
      `node <template checkout>/scripts/check-instructions.mjs --root <this repo>` (that form, not
      the template's `npm run` script: this repo's package.json doesn't have it, and the check
      reports any `npm run` it can't find). -->
@@ -23,6 +30,17 @@ Guidance for coding agents working in this repository.
 - **Entry points:** [WHERE THE CODE STARTS — routes, API, schema, e.g. `src/app/`, `src/db/`].
 - **Current milestone:** see [`docs/dev-plan.md`](./docs/dev-plan.md). Work toward the
   current milestone's exit criteria; flag anything that belongs to a later one.
+- **Ownership:** [OWNERSHIP: WHO MAINTAINS THIS CODE, AND WHAT AN AGENT DOES WITH WHAT A CHANGE SUPERSEDES]
+
+<!-- GUIDANCE: One sentence, and it changes how much an agent rewrites. Where the team owns the
+     code and wants it left cleaner: "You maintain this code: inside the files a task touches,
+     replace what it supersedes instead of leaving a shim or a second path beside it; outside
+     them, change nothing and flag what you would change." Where the code is someone else's, or
+     the smallest diff matters more (a vendored module, a regulated path, a first engagement):
+     "This code is [WHOSE]: change only what the task names, and flag the rest." Anthropic's
+     guide for its current models reports that the first form makes a model consolidate far
+     more often and write more, and that operating rule 2 alone doesn't cancel it, which is why
+     it's scoped to the files a task touches. Don't leave both. -->
 
 ## Commands
 
@@ -50,6 +68,32 @@ else, wired up in [WHERE IT'S WIRED UP].
      ships. A hook written for this repo needs the same Node step, or every gate in a cloud
      session runs on a version CI and the host don't use. nvm's script doesn't run under the hook's `set -euo pipefail` (a trial's hook
      exited 3 sourcing it): `set +eu` around the nvm lines, then restore the options. -->
+
+## Where you are running
+
+Every session starts from what is committed: this file, the workflows, and the commands above
+need only [THE RUNTIME AND TOOLS A FRESH CLONE NEEDS]. Nothing committed needs a daemon, an MCP
+server, or anything installed for one user, so a cloud session or a fresh clone is complete as
+it is. A machine may have more: [HOW A SESSION LEARNS WHAT THIS MACHINE HAS, OR "NOTHING OPTIONAL IS USED HERE"].
+Use an optional tool that answers; when one is down or absent, take the committed path and say
+so once. An offline optional tool is not a blocker, and not something to repair unless that was
+the task.
+
+**Ask first** before [ACTIONS THAT NEED A PERSON'S ANSWER — e.g. force-pushing or rewriting history, deleting data or volumes, installing a tool the lockfile doesn't pin, anything that publishes or sends outside this repository's own pull request].
+Reading anything here, running the commands above, and edits inside the task's scope need no
+answer.
+
+<!-- GUIDANCE: Name the actions; "be careful" changes nothing, and "never" is read as absolute,
+     so write "ask first" where asking is what you want. If the team uses nothing beyond the
+     repository, keep the first three sentences and the ask-first list, and say so in the
+     second placeholder. If some machines have more (a memory server, upstream skills,
+     containers), keep it out of the committed files and say how a session finds out: the
+     template has a working probe to adapt, `scripts/agent-target.mjs` in a template checkout,
+     which prints `cloud`, `local-power`, or `core` and which optional tools answer, and never
+     fails a session. A remote MCP server every session should reach goes in the project's own
+     MCP config (skeletons: `mcp.skeleton.json` for Claude Code, `codex-config.skeleton.toml`
+     for Codex); a committed `.mcp.json` is loaded by Claude Code on the web without a prompt,
+     so commit only a server you'd want every cloud session to call. -->
 
 ## Workflows
 
@@ -127,6 +171,19 @@ it on its own), `template-update` to take a template release. [WHERE THE SKILLS 
 
 <!-- operating-rules:end -->
 <!-- prettier-ignore-end -->
+
+## Security findings
+
+Follow the project's SECURITY.md for private reporting. Keep exploit details, secrets, and
+personal data out of public issues, pull requests, CI logs, and artifacts; a draft PR is still
+public in a public repo. Use synthetic reproductions and coordinate disclosure with the
+maintainer. If the reporting channel is missing, flag it to the owner; do not invent one.
+
+## Code review
+
+Any review, including an automated one on a pull request, follows `prompts/review.md`: findings
+most severe first, each with `file:line`, a concrete failure scenario, and a verification label.
+Style the linter owns is not a finding. It adds no review rounds.
 
 ## Project-specific rules
 

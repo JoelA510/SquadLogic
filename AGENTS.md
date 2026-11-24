@@ -350,7 +350,7 @@ For every reviewer, Codex's pull-request review included.
 
 ## Don't
 
-- Don't edit `prompts/` or the template's skills in `.agents/skills/` and `.claude/skills/`
+- Don't edit `continuity/`, `prompts/` or the template's skills in `.agents/skills/` and `.claude/skills/`
   (all but the three `squadlogic-*` ones): the template's `process:apply` delivered them, and a
   re-apply updates them. Report a gap upstream instead (§3, Workflows).
 - Don't add a dependency without flagging it in the PR description with the reason.

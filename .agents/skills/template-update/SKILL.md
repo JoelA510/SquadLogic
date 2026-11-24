@@ -2,8 +2,10 @@
 name: template-update
 description: "Use when this repository should take a release of the template it was built from, or a template update pull request needs finishing. Runs prompts/template-update.md — finds the template version it has, reads the CHANGELOG to the release, brings the process files across, merges each parked .template, and does what the release's entries ask."
 metadata:
-  argument-hint: "<the release tag to take, and the template's repository URL>"
+  argument-hint: "the release tag to take, and the template's repository URL"
 ---
+
+# Apply a template release
 
 Take the update exactly as written in `prompts/template-update.md`. Read that file in full first;
 it is the authoritative instruction set, and this skill only wires it up.

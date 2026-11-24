@@ -1,0 +1,71 @@
+name: Continuity
+
+on:
+  pull_request:
+    branches: ['[DEFAULT BRANCH]']
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+  push:
+    branches: ['[DEFAULT BRANCH]']
+  schedule:
+    - cron: '23 6 * * 1'
+  workflow_dispatch:
+
+permissions: {}
+concurrency:
+  group: continuity-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: Continuity ledger and cited decisions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      TREE: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select the protected base and its reader
+        shell: bash
+        env:
+          EVENT_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          [[ "$TREE" =~ ^[0-9a-f]{40}$ && "$(git rev-parse HEAD)" == "$TREE" ]]
+          case "$GITHUB_EVENT_NAME" in
+            pull_request) base=$EVENT_BASE; [[ "$(git rev-parse --verify "$TREE^1")" == "$base" ]] ;;
+            push) base=$EVENT_BASE ;;
+            schedule|workflow_dispatch)
+              [[ "$GITHUB_REF" == "refs/heads/$DEFAULT_BRANCH" ]]
+              base=$(git rev-parse --verify "$TREE^1") ;;
+            *) exit 1 ;;
+          esac
+          [[ "$base" =~ ^[0-9a-f]{40}$ && "$base" != "$TREE" ]]
+          git merge-base --is-ancestor "$base" "$TREE"
+          # A missing reader is an error. First merge the gate and seed under ordinary CI.
+          git show "$base:continuity/gate.mjs" > "$RUNNER_TEMP/base-gate.mjs"
+          # Use the protected checkout for runner setup.
+          git checkout --quiet --detach "$base"
+          echo "BASE=$base" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Check the candidate Git tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          selection=()
+          case "$GITHUB_EVENT_NAME" in
+            schedule|workflow_dispatch) selection=(--all) ;;
+          esac
+          node "$RUNNER_TEMP/base-gate.mjs" check --root "$GITHUB_WORKSPACE" \
+            --base "$BASE" --tree "$TREE" --event-file "$GITHUB_EVENT_PATH" --stale warn "${selection[@]}"

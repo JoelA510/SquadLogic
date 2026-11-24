@@ -1,4 +1,4 @@
-# [ADAPT, THEN DELETE THIS LINE: every step runs a script this repository has, and each job `name` is a required check in .github/rulesets/main.json]
+# [ADAPT, THEN DELETE THIS LINE: every step runs a script this repository has, every gate the repository's own check runs has a step here (add any this file lacks), and each job `name` is a required check in .github/rulesets/main.json]
 #
 # The gate on every pull request (new-project Phase 2.5; existing-project audit §7), for a Node
 # project. Another stack keeps the shape (no token permissions, actions pinned by commit, the
@@ -6,15 +6,16 @@
 # commands; the steps marked "node pack" are the node standards'. The dependency audit is its own
 # workflow (docs/dependency-policy.md), and Dependabot (.github/dependabot.yml) keeps the pins
 # and the dependencies current.
+# Rehearse optional agent checks using the staged .github/README.md before requiring them.
 name: CI
 
 on:
   push:
     branches:
-      - main
+      - '[DEFAULT BRANCH]'
   pull_request:
     branches:
-      - main
+      - '[DEFAULT BRANCH]'
 
 # Nothing by default; each job asks for what it uses. These jobs only read the repository.
 permissions: {}
@@ -61,6 +62,11 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      # The formatter checks, it never writes (Phase 2.5's tooling): a `format:check` script, such as
+      # `prettier --check .`. Without this step, a "CI runs format" claim in AGENTS.md is untrue.
+      - name: Format
+        run: npm run format:check
 
       # Node pack (standard node.unused-code): files, exports, and dependencies nothing uses. Needs
       # knip as a dev dependency and a `check:unused` script that runs it.

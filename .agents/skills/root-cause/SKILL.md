@@ -2,8 +2,10 @@
 name: root-cause
 description: Use when something is broken and the cause isn't known. Runs prompts/investigate.md — reproduce the reported case, confirm a baseline, test hypotheses one at a time, fix the root cause, find sibling occurrences.
 metadata:
-  argument-hint: "<symptom, where it was seen, expected vs actual>"
+  argument-hint: "symptom, where it was seen, expected vs actual"
 ---
+
+# Investigate a failure
 
 Run the defect investigation exactly as written in `prompts/investigate.md`. Read that file
 in full first; it is the authoritative instruction set, and this skill only wires it up.

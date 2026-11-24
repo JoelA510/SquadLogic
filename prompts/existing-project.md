@@ -38,6 +38,15 @@ can't see.
 - Definition of "complete" for this app, in user terms: [COMPLETE_MEANS]
 - Known issues already reported (bug tracker, playtest notes, support
   threads, TODO/HARDENING files), or "none known": [KNOWN_ISSUES]
+- Coding agents the project uses (Claude Code, Codex, Cursor, GitHub
+  Copilot, Gemini CLI, Antigravity, or another): [AGENT PLATFORMS]. Read it
+  from `.agents/platforms.json` when the repo records one. Otherwise ask the
+  owner before judging instruction-file size or wiring (area 12), offering
+  the list in `prompts/agent-platforms.md` plus "other", and record the
+  answer there; an agent that list doesn't have is researched from its
+  vendor's documentation as that page describes, never guessed. Where no
+  answer can be had, judge against every listed agent and make the missing
+  selection a finding.
 - Repository visibility and GitHub plan (public/private; Free/Pro/Team),
   which decide whether CI can be a required check: [VISIBILITY AND PLAN]. If
   it isn't given, read it from the host (the GitHub API, `gh repo view`, or
@@ -200,7 +209,10 @@ site has no server-side authz or database):
    upstream; config keys dead after a tool upgrade; preview
    deploys; rollback path; is the shipped artifact ever checked; build
    settings that live only in a hosting dashboard (yardstick: ixartz; target
-   shape: the release-runbook skeleton, docs/release-runbook.md).
+   shape: the release-runbook skeleton, docs/release-runbook.md); on a free
+   plan, what each push spends (CI minutes, deployments, preview branches)
+   and whether agents' and bots' pushes stay inside it (skeleton:
+   docs/free-tier.md).
 8. Security - secrets in code/history, dependency audit (does it run in CI,
    block on high/critical, and run on a schedule; are waivers reasoned and
    expiring - skeleton: docs/dependency-policy.md), whether updates arrive
@@ -230,8 +242,12 @@ site has no server-side authz or database):
     checkout). A repo with both a CLAUDE.md and an AGENTS.md where CLAUDE.md
     doesn't import AGENTS.md is a finding: Claude Code never reads AGENTS.md
     there. So is a repo that uses Gemini CLI without pointing it at AGENTS.md,
-    a skill that breaks the Agent Skills spec, and an AGENTS.md over 24,000
-    bytes (Antigravity's limit); `check:instructions` reports all three. Rules
+    a skill that breaks the Agent Skills spec, and an AGENTS.md over the
+    strictest size limit among the agents `.agents/platforms.json` selects
+    (24,000 bytes, Antigravity's, when nothing is selected);
+    `check:instructions` reports all three, and notes a file past a selected
+    agent's guidance length (Claude Code's 200 lines). Wiring for an agent
+    the project doesn't use, or missing for one it does, is a finding too. Rules
     kept only in a tool-specific form other agents can't read (a lone
     CLAUDE.md, Antigravity workflows, which stop working on 2026-10-19; Cursor
     `.mdc` rules) are a finding (standard core.agent-rules, high): move them

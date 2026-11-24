@@ -8,8 +8,9 @@ audit-area: 12
 
 **Requires:** every link, `@` import, code-span path, and `npm run` script named in the repository's
 agent instruction files and skills resolves; no hidden characters; no `CLAUDE.md` that hides
-`AGENTS.md`; skills that meet the Agent Skills specification; no `AGENTS.md` or `GEMINI.md` over
-24,000 bytes.
+`AGENTS.md`; skills that meet the Agent Skills specification; no shared instruction file over the
+strictest size limit among the agents the repository selects in `.agents/platforms.json` (with no
+selection, no `AGENTS.md` or `GEMINI.md` over 24,000 bytes), and a selection file that is valid.
 
 **Why:** an instruction that names a path or script that no longer exists still reads fine, so an
 agent follows it into a dead end, or invents what was meant.

@@ -77,9 +77,9 @@ numbers are as of `7405db3` and will move: search by name.
 | ID  | Item                                                                                      | Status                   | PR           | Date       |
 | --- | ----------------------------------------------------------------------------------------- | ------------------------ | ------------ | ---------- |
 | P   | Prep: this plan, the AGENTS.md pointer, the Codex rules, `codex/**` off Vercel            | done                     | this change  | 2026-11-23 |
-| T0  | Toolchain and baseline on the machine                                                     | not started              |              |            |
+| T0  | Toolchain and baseline on the machine                                                     | done                     | no PR        | 2026-11-23 |
 | T1  | Release agent-ready-template                                                              | done                     | template #63 | 2026-11-23 |
-| C15 | Take that release here                                                                    | not started              |              |            |
+| C15 | Take that release here                                                                    | done                     | this change  | 2026-11-23 |
 | C17 | Skill scan in CI                                                                          | not started              |              |            |
 | C1  | Close issue #364                                                                          | not started              |              |            |
 | C2  | The weekly keep-alive fails                                                               | not started              |              |            |
@@ -132,6 +132,11 @@ numbers are as of `7405db3` and will move: search by name.
   selects, then `--check`. The pack is per machine and commits nothing here. No provider key goes into it. It is
   never a blocker: if a step fails, record it and continue with the committed toolchain.
 - Done: the baseline results and every installed tool and version are in the report.
+- **Executed on untouched `dd1ae7ca`, 2026-11-23.** Typecheck, lint (one warning), unused code, build, bundle
+  and advisor checks passed. Native Windows coverage failed in 17 of 605 files. The WSL2 local database
+  passed all 2,977 pgTAP assertions in 92 files using ports 45420–45429 because Windows reserves 55422.
+  The production connector returned `transaction_read_only = on`. The optional power pack stopped at
+  `gbrain` before activating a profile.
 
 ### T1. Release agent-ready-template (in that repository)
 
@@ -163,7 +168,7 @@ numbers are as of `7405db3` and will move: search by name.
   no ledger is seeded, and `continuity.yml` and `agentshield.yml` stay under `prompts/skeletons/`); the template's
   "Ownership" line (it conflicts with operating rule 2; the owner's call). The skill scan is C17; the local power
   pack is T0.
-- Report upstream: the template's upgrade guide does not say a project's linter will pick up `continuity/gate.mjs`.
+- Reported the consumer lint and formatting issue in [agent-ready-template #64](https://github.com/JoelA510/agent-ready-template/issues/64).
 
 ### C17. Skill scan in CI (class (a); a workflow; after C15)
 

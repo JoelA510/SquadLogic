@@ -2,8 +2,10 @@
 name: discovery
 description: "Use when someone asks for a discovery pass or for discovery candidates, not for an ordinary request to look into something. Runs prompts/discovery.md — with nothing given, Stage 0: a read-only survey of this repo for the questions worth a discovery pass before the next piece of work, ending at the candidate list; given a candidate, a filled-in Stage 1 drafted for review, not run."
 metadata:
-  argument-hint: "<nothing for the Stage 0 survey, or the candidate to draft a Stage 1 for>"
+  argument-hint: "nothing for the Stage 0 survey, or the candidate to draft a Stage 1 for"
 ---
+
+# Identify discovery candidates
 
 Run the discovery template exactly as written in `prompts/discovery.md`. Read that file in full
 first; it is the authoritative instruction set, and this skill only wires it up. What was given

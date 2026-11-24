@@ -647,12 +647,15 @@ NOT NULL DEFAULT '{}'` cannot say "inherit", its CHECK cannot see an inherited v
 
 ## Done when
 
-- [ ] Every task's test passes, and each "Unchanged" item has a test.
+- [x] (#733, #737) The task tests and the unchanged-behavior checks passed. The database cases
+      are in `scoped_settings.sql` and `game_scores.sql`. The panel, mock, audit wording and import tests
+      are named under F11-4a and F11-4b above.
 - [ ] The repository's full gate passes, and every new check was shown failing first (the plants above).
-- [ ] The F11 plan's three required tests are among them: the eight-combination precedence test with an explicit
+      Both PRs passed CI. #737 records that the new E2E heading step was only statically reviewed for plant coverage.
+- [x] (#733) The F11 plan's three required tests are among them: the eight-combination precedence test with an explicit
       `false` beating an inherited `true` (A1), rollover keeps program and division values (A1), and
       `standings_counts_outside` follows the cascade (A1).
-- [ ] `docs/security/rls-policies.md`, `docs/architecture/persistence-rpc-layer.md` and the feature-guardians skill say
+- [x] (#733, #737) `docs/security/rls-policies.md`, `docs/architecture/persistence-rpc-layer.md` and the feature-guardians skill say
       where a scoped setting lives and who may write it; the F11 plan's F11-4 entry points here.
 
 ## Receipts: searches and what was not run

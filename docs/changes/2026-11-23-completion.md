@@ -82,8 +82,8 @@ numbers are as of `7405db3` and will move: search by name.
 | C15 | Take that release here                                                                    | done                     | #742         | 2026-11-23 |
 | C17 | Skill scan in CI                                                                          | done                     | #743         | 2026-11-23 |
 | C1  | Close issue #364                                                                          | done                     | issue #364   | 2026-11-23 |
-| C2  | The weekly keep-alive fails                                                               | awaiting main dispatch   | this change  | 2026-11-23 |
-| C3  | Docs match the system                                                                     | not started              |              |            |
+| C2  | The weekly keep-alive fails                                                               | done                     | #744         | 2026-11-23 |
+| C3  | Docs match the system                                                                     | done                     | this change  | 2026-11-23 |
 | C4  | UI follow-ups                                                                             | not started              |              |            |
 | C5  | Games import: cleaned headers, one header helper, mock `program_id`, the discard pre-read | not started              |              |            |
 | C6  | Retire the flags nothing reads                                                            | not started              |              |            |
@@ -208,6 +208,8 @@ numbers are as of `7405db3` and will move: search by name.
   `docs/LESSONS_LEARNED.md` calls this job load-bearing: it stays weekly. `tests/rulesetRequiredChecks.test.js` pins the job id `keepalive`: keep it.
 - Done: the workflow audit passes and a manually dispatched scheduled run is green. If it still fails, the repository
   secret `VITE_SUPABASE_ANON_KEY` holds the disabled key: that is the owner's to replace, so report it.
+- Fully validated on `main` after #744. The manually dispatched **Supabase keep-alive** job passed
+  with the existing repository secret. [GitHub Actions run](https://github.com/JoelA510/SquadLogic/actions/runs/45336458263)
 
 ### C3. Docs match the system (docs; no review class)
 

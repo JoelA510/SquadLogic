@@ -423,7 +423,7 @@
     },
     {
       "id": "delete-booked-all-four-confirmed",
-      "why": "One FREE-STANDING booking in each of the four tables that carry a field_id, and p_confirm true. The count must be 4: the game slot here has no fixture on it, so the games arm contributes nothing and a union that lost an arm reports 3. Both disposition words must appear, because the two slot tables cascade and the two unlinked assignments are merely unassigned.",
+      "why": "One FREE-STANDING booking in each of the four tables that carry a field_id, and p_confirm true. The count must be 4: losing any one of the four booking kinds reports 3. Both disposition words must appear, because the two slot tables cascade and the two unlinked assignments are merely unassigned.",
       "rpc": "admin_delete_field",
       "before": {
         "active": true,
@@ -444,7 +444,7 @@
     },
     {
       "id": "delete-scheduled-game-refused",
-      "why": "The shape persist_game_schedule actually writes: a game slot, an assignment carrying game_slot_id, and a games row. All three are DESTROYED, because the slot cascade reaches the assignment before field_id's SET NULL can fire. Reporting 'unassigned' here -- which the first version of the RPC did for the whole table -- promises the operator a survival that does not happen.",
+      "why": "The shape persist_game_schedule actually writes: a game slot and its saved assignment carrying game_slot_id. Both are DESTROYED, because the slot cascade reaches the assignment before field_id's SET NULL can fire. Reporting 'unassigned' here -- which the first version of the RPC did for the whole table -- promises the operator a survival that does not happen.",
       "rpc": "admin_delete_field",
       "before": {
         "active": true,
@@ -458,7 +458,7 @@
         "ok": true,
         "deleted": false,
         "reason": "bookings_exist",
-        "affectedCount": 3,
+        "affectedCount": 2,
         "dispositions": ["deleted"],
         "exists": true,
         "auditPhases": ["refused"]
@@ -502,7 +502,7 @@
         "ok": true,
         "deleted": false,
         "reason": "bookings_exist",
-        "affectedCount": 5,
+        "affectedCount": 4,
         "dispositions": ["deleted", "unassigned"],
         "exists": true,
         "auditPhases": ["refused"]

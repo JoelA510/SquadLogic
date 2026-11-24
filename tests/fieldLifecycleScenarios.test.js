@@ -223,7 +223,6 @@ const COMPOSITE_SEEDS = {
         week_index: 1,
       },
     ],
-    ['games', { id: `${id}-game`, organization_id: ORG, game_slot_id: `${id}-slot` }],
   ],
   scheduled_practice: (id, fieldId, at) => [
     [
@@ -270,7 +269,7 @@ const seedBookings = async (fieldId, kinds, bookingOffset) => {
     const id = `${fieldId}-${kind}`;
     const at = bookingOffset ?? DEFAULT_BOOKING_OFFSET[kind];
     if (at === undefined) throw new Error(`no default offset for booking kind "${kind}"`);
-    // Composite kinds first: `scheduled_game` is three rows, not one.
+    // Composite kinds first: `scheduled_game` is a slot and its assignment.
     const composite = COMPOSITE_SEEDS[kind];
     if (composite !== undefined) {
       for (const [tableName, row] of composite(id, fieldId, at)) {
@@ -668,10 +667,6 @@ describe('scenario table :: the mock honours it', () => {
         for (const booking of seeded) {
           const row = getMockData(booking.table).find((r) => String(r.id) === booking.id);
           expect(row, `${booking.kind} was destroyed by a REFUSED delete`).toBeDefined();
-          // `games` reaches the field through its slot and carries no field_id
-          // of its own, so only the rows that HAVE one are checked for it --
-          // asserting a column that does not exist would fail on the table this
-          // whole correction exists to include.
           if ('field_id' in row) expect(String(row.field_id)).toBe(String(field.id));
         }
       }

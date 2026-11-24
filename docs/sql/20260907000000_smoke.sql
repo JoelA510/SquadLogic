@@ -141,7 +141,7 @@ DECLARE
     'field_availability_profile_formats','field_availability_profiles',
     'field_availability_scenario_members','field_blackout_windows',
     'field_blackouts','field_equipment_requirements','field_subunits',
-    'game_assignments','game_scores','game_slots','games',
+    'game_assignments','game_scores','game_slots',
     'practice_assignments','practice_exceptions','practice_lighting_overrides',
     'practice_slots'
   ];
@@ -149,7 +149,7 @@ DECLARE
   -- two migration headers state; section 4b holds it to both halves.
   v_bookings text[] := ARRAY[
     'field_availability_profiles',
-    'game_assignments','game_slots','games','practice_assignments','practice_slots'
+    'game_assignments','game_slots','practice_assignments','practice_slots'
   ];
   -- `field_blackouts` and `field_subunits` are excluded by 20260907000000's
   -- header: a closure is not a booking, and a subunit is part of the field
@@ -273,7 +273,7 @@ BEGIN
                        'game_assignments','game_slots','practice_assignments','practice_slots'] THEN
     RAISE EXCEPTION 'the field_id family changed: %', v_actual;
   END IF;
-  RAISE NOTICE 'field_id family: 8 tables, a subset of the 15-table cascade closure';
+  RAISE NOTICE 'field_id family: 8 tables, a subset of the 14-table cascade closure';
 END $$;
 
 -- ---------------------------------------------------------------------------
@@ -317,8 +317,8 @@ BEGIN
 
   v_arms := regexp_split_to_array(v_cte, 'UNION ALL');
   -- Six as of 20260909000000, which added the `availability_profile` arm.
-  IF array_length(v_arms, 1) <> 6 THEN
-    RAISE EXCEPTION 'expected 6 arms in the affected-booking union, parsed %', array_length(v_arms, 1);
+  IF array_length(v_arms, 1) <> 5 THEN
+    RAISE EXCEPTION 'expected 5 arms in the affected-booking union, parsed %', array_length(v_arms, 1);
   END IF;
 
   FOREACH v_arm IN ARRAY v_arms LOOP
@@ -413,8 +413,8 @@ BEGIN
     RAISE EXCEPTION 'admin_delete_field does not turn the producer''s cascades flag into a disposition';
   END IF;
 
-  IF v_checked <> 6 THEN
-    RAISE EXCEPTION 'checked % dispositions, expected 6', v_checked;
+  IF v_checked <> 5 THEN
+    RAISE EXCEPTION 'checked % dispositions, expected 5', v_checked;
   END IF;
   RAISE NOTICE 'disposition literals checked against pg_constraint on % arms', v_checked;
 END $$;
@@ -545,7 +545,7 @@ DECLARE
   v_org uuid; v_loc uuid; v_field uuid; v_bare uuid; v_user uuid := gen_random_uuid();
   v_season uuid; v_div uuid; v_team uuid;
   v_gs uuid; v_ga uuid; v_ps uuid; v_pa uuid;
-  v_ga_slotted uuid; v_ga_orphan uuid; v_pa_slotted uuid; v_game uuid; v_team_b uuid;
+  v_ga_slotted uuid; v_ga_orphan uuid; v_pa_slotted uuid;
   v_res jsonb; v_n int; v_kinds text[]; v_fk uuid; v_disp text; v_audit_affected jsonb;
 BEGIN
   -- `password_length` satisfies check_password_length_on_auth_users from
@@ -611,12 +611,6 @@ BEGIN
   VALUES (v_org, v_team, v_field, daterange(current_date, current_date + 60, '[]'))
   RETURNING id INTO v_pa;
 
-  -- `games` carries no field_id and dies with the slot, score and all.
-  INSERT INTO public.teams (organization_id, division_id, name)
-  VALUES (v_org, v_div, 'Guard Team B') RETURNING id INTO v_team_b;
-  INSERT INTO public.games (organization_id, game_slot_id, home_team_id, away_team_id)
-  VALUES (v_org, v_gs, v_team, v_team_b) RETURNING id INTO v_game;
-
   -- 6a. UNCONFIRMED delete of booked ground is REFUSED, names every kind, and
   --     writes nothing.
   v_res := public.admin_delete_field(v_org, v_field, false);
@@ -625,14 +619,13 @@ BEGIN
   IF v_res->>'reason' <> 'bookings_exist' THEN
     RAISE EXCEPTION 'refusal did not name bookings_exist: %', v_res; END IF;
   -- 1 game_slot + 1 practice_slot + 3 game_assignments + 2 practice_assignments
-  -- + 1 game = 8.
-  IF (v_res->>'affected_count')::int <> 8 THEN
-    RAISE EXCEPTION 'expected 8 affected rows across five kinds, got %: %',
+  IF (v_res->>'affected_count')::int <> 7 THEN
+    RAISE EXCEPTION 'expected 7 affected rows across four kinds, got %: %',
       v_res->>'affected_count', v_res; END IF;
 
   SELECT array_agg(DISTINCT x->>'kind' ORDER BY x->>'kind') INTO v_kinds
     FROM jsonb_array_elements(v_res->'affected') x;
-  IF v_kinds <> ARRAY['game','game_assignment','game_slot','practice_assignment','practice_slot'] THEN
+  IF v_kinds <> ARRAY['game_assignment','game_slot','practice_assignment','practice_slot'] THEN
     RAISE EXCEPTION 'the refusal named kinds %, expected all five', v_kinds; END IF;
 
   -- **The per-row disposition, on both shapes.** The slot-linked assignment is
@@ -670,8 +663,7 @@ BEGIN
      OR NOT EXISTS (SELECT 1 FROM public.game_assignments WHERE id = v_ga_orphan)
      OR NOT EXISTS (SELECT 1 FROM public.practice_slots WHERE id = v_ps)
      OR NOT EXISTS (SELECT 1 FROM public.practice_assignments WHERE id = v_pa)
-     OR NOT EXISTS (SELECT 1 FROM public.practice_assignments WHERE id = v_pa_slotted)
-     OR NOT EXISTS (SELECT 1 FROM public.games WHERE id = v_game) THEN
+     OR NOT EXISTS (SELECT 1 FROM public.practice_assignments WHERE id = v_pa_slotted) THEN
     RAISE EXCEPTION 'a refused delete destroyed a booking'; END IF;
 
   -- The refusal is recorded, so an operator can see the decision that was
@@ -732,8 +724,7 @@ BEGIN
     RAISE EXCEPTION 'game_slot survived a field delete; its FK is documented CASCADE'; END IF;
   IF EXISTS (SELECT 1 FROM public.practice_slots WHERE id = v_ps) THEN
     RAISE EXCEPTION 'practice_slot survived a field delete; its FK is documented CASCADE'; END IF;
-  IF EXISTS (SELECT 1 FROM public.games WHERE id = v_game) THEN
-    RAISE EXCEPTION 'the game survived; it cascades with its slot, and the RPC said so'; END IF;
+
 
   -- **The rows the RPC said would be DESTROYED really are.** This is the half
   -- the first draft got wrong in the operator's favour, promising survival.
@@ -759,7 +750,7 @@ BEGIN
   IF v_fk IS NOT NULL THEN
     RAISE EXCEPTION 'practice_assignment.field_id is % after the field was deleted -- it is DANGLING', v_fk; END IF;
 
-  RAISE NOTICE 'delete guard exercised: 8 rows across 5 kinds refused, 1 unbooked field deleted, 1 confirmed delete with 6 destroyed and 2 unassigned';
+  RAISE NOTICE 'delete guard exercised: 7 rows across 4 kinds refused, 1 unbooked field deleted, 1 confirmed delete with 5 destroyed and 2 unassigned';
   DELETE FROM public.organizations WHERE id = v_org;
   DELETE FROM auth.users WHERE id = v_user;
 END $$;

@@ -68,7 +68,7 @@ VALUES ('a1111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-0000000
 INSERT INTO public.teams (id, organization_id, division_id, name)
 VALUES ('a1111111-0000-4000-8000-0000000002b2', 'a1111111-1111-1111-1111-111111111111',
         'a1111111-1111-1111-1111-11111111abcd', 'R2 Opponent');
-INSERT INTO public.games (id, organization_id, home_team_id, away_team_id)
+INSERT INTO public.game_assignments (id, organization_id, home_team_id, away_team_id)
 VALUES ('a1111111-0000-4000-8000-0000000002a1', 'a1111111-1111-1111-1111-111111111111',
         'aaaaaaaa-0000-0000-0000-000000000001', 'a1111111-0000-4000-8000-0000000002b2');
 INSERT INTO public.locations (id, organization_id, name)
@@ -98,7 +98,7 @@ SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"
 
 SELECT is((SELECT count(*)::int FROM public.teams WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001'),
     1, 'the admin reads the team');
-SELECT is((SELECT count(*)::int FROM public.games
+SELECT is((SELECT count(*)::int FROM public.game_assignments
             WHERE home_team_id = 'aaaaaaaa-0000-0000-0000-000000000001'
                OR away_team_id = 'aaaaaaaa-0000-0000-0000-000000000001'),
     1, 'the admin reads the team''s game');
@@ -117,7 +117,7 @@ SELECT is((SELECT array_agg(coach_id::text) FROM public.get_team_staff('aaaaaaaa
 -- above are the admin's own access and not an open table.
 SET LOCAL "request.jwt.claims" TO '{"sub":"22222222-2222-2222-2222-222222222222"}';
 SELECT is((SELECT count(*)::int FROM public.teams WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001')
-          + (SELECT count(*)::int FROM public.games WHERE home_team_id = 'aaaaaaaa-0000-0000-0000-000000000001')
+          + (SELECT count(*)::int FROM public.game_assignments WHERE home_team_id = 'aaaaaaaa-0000-0000-0000-000000000001')
           + (SELECT count(*)::int FROM public.practice_assignments WHERE team_id = 'aaaaaaaa-0000-0000-0000-000000000001')
           + (SELECT count(*)::int FROM public.practice_exceptions WHERE team_id = 'aaaaaaaa-0000-0000-0000-000000000001'),
     0, 'control: another organisation''s admin reads none of the team''s rows');

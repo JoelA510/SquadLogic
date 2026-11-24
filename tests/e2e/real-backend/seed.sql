@@ -273,7 +273,7 @@ VALUES (
 )
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO public.games (id, organization_id, game_slot_id, home_team_id, away_team_id)
+INSERT INTO public.game_assignments (id, organization_id, game_slot_id, home_team_id, away_team_id)
 VALUES (
     'e2e0d400-0000-4000-8000-000000000001', 'e2e0b000-0000-4000-8000-000000000002',
     'e2e0d300-0000-4000-8000-000000000001',

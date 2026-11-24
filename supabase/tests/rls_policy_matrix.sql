@@ -1,5 +1,5 @@
 -- RLS persona matrix: what each persona can read and write, table by table,
--- on the 23 tables whose policies the Supabase performance advisors flag
+-- on the 22 tables whose policies the Supabase performance advisors flag
 -- (`auth_rls_initplan`, `multiple_permissive_policies`; the waivers in
 -- docs/security/supabase-advisor-waivers.json). docs/PLAN_RLS_ADVISOR_REWRITE.md
 -- section 4.2.
@@ -33,7 +33,7 @@
 -- and one in Org B (from the fixtures where they have one, seeded below
 -- otherwise).
 --
--- **Probes**, per persona and table (23 x 7 x 5 = 805 cells):
+-- **Probes**, per persona and table (22 x 7 x 5 = 770 cells):
 --   sel  which of the two subject rows SELECT returns: 'AB', 'A', 'B' or '-';
 --   ins  an INSERT of a new Org A row: 'ok';
 --   upd  how many rows an UPDATE of Org A's subject row reaches, setting one
@@ -62,10 +62,10 @@
 -- tables has a deferred constraint or a constraint trigger that would run
 -- only at commit (checked on a31ddde).
 --
--- **Assertions** (37): five meta-assertions (the 23 subject tables exist and
+-- **Assertions** (36): five meta-assertions (the 22 subject tables exist and
 -- each has RLS enabled, every subject row was seeded, every persona ran as the
--- identity it claims on every table, the expected table covers all 161
--- table-persona pairs, the probes produced all 805 cells); one that no cell
+-- identity it claims on every table, the expected table covers all 154
+-- table-persona pairs, the probes produced all 770 cells); one that no cell
 -- anywhere differs from the literal expected table below; one `results_eq` per
 -- table, so a failure names its table; and eight on the roster read and the
 -- roles: an admin reads every column of `get_team_roster`, while a user whose
@@ -78,7 +78,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(37);
+SELECT plan(36);
 
 -- ── 1. The three personas the fixtures lack, and a spare user ─────────────
 -- The spare user exists only so the profiles INSERT probe has an auth user
@@ -180,16 +180,11 @@ INSERT INTO public.export_jobs (id, organization_id, job_type, status) VALUES
     ('e0000006-0000-0000-0000-00000000000a', 'a1111111-1111-1111-1111-111111111111', 'master', 'queued'),
     ('e0000006-0000-0000-0000-00000000000b', 'b2222222-2222-2222-2222-222222222222', 'master', 'queued');
 
--- 07 game_slots, 08 games
+-- 07 game_slots
 INSERT INTO public.game_slots (id, organization_id, field_id) VALUES
     ('e0000007-0000-0000-0000-00000000000a', 'a1111111-1111-1111-1111-111111111111', 'e0000031-0000-0000-0000-00000000000a'),
     ('e0000007-0000-0000-0000-00000000000b', 'b2222222-2222-2222-2222-222222222222', 'e0000031-0000-0000-0000-00000000000b');
 
-INSERT INTO public.games (id, organization_id, home_team_id, away_team_id) VALUES
-    ('e0000008-0000-0000-0000-00000000000a', 'a1111111-1111-1111-1111-111111111111',
-     'aaaaaaaa-0000-0000-0000-000000000001', 'e0000032-0000-0000-0000-00000000000a'),
-    ('e0000008-0000-0000-0000-00000000000b', 'b2222222-2222-2222-2222-222222222222',
-     'bbbbbbbb-0000-0000-0000-000000000002', 'e0000032-0000-0000-0000-00000000000b');
 
 -- 09 player_buddies
 INSERT INTO public.player_buddies (player_id, buddy_player_id, organization_id, source_import_job) VALUES
@@ -298,12 +293,6 @@ INSERT INTO matrix_subject VALUES
      $$INSERT INTO public.game_slots (id, organization_id, field_id)
        VALUES ('e0000007-0000-0000-0000-0000000000fa', 'a1111111-1111-1111-1111-111111111111',
                'e0000031-0000-0000-0000-00000000000a')$$),
-    ('games',
-     $$id = 'e0000008-0000-0000-0000-00000000000a'$$, $$id = 'e0000008-0000-0000-0000-00000000000b'$$,
-     'organization_id',
-     $$INSERT INTO public.games (id, organization_id, home_team_id, away_team_id)
-       VALUES ('e0000008-0000-0000-0000-0000000000fa', 'a1111111-1111-1111-1111-111111111111',
-               'e0000032-0000-0000-0000-00000000000a', 'aaaaaaaa-0000-0000-0000-000000000001')$$),
     ('player_buddies',
      $$player_id = 'e0000010-0000-0000-0000-00000000000a' AND buddy_player_id = 'e0000010-0000-0000-0000-00000000002a'$$,
      $$player_id = 'e0000010-0000-0000-0000-00000000000b' AND buddy_player_id = 'e0000010-0000-0000-0000-00000000002b'$$,
@@ -531,7 +520,7 @@ $matrix$;
 -- admin and tenant_admin): every member of Org A reads A's row, A's admin and
 -- tenant_admin write it and cannot move rows to Org C (the WITH CHECK refuses:
 -- 'rls'; so does Bob's, on B's rows), Bob reads B's only, and the outsider
--- and anon read nothing. None of the 23 tables has a policy for `anon`, so anon's writes are
+-- and anon read nothing. None of the 22 tables has a policy for `anon`, so anon's writes are
 -- refused by RLS (or by the grant, where the table grants anon nothing).
 CREATE TEMP TABLE matrix_expected (
     tbl text, persona text, sel text, ins text, upd text, mov text, del text,
@@ -602,13 +591,6 @@ INSERT INTO matrix_expected VALUES
     ('game_slots',                  'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('game_slots',                  'anon',     '-',  'rls',   '0',   '0',     '0'),
 
-    -- games: member SELECT, admin ALL.
-    ('games',                       'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
-    ('games',                       'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
-    ('games',                       'user_a',  '-',  'rls',   '0',   '0',     '0'),
-    ('games',                       'admin_b',  'B',  'rls',   '0',   'rls',   '0'),
-    ('games',                       'outsider', '-',  'rls',   '0',   '0',     '0'),
-    ('games',                       'anon',     '-',  'rls',   '0',   '0',     '0'),
 
     -- import_jobs: two member SELECT policies (one the legacy subquery form); no write policy.
     ('import_jobs',                 'admin_a',  'A',  'rls',   '0',   '0',     '0'),
@@ -742,13 +724,13 @@ SELECT is(
     (SELECT count(*) FROM matrix_subject s
        JOIN pg_class c ON c.oid = to_regclass('public.' || quote_ident(s.tbl))
       WHERE c.relkind = 'r' AND c.relrowsecurity),
-    23::bigint,
-    'the 23 subject tables exist, each an ordinary table with RLS enabled'
+    22::bigint,
+    'the 22 subject tables exist, each an ordinary table with RLS enabled'
 );
 
 SELECT is(
     (SELECT count(*) FROM matrix_seen WHERE a_n = 1 AND b_n = 1),
-    23::bigint,
+    22::bigint,
     'every subject table holds exactly one Org A and one Org B subject row'
 );
 
@@ -757,21 +739,21 @@ SELECT is(
        JOIN matrix_persona p ON p.persona = i.persona
        JOIN matrix_subject s ON s.tbl = i.tbl
       WHERE i.db_role = p.db_role AND i.uid IS NOT DISTINCT FROM p.uid),
-    161::bigint,
-    'every persona ran as the role and user it claims, on every table (23 x 7)'
+    154::bigint,
+    'every persona ran as the role and user it claims, on every table (22 x 7)'
 );
 
 SELECT is(
     (SELECT count(*) FROM matrix_expected e
        JOIN matrix_subject USING (tbl) JOIN matrix_persona USING (persona)),
-    161::bigint,
-    'the expected table covers every table and persona (23 x 7)'
+    154::bigint,
+    'the expected table covers every table and persona (22 x 7)'
 );
 
 SELECT is(
     (SELECT count(sel) + count(ins) + count(upd) + count(mov) + count(del) FROM matrix_result),
-    805::bigint,
-    'the probes produced every cell (23 tables x 7 personas x 5 probes)'
+    770::bigint,
+    'the probes produced every cell (22 tables x 7 personas x 5 probes)'
 );
 
 -- Every differing cell, anywhere in the matrix: printed, then counted. This
@@ -815,7 +797,6 @@ SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'evaluation_run_events'),
 SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'evaluation_runs'), pg_temp.matrix_rows('matrix_expected', 'evaluation_runs'), 'persona matrix: evaluation_runs');
 SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'export_jobs'), pg_temp.matrix_rows('matrix_expected', 'export_jobs'), 'persona matrix: export_jobs');
 SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'game_slots'), pg_temp.matrix_rows('matrix_expected', 'game_slots'), 'persona matrix: game_slots');
-SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'games'), pg_temp.matrix_rows('matrix_expected', 'games'), 'persona matrix: games');
 SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'import_jobs'), pg_temp.matrix_rows('matrix_expected', 'import_jobs'), 'persona matrix: import_jobs');
 SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'organization_members'), pg_temp.matrix_rows('matrix_expected', 'organization_members'), 'persona matrix: organization_members');
 SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'organization_schema_history'), pg_temp.matrix_rows('matrix_expected', 'organization_schema_history'), 'persona matrix: organization_schema_history');

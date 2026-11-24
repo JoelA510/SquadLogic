@@ -83,7 +83,7 @@ const makeDb = () => ({
   ],
   // Coach kc's team plays at Pitch 1; kq's practises at Pitch 3 (data only: nobody signs in as them).
   game_slots: [{ id: 'gs1', organization_id: ORG, field_id: F1 }],
-  games: [
+  game_assignments: [
     { id: 'g1', organization_id: ORG, game_slot_id: 'gs1', home_team_id: 'tc', away_team_id: 'tx' },
   ],
   practice_slots: [{ id: 'ps3', organization_id: ORG, field_id: F3 }],

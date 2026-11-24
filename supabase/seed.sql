@@ -657,21 +657,6 @@ begin
     on conflict (team_id, practice_slot_id, effective_date_range) do update set
         source = excluded.source;
 
-    delete from games where game_slot_id in (game_slot_u8, game_slot_u10);
-
-    insert into games (
-        game_slot_id,
-        home_team_id,
-        away_team_id,
-        week_index
-    ) values
-        (game_slot_u8, team_firebolts_id, team_riverrunners_id, 1),
-        (game_slot_u10, team_lightning_id, team_thunder_id, 1)
-    on conflict (game_slot_id) do update set
-        home_team_id = excluded.home_team_id,
-        away_team_id = excluded.away_team_id,
-        week_index = excluded.week_index;
-
     -- Clear out old demo data in reverse order of dependency to avoid
     -- relying on specific foreign key delete behaviors.
     delete from email_log

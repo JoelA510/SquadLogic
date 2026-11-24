@@ -196,9 +196,9 @@ BEGIN
     INSERT INTO public.fields (organization_id, location_id, name, active) VALUES (v_other_org, v_other_venue, 'Smoke Other Pitch', true) RETURNING id INTO v_f_other;
     -- A team plays at Pitch 1 and another at Pitch 2 (the bookings that make a field delete ask first).
     INSERT INTO public.game_slots (organization_id, field_id, slot_date, week_index) VALUES (v_org, v_f1, current_date + 7, 1) RETURNING id INTO v_slot;
-    INSERT INTO public.games (organization_id, game_slot_id, home_team_id, away_team_id) VALUES (v_org, v_slot, v_team_c, v_team_x);
+    INSERT INTO public.game_assignments (organization_id, game_slot_id, home_team_id, away_team_id) VALUES (v_org, v_slot, v_team_c, v_team_x);
     INSERT INTO public.game_slots (organization_id, field_id, slot_date, week_index) VALUES (v_org, v_f2, current_date + 7, 1) RETURNING id INTO v_slot;
-    INSERT INTO public.games (organization_id, game_slot_id, home_team_id, away_team_id) VALUES (v_org, v_slot, v_team_q, v_team_x);
+    INSERT INTO public.game_assignments (organization_id, game_slot_id, home_team_id, away_team_id) VALUES (v_org, v_slot, v_team_q, v_team_x);
     v_today := public.org_local_today(v_org);
 
     -- ---- 2. the writer -------------------------------------------------------

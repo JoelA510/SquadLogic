@@ -103,6 +103,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **Legacy games table (C9).** Field bookings, team deletion and field-import rollback now use saved game assignments. The migration refuses to retire the legacy table if it contains any rows. Existing scores and saved fixtures keep their IDs.
+
 - Removed four switches from Features settings that had no effect, along with five unused flag keys. Organizations with these keys stored keep their active settings, including the dashboard accessibility list view.
 
 - **The unused column `players.placement_eligible`** (owner decision of 2026-11-03; `docs/changes/2026-11-03-drop-placement-eligible.md`; migration `20261118010000_drop_players_placement_eligible.sql`). Nothing read or wrote it: every player held the default `true`, and whether a player can be placed is derived from their natural age, not stored. Production holds no players. The migration drops the column, takes its name off the demo's list of editable player columns (and the browser's copy of that list), and refuses, rolling back whole, if a player holds `false`, if anything but the column's own default depends on it, or if a function still names it. The revert puts the column back at its default; it cannot restore data, and there is none.

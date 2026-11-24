@@ -61,11 +61,9 @@ INSERT INTO public.practice_exceptions (id, organization_id, season_settings_id,
     ('d8000000-0000-4000-8000-0000000000e3', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111aaa',
      'd8000000-0000-4000-8000-0000000000b3', 'd8000000-0000-4000-8000-00000000000c', '[2026-09-08,2026-09-22)', 'relocated',
      'd8000000-0000-4000-8000-0000000005a2', NULL, 'retirement', 'd8000000-0000-4000-8000-0000000000aa', NULL);
-INSERT INTO public.games (id, organization_id, home_team_id, away_team_id) VALUES
+INSERT INTO public.game_assignments (id, organization_id, home_team_id, away_team_id) VALUES
     ('d8000000-0000-4000-8000-0000000000c1', 'a1111111-1111-1111-1111-111111111111', 'd8000000-0000-4000-8000-0000000000b1', 'd8000000-0000-4000-8000-0000000000b2'),
     ('d8000000-0000-4000-8000-0000000000c2', 'a1111111-1111-1111-1111-111111111111', 'd8000000-0000-4000-8000-0000000000b2', 'aaaaaaaa-0000-0000-0000-000000000001');
-INSERT INTO public.game_assignments (organization_id, home_team_id, away_team_id)
-VALUES ('a1111111-1111-1111-1111-111111111111', 'd8000000-0000-4000-8000-0000000000b1', 'd8000000-0000-4000-8000-0000000000b2');
 INSERT INTO public.players (id, organization_id, division_id, first_name, last_name, team_id) VALUES
     ('d8000000-0000-4000-8000-00000000aa01', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-11111111abcd', 'DelA', 'Player', NULL),
     ('d8000000-0000-4000-8000-00000000aa02', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-11111111abcd', 'DelB', 'Player', 'd8000000-0000-4000-8000-0000000000b1'),
@@ -166,8 +164,8 @@ SELECT is((SELECT array_agg(e.value->>'id' ORDER BY e.value->>'id')
           'run R''s archive holds both of T''s exceptions beside the sibling''s');
 
 -- Games: T's goes with the cascade, O's other game stays.
-SELECT ok(EXISTS (SELECT 1 FROM public.games WHERE id = 'd8000000-0000-4000-8000-0000000000c2')
-          AND NOT EXISTS (SELECT 1 FROM public.games WHERE id = 'd8000000-0000-4000-8000-0000000000c1'),
+SELECT ok(EXISTS (SELECT 1 FROM public.game_assignments WHERE id = 'd8000000-0000-4000-8000-0000000000c2')
+          AND NOT EXISTS (SELECT 1 FROM public.game_assignments WHERE id = 'd8000000-0000-4000-8000-0000000000c1'),
           'T''s game is gone, the other game stays');
 
 -- Players.
@@ -179,12 +177,11 @@ SELECT ok((SELECT bool_and(team_id IS NULL) FROM public.players
 SELECT is((SELECT jsonb_build_object(
               'practice_exceptions_deleted', metadata->'practice_exceptions_deleted',
               'practice_assignments_deleted', metadata->'practice_assignments_deleted',
-              'games_deleted', metadata->'games_deleted',
               'game_assignments_deleted', metadata->'game_assignments_deleted',
               'team_players_deleted', metadata->'team_players_deleted',
               'team_coach_assignments_deleted', metadata->'team_coach_assignments_deleted',
               'team_calendar_tokens_deleted', metadata->'team_calendar_tokens_deleted') FROM del_audit),
-          '{"practice_exceptions_deleted": 2, "practice_assignments_deleted": 2, "games_deleted": 1,
+          '{"practice_exceptions_deleted": 2, "practice_assignments_deleted": 2,
             "game_assignments_deleted": 1, "team_players_deleted": 1,
             "team_coach_assignments_deleted": 1, "team_calendar_tokens_deleted": 1}'::jsonb,
           'team.deleted counts what each table lost');
@@ -194,8 +191,8 @@ SELECT is(
     (SELECT array_agg(k ORDER BY k) FROM del_audit, jsonb_object_keys(metadata) k
       WHERE k LIKE '%\_deleted' AND to_regclass('public.' || regexp_replace(k, '_deleted$', '')) IS NULL),
     NULL, 'team.deleted has no counter for a table that does not exist (no RSVP or chat counter)');
-SELECT is((SELECT metadata->'game_ids' FROM del_audit), '["d8000000-0000-4000-8000-0000000000c1"]'::jsonb,
-          'team.deleted names the deleted game');
+SELECT ok((SELECT NOT (metadata ?| ARRAY['game_ids','games_deleted']) FROM del_audit),
+          'a new team deletion carries no legacy game fields');
 SELECT is((SELECT metadata->'player_ids_unassigned' FROM del_audit),
           '["d8000000-0000-4000-8000-00000000aa01", "d8000000-0000-4000-8000-00000000aa02"]'::jsonb,
           'team.deleted names both unassigned players');

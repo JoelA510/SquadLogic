@@ -29,7 +29,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(145);
+SELECT plan(136);
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
 -- err: SQLSTATE:DETAIL of the first error, or 'no error' (the statement's effect stays).
@@ -342,9 +342,10 @@ SELECT is(pg_temp.val($$SELECT string_agg(c.relname || ':' || c.reloptions::text
     'both views run with the reader''s rights');
 SELECT is(pg_temp.val($$SELECT string_agg(attname, ',' ORDER BY attnum) FROM pg_attribute WHERE attrelid = 'public.current_game_runs'::regclass AND attnum > 0$$),
     'organization_id,season_settings_id,run_id,completed_at', 'current_game_runs: the organization, the season, its run');
-SELECT is(pg_temp.val($$SELECT count(*) FROM pg_depend d JOIN pg_rewrite r ON r.oid = d.objid
-    WHERE r.ev_class = 'public.view_league_standings'::regclass AND d.refobjid = 'public.games'::regclass$$), '0',
-    'the standings view no longer reads the legacy games table');
+SELECT ok(EXISTS (SELECT 1 FROM pg_depend d JOIN pg_rewrite r ON r.oid = d.objid
+    WHERE r.ev_class = 'public.view_league_standings'::regclass AND d.refobjid = 'public.game_scores'::regclass),
+    'the standings read saved scores');
+
 
 -- ── 2. update_game_score names a saved game ────────────────────────────────
 SELECT is(pg_temp.stored(pg_temp.e('02')), 'none', 'control: e02 has no score');
@@ -368,13 +369,6 @@ SELECT is(pg_temp.audits(pg_temp.e('02')), 3, 'entering, editing and clearing ar
 SELECT is(pg_temp.score(pg_temp.e('02'), NULL, NULL), '--- changed=false was=---', 'clearing a game with no score changes nothing');
 SELECT is(pg_temp.score('b2222222-2222-2222-2222-0000000d0e01', 1, 0), '42501:', 'another organization''s game is not found');
 SELECT is(pg_temp.score(gen_random_uuid(), 1, 0), '42501:', 'nor is an id that names no game');
-SET LOCAL "request.jwt.claims" TO '{}';
-INSERT INTO public.games (id, organization_id, season_id, home_team_id, away_team_id, start_time)
-VALUES ('a1111111-1111-1111-1111-0000000d0f01', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111aaa', pg_temp.t('01'), pg_temp.t('02'), '2026-04-04T08:00:00Z');
-SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
-SELECT is(pg_temp.score('a1111111-1111-1111-1111-0000000d0f01', 1, 0), '42501:', 'nor is the id of a row of the legacy games table: a score names a saved game');
-SELECT is(pg_temp.val($$SELECT COALESCE(score_home::text, 'null') FROM public.games WHERE id = 'a1111111-1111-1111-1111-0000000d0f01'$$), 'null',
-    'and the legacy row is not written');
 SELECT is(pg_temp.score(pg_temp.e('09'), 1, 0), '22023:season_completed', 'a completed season refuses a score');
 SELECT is(pg_temp.stored(pg_temp.e('09')), 'none', 'with nothing written');
 -- R3: a score is SET only on a game of its season's current run. e08 is the older, hidden row: a score there would hold a
@@ -623,28 +617,6 @@ SET LOCAL "request.jwt.claims" TO '{}';
 SELECT is(pg_temp.err($$DELETE FROM public.organizations WHERE id = 'b2222222-2222-2222-2222-222222222222'$$), 'no error',
     'U5: deleting an organization with a scored game succeeds (NO ACTION is checked after the cascade)');
 SELECT is(pg_temp.val($$SELECT count(*) FROM public.game_scores WHERE organization_id = 'b2222222-2222-2222-2222-222222222222'$$), '0', 'and its scores are gone with it');
-
--- ── 8. The legacy copy ─────────────────────────────────────────────────────
--- The legacy row f01 (T1 against T2, no slot) has no score: nothing to copy.
-SELECT is(pg_temp.val($$SELECT public.copy_legacy_game_scores()::text$$), '{"copied": 0, "scored": 0, "already": 0}', 'with no scored legacy row the copy does nothing');
-UPDATE public.games SET score_home = 9, score_away = 8 WHERE id = 'a1111111-1111-1111-1111-0000000d0f01';
-SELECT is(pg_temp.errx($$SELECT public.copy_legacy_game_scores()$$), '55000:legacy_score_unmatched count=1 ids=a1111111-1111-1111-1111-0000000d0f01',
-    'a scored legacy row that matches no saved game refuses the copy, naming it');
-UPDATE public.games SET home_team_id = pg_temp.t('01'), away_team_id = pg_temp.t('03'), game_slot_id = 'a1111111-1111-1111-1111-0000000d00d8'
- WHERE id = 'a1111111-1111-1111-1111-0000000d0f01';
-SELECT is(pg_temp.val($$SELECT public.copy_legacy_game_scores()::text$$), '{"copied": 1, "scored": 1, "already": 0}', 'one that matches exactly one saved game (home, away, slot) is copied');
-SELECT is(pg_temp.stored(pg_temp.e('03')), '9-8 by nobody', 'onto that game');
-SELECT is(pg_temp.val($$SELECT public.copy_legacy_game_scores()::text$$), '{"copied": 0, "scored": 1, "already": 1}', 'and a second run copies nothing twice');
--- R3: a legacy result is matched only with a game of a current run. e08 (T2 against T4 on slot d8) is the older, hidden row.
-INSERT INTO public.games (id, organization_id, season_id, game_slot_id, home_team_id, away_team_id, score_home, score_away)
-VALUES ('a1111111-1111-1111-1111-0000000d0f02', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111aaa', NULL, pg_temp.t('02'), pg_temp.t('04'), 1, 0);
-SELECT is(pg_temp.errx($$DELETE FROM public.games WHERE id = 'a1111111-1111-1111-1111-0000000d0f01';
-        UPDATE public.games SET game_slot_id = (SELECT game_slot_id FROM public.game_assignments WHERE id = pg_temp.e('08')) WHERE id = 'a1111111-1111-1111-1111-0000000d0f02';
-        SELECT public.copy_legacy_game_scores()$$), '55000:legacy_score_unmatched count=1 ids=a1111111-1111-1111-1111-0000000d0f02',
-    'a scored legacy row whose only match is a game outside its season''s current run is unmatched: it would make a hold nobody sees');
-DELETE FROM public.games WHERE id = 'a1111111-1111-1111-1111-0000000d0f02';
-UPDATE public.games SET score_away = NULL WHERE id = 'a1111111-1111-1111-1111-0000000d0f01';
-SELECT is(pg_temp.val($$SELECT public.copy_legacy_game_scores()::text$$), '{"copied": 0, "scored": 0, "already": 0}', 'a one-sided legacy entry was never a result (the old view ignored it) and is not one now');
 
 SELECT * FROM finish();
 ROLLBACK;

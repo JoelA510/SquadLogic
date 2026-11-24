@@ -457,12 +457,12 @@ describe('every read of the saved schedule names real columns and real foreign k
     expect(judgeReads(reads())).toEqual([]);
   });
 
-  it('PLANT: an unhinted slot, a hint on no key, a column of the legacy table and an unrelated embed are each reported', () => {
+  it('PLANT: an unhinted slot, a hint on no key, a column outside the saved assignment and an unrelated embed are each reported', () => {
     const planted = [
       "supabase.from('game_assignments').select('id, game_slots(slot_date)');",
       "supabase.from('game_assignments').select('id, home:teams!coach_id(name)');",
       "supabase.from('game_assignments').select('id, start_time, score_home').eq('season_id', s);",
-      "supabase.from('game_assignments').select('id, games(id)');",
+      "supabase.from('game_assignments').select('id, players(id)');",
       "supabase.from('current_game_runs').select('run_id').or(`season_id.eq.${x}`);",
     ];
     const problems = judgeReads(
@@ -474,7 +474,7 @@ describe('every read of the saved schedule names real columns and real foreign k
       'planted2.js:1: game_assignments.start_time does not exist',
       'planted2.js:1: game_assignments.score_home does not exist',
       'planted2.js:1: filters game_assignments.season_id, which does not exist',
-      'planted3.js:1: game_assignments has no foreign key to or from games',
+      'planted3.js:1: game_assignments has no foreign key to or from players',
       'planted4.js:1: filters current_game_runs.season_id, which does not exist',
     ]);
   });

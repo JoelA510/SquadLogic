@@ -291,6 +291,7 @@ M80="$REPO/supabase/migrations/20261123010000_practice_import.sql"
 # (supabase/tests/scoped_settings.sql) is CI's.
 M81="$REPO/supabase/migrations/20261124010000_settings_scope.sql"
 GAME_IMPORT_GUARDS="$REPO/supabase/migrations/20261125010000_game_import_guards.sql"
+LEGACY_GAMES_RETIRE="$REPO/supabase/migrations/20261126010000_retire_legacy_games.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -1233,10 +1234,10 @@ plant "ONLY-SCEN half a blackout window accepted" "$M2" \
 # above repeated.** It DROPs `field_bookings(uuid, uuid, date)` and creates the
 # scoped signature with a plain CREATE, which the pre-flight's first function
 # arm could not see, so this plant and four more sat in a dropped body. They are
-# aimed at $M7 now; the pre-flight judges by name and signature and reads DROPs.
-plant "M3 the shared producer loses its games arm" "$M7" \
-    "    SELECT 'game'::text, g.id," \
-    "    SELECT 'not_a_game'::text, g.id," \
+# aimed at the current producer; the pre-flight judges by name and signature and reads DROPs.
+plant "M3 the shared producer loses its saved game assignment arm" "$LEGACY_GAMES_RETIRE" \
+    "    SELECT 'game_assignment'::text, ga.id," \
+    "    SELECT 'unknown_booking'::text, ga.id," \
   "smoke 20260907000000" \
   "smoke 20260906000000"
 plant "M3 retire reads a NULL confirmation as yes" "$M3" \
@@ -1408,7 +1409,7 @@ ALTER TABLE public.practice_assignments
 # lives in the producer's `cascades` column, so each plant pins that column to a
 # constant. Both halves get one, since a flat answer in either direction passes
 # the case for the shape it happens to match.
-plant "M3 every game assignment claimed to survive" "$M7" \
+plant "M3 every game assignment claimed to survive" "$LEGACY_GAMES_RETIRE" \
   "           EXISTS (SELECT 1 FROM public.game_slots s
                     WHERE s.id IN (ga.game_slot_id, ga.slot_id)
                       AND public.estate_scope_covers(p_organization_id, p_scope, p_scope_id, s.field_id, NULL)),
@@ -1419,7 +1420,7 @@ plant "M3 every game assignment claimed to survive" "$M7" \
     FROM public.game_assignments ga" \
   "smoke 20260907000000" \
   "smoke 20260906000000"
-plant "M3 every practice assignment claimed to be destroyed" "$M7" \
+plant "M3 every practice assignment claimed to be destroyed" "$LEGACY_GAMES_RETIRE" \
   "           EXISTS (SELECT 1 FROM public.practice_slots s
                     WHERE s.id IN (pa.practice_slot_id, pa.slot_id)
                       AND public.estate_scope_covers(p_organization_id, p_scope, p_scope_id, s.field_id, s.field_subunit_id)),
@@ -1446,7 +1447,7 @@ plant "M3 every practice assignment claimed to be destroyed" "$M7" \
 # recreates it with `p_scope`, so 20260909000000's copy of this line is dead
 # code by the time the scenario table runs. Planted there, the harness printed
 # HARNESS OK -- this prover could not fail. The live copy is $M7's.
-plant "ONLY-SCEN the practice range boundary is read exclusively again" "$M7" \
+plant "ONLY-SCEN the practice range boundary is read exclusively again" "$LEGACY_GAMES_RETIRE" \
   "                 ELSE upper(pa.effective_date_range) - 1" \
   "                 ELSE upper(pa.effective_date_range)" \
   "scenario table" \
@@ -1456,7 +1457,7 @@ plant "ONLY-SCEN the practice range boundary is read exclusively again" "$M7" \
 # leaves every refusal on the right rows and names each practice's end a day
 # late -- which only 20260911000000's section 7 reads, since the table asserts
 # the verdict and never the date. It must stay green for the same reason.
-plant "M7 a practice assignment's on_date reads the exclusive upper bound" "$M7" \
+plant "M7 a practice assignment's on_date reads the exclusive upper bound" "$LEGACY_GAMES_RETIRE" \
   "    SELECT 'practice_assignment'::text, pa.id,
            b.last_day," \
   "    SELECT 'practice_assignment'::text, pa.id,
@@ -2027,7 +2028,7 @@ plant "R4 revert restores the finalizer under a second signature" "$R4" \
 # delete. A field held only by a free-standing assignment or an availability
 # profile then rolls back unrefused, which is LIVE-3 exactly.
 # Re-aimed at $M46 (D2), which replaces rollback_field_import_job from this body.
-plant "M5 the rollback goes back to its two-table guard" "$M46" \
+plant "M5 the rollback goes back to its two-table guard" "$LEGACY_GAMES_RETIRE" \
   "                SELECT count(*) INTO v_affected_count
                   FROM public.field_bookings(
                          v_job.organization_id, v_record.target_id, NULL);" \
@@ -2040,7 +2041,7 @@ plant "M5 the rollback goes back to its two-table guard" "$M46" \
 # **The sixth arm, removed.** `admin_delete_field` then reports nothing for a
 # field carrying only a profile and deletes it, which is the half of LIVE-3
 # LIVE-2 measured. Section 6 of the new smoke is what must see this.
-plant "M5 the producer loses its availability_profile arm" "$M7" \
+plant "M5 the producer loses its availability_profile arm" "$LEGACY_GAMES_RETIRE" \
   "      AND public.estate_scope_covers(p_organization_id, p_scope, p_scope_id, fap.field_id, NULL)" \
   "      AND fap.field_id IS NULL" \
   "smoke 20260909000000"
@@ -2057,7 +2058,7 @@ plant "M5 the profile FK stays SET NULL" "$M5" \
 # rolled back having deleted nothing -- the class 8.3 recorded three instances
 # of. Section 5c of the new smoke calls the RPC with exactly such a record.
 # Re-aimed at $M46 (D2), which replaces rollback_field_import_job from this body.
-plant "M5 an unhandled target_table falls through silently again" "$M46" \
+plant "M5 an unhandled target_table falls through silently again" "$LEGACY_GAMES_RETIRE" \
   "            ELSE
                 -- **The arm that used to be missing.**" \
   "            ELSIF false THEN
@@ -2067,7 +2068,7 @@ plant "M5 an unhandled target_table falls through silently again" "$M46" \
 # **The blocked list, reduced to a counter.** The refusal still fires and the
 # count is still right; what the operator loses is which record and why.
 # Re-aimed at $M46 (D2), which replaces rollback_field_import_job from this body.
-plant "M5 a blocked record stops saying which one and why" "$M46" \
+plant "M5 a blocked record stops saying which one and why" "$LEGACY_GAMES_RETIRE" \
   "                    v_blocked := v_blocked || jsonb_build_object(
                         'kind', v_record.target_table,
                         'id', v_record.target_id,
@@ -2169,7 +2170,7 @@ plant "M5-SMOKE section 1b's fields-arm parse degenerates to a one-character cap
 # first while its practice sibling read both. Put it back and an assignment
 # carrying `slot_id` alone is destroyed by the rollback with nothing refusing.
 # Re-aimed at $M46 (D2), which replaces rollback_field_import_job from this body.
-plant "M5 the game_slots arm forgets slot_id again" "$M46" \
+plant "M5 the game_slots arm forgets slot_id again" "$LEGACY_GAMES_RETIRE" \
   "                      AND (
                         ga.game_slot_id = v_record.target_id
                         OR ga.slot_id = v_record.target_id
@@ -2198,7 +2199,7 @@ plant "M5 a third table references locations unnoticed" "$M5" \
 # `warning_summary` and the audit row on every attempt -- the hazard
 # 20260907000000 built `field_bookings_digest` for.
 # Re-aimed at $M46 (D2), which replaces rollback_field_import_job from this body.
-plant "M5 the audit row gets the raw blocked list" "$M46" \
+plant "M5 the audit row gets the raw blocked list" "$LEGACY_GAMES_RETIRE" \
   "        'blocked', public.field_bookings_digest(v_blocked)" \
   "        'blocked', v_blocked" \
   "smoke 20260909000000"
@@ -2207,7 +2208,7 @@ plant "M5 the audit row gets the raw blocked list" "$M46" \
 # the harness runs one -- so the plant proves the ASSERTION can fail, not that
 # the race is reproduced. Said out loud rather than implied.
 # Re-aimed at $M46 (D2), which replaces rollback_field_import_job from this body.
-plant "M5 the fields arm counts bookings without locking the field" "$M46" \
+plant "M5 the fields arm counts bookings without locking the field" "$LEGACY_GAMES_RETIRE" \
   "                PERFORM 1 FROM public.fields f
                  WHERE f.id = v_record.target_id
                    AND f.organization_id = v_job.organization_id
@@ -2218,7 +2219,7 @@ plant "M5 the fields arm counts bookings without locking the field" "$M46" \
 # Two of three is not three: the field is locked and its slots are not, which
 # is the half that covers `games` and a slot-only assignment.
 # Re-aimed at $M46 (D2), which replaces rollback_field_import_job from this body.
-plant "M5 the fields arm locks the field but not its slots" "$M46" \
+plant "M5 the fields arm locks the field but not its slots" "$LEGACY_GAMES_RETIRE" \
   "                PERFORM 1 FROM public.game_slots gs
                  WHERE gs.organization_id = v_job.organization_id
                    AND gs.field_id = v_record.target_id
@@ -2229,7 +2230,7 @@ plant "M5 the fields arm locks the field but not its slots" "$M46" \
 # **A lock in another arm.** Correct-looking and a deadlock cycle: it acquires
 # a slot before the field, which is the opposite order to admin_delete_field.
 # Re-aimed at $M46 (D2), which replaces rollback_field_import_job from this body.
-plant "M5 a second arm starts taking a row lock" "$M46" \
+plant "M5 a second arm starts taking a row lock" "$LEGACY_GAMES_RETIRE" \
   "            ELSIF v_record.target_table = 'practice_slots' THEN
                 IF EXISTS (" \
   "            ELSIF v_record.target_table = 'practice_slots' THEN
@@ -2584,7 +2585,7 @@ plant "M7 the sub-surface scope widens to its parent pitch" "$M7" \
 # reporting "nothing is booked here" because its scope was misspelled is the
 # loudest form of the silent pass, and it is the entire reason the producer is
 # plpgsql rather than sql.
-plant "M7 an unknown scope returns an empty set instead of refusing" "$M7" \
+plant "M7 an unknown scope returns an empty set instead of refusing" "$LEGACY_GAMES_RETIRE" \
   "    IF p_scope IS NULL OR p_scope NOT IN ('field', 'location', 'subunit') THEN" \
   "    IF false THEN" \
   "smoke 20260911000000"
@@ -4056,7 +4057,7 @@ plant "R34 the revert restores a drifted rotate body" "$R34" \
 # are aimed at $M69; the three RSVP plants (the
 # opponent's game RSVP, a practice RSVP sharing a game id, the RSVP writer's
 # game lock) went with the RSVP function and table.
-plant "M35 the delete withdraws nothing" "$M71" \
+plant "M35 the delete withdraws nothing" "$LEGACY_GAMES_RETIRE" \
   "                                         WHERE pa.team_id = p_team_id))
            AND pe.withdrawn_at IS NULL
         RETURNING pe.*" \
@@ -4065,12 +4066,12 @@ plant "M35 the delete withdraws nothing" "$M71" \
         RETURNING pe.*" \
   "smoke 20261021030000"
 
-plant "M35 the delete archives nothing onto the run" "$M71" \
+plant "M35 the delete archives nothing onto the run" "$LEGACY_GAMES_RETIRE" \
   "     WHERE sr.id IN (SELECT (e.value->>'run_id')::uuid FROM jsonb_array_elements(v_archived) e" \
   "     WHERE false AND sr.id IN (SELECT (e.value->>'run_id')::uuid FROM jsonb_array_elements(v_archived) e" \
   "smoke 20261021030000"
 
-plant "M35 the delete audits no series" "$M71" \
+plant "M35 the delete audits no series" "$LEGACY_GAMES_RETIRE" \
   "            'practice.cancelled',
             'practice_assignments',
             v_pa.id," \
@@ -4079,19 +4080,19 @@ plant "M35 the delete audits no series" "$M71" \
             v_pa.id," \
   "smoke 20261021030000"
 
-plant "M35 the delete leaves players.team_id" "$M71" \
+plant "M35 the delete leaves players.team_id" "$LEGACY_GAMES_RETIRE" \
   "    UPDATE public.players SET team_id = NULL WHERE id = ANY (v_player_ids);" \
   "    PERFORM 1;" \
   "smoke 20261021030000"
 
-plant "M35 team.deleted records no counts" "$M71" \
+plant "M35 team.deleted records no counts" "$LEGACY_GAMES_RETIRE" \
   "            || v_counts
 " \
   "            || '{}'::jsonb
 " \
   "smoke 20261021030000"
 
-plant "M35 the delete lets a coach through" "$M71" \
+plant "M35 the delete lets a coach through" "$LEGACY_GAMES_RETIRE" \
   "    IF NOT public.is_org_admin(v_team.organization_id) THEN
         -- Production's own text" \
   "    IF false THEN
@@ -4287,7 +4288,7 @@ plant "M39 create_team_message is left behind" "$M39" \
   "" \
   "smoke 20261022030000"
 
-plant "M39 admin_delete_team still counts the RSVP table" "$M71" \
+plant "M39 admin_delete_team still counts the RSVP table" "$LEGACY_GAMES_RETIRE" \
   "        'team_players_deleted',
             (SELECT count(*) FROM public.team_players WHERE team_id = p_team_id)," \
   "        'team_players_deleted',
@@ -4726,7 +4727,7 @@ plant "M46 a re-import without a Division clears the reservation" "$M50" \
   "                    division_id = v_division_id," \
   "smoke 20261029010000"
 
-plant "M46 a rollback keeps the import's reservation" "$M46" \
+plant "M46 a rollback keeps the import's reservation" "$LEGACY_GAMES_RETIRE" \
   "                        WHEN NOT (v_previous ? 'division_id') THEN division_id" \
   "                        WHEN true THEN division_id" \
   "smoke 20261029010000"

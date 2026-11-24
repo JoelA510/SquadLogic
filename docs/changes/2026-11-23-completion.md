@@ -87,8 +87,8 @@ numbers are as of `7405db3` and will move: search by name.
 | C4  | UI follow-ups                                                                             | done                     | #746         | 2026-11-23 |
 | C5  | Games import: cleaned headers, one header helper, mock `program_id`, the discard pre-read | done                     | #747         | 2026-11-23 |
 | C6  | Retire the flags nothing reads                                                            | done                     | #748         | 2026-11-23 |
-| C8  | Games import: two SQL guards                                                              | done                     | this change  | 2026-11-24 |
-| C9  | Retire the legacy `games` table (F11-5)                                                   | not started              |              |            |
+| C8  | Games import: two SQL guards                                                              | done                     | #749         | 2026-11-24 |
+| C9  | Retire the legacy `games` table (F11-5)                                                   | done                     | this change  | 2026-11-24 |
 | C7  | Paired practice days (PR 12)                                                              | not started              |              |            |
 | C10 | Manual QA workbook                                                                        | not started              |              |            |
 | C11 | Registration state (B5.10): plan only                                                     | not started              |              |            |

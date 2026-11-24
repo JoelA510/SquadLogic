@@ -197,6 +197,11 @@ export function describeTooManyColumns(count, max) {
   return `The file has ${count} columns; one import reads at most ${max}. Remove the columns it does not need and choose it again.`;
 }
 
+/** @param {number} count */
+export function describeTooManyRows(count) {
+  return `The file has ${count.toLocaleString('en-US')} rows; one import takes at most ${SCHEDULE_IMPORT_LIMITS.MAX_ROWS.toLocaleString('en-US')}. Split it and import the parts one after the other.`;
+}
+
 const DESCRIPTIONS = Object.freeze({
   [R.MISSING_COLUMN]: 'The file is missing a column the import needs.',
   [R.DUPLICATE_COLUMN]: 'The file has the same column twice, so neither can be trusted.',

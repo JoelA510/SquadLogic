@@ -18,6 +18,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { startGameImport } from '../frontend/src/utils/gameImportClient.js';
 import { handleGameImportFunction } from '../frontend/src/lib/mockGameImport.js';
 import {
+  prepareGameImportFile,
   splitScheduleImportHeaders,
   stageScheduleChunk,
 } from '../packages/core/src/scheduleImport/staging.js';
@@ -245,5 +246,20 @@ describe('the mock answers more than 200 headers as the Edge request shape does:
     // CONTROL: the shape takes 200, so the answer is the next check's (no such job)
     const at200 = call(wide(200, 'Game ID', 200));
     expect(at200.error.context.status).toBe(404);
+  });
+});
+
+it('refuses an over-limit file before reading any cell', () => {
+  const readDate = vi.fn(() => '2026-09-12');
+  const source = Object.defineProperty({}, 'Date', { get: readDate, enumerable: true });
+  const prepared = prepareGameImportFile({
+    headers: HEADERS,
+    rows: Array(2401).fill(source),
+    clean: sanitizeImportText,
+  });
+  expect(readDate).not.toHaveBeenCalled();
+  expect(prepared.refusal).toMatchObject({
+    code: 'too-many-rows',
+    message: expect.stringContaining('2,401'),
   });
 });

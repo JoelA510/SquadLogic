@@ -336,7 +336,7 @@ export async function rollbackGameImport(client, { jobId, organizationId, season
 
 /**
  * Where a games import job stands, read from the job itself: its status and, once applied, the result the apply
- * stored on it. This is how a confirm whose answer never arrived is settled, and what a discard is decided on.
+ * stored on it. This settles a confirm whose response was lost or explains a discard the RPC refused.
  *
  * @param {any} client
  * @param {string} jobId

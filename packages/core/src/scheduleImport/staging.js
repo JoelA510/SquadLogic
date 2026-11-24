@@ -40,6 +40,7 @@ import {
   SCHEDULE_IMPORT_REASON,
   SCHEDULE_IMPORT_STAGED_FLAGS,
   describeTooManyColumns,
+  describeTooManyRows,
 } from './reasonCodes.js';
 
 /** The staged flags as plain text, for a membership test of any code. */
@@ -153,6 +154,17 @@ export function splitScheduleImportHeaders(headers, clean) {
  * @param {Parameters<typeof prepareImportFile>[0]} file
  */
 export function prepareGameImportFile(file) {
+  if (Array.isArray(file.rows) && file.rows.length > SCHEDULE_IMPORT_LIMITS.MAX_ROWS) {
+    return {
+      refusal: {
+        code: SCHEDULE_IMPORT_REASON.TOO_MANY_ROWS,
+        message: describeTooManyRows(file.rows.length),
+      },
+      headers: [],
+      rows: [],
+      dropped: [],
+    };
+  }
   return prepareImportFile(file, {
     maxLength: SCHEDULE_IMPORT_CHUNK_LIMITS.MAX_CELL_LENGTH,
     maxColumns: SCHEDULE_IMPORT_LIMITS.MAX_COLUMNS,

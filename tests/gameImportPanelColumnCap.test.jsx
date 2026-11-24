@@ -56,7 +56,7 @@ it('catches a repeated marked-up header that the CSV reader automatically rename
   fireEvent.change(screen.getByTestId('schedule-import-file'), {
     target: { files: [new File([csv], 'repeated.csv', { type: 'text/csv' })] },
   });
-  expect(await screen.findByRole('alert')).toHaveTextContent(/more than once/);
+  expect(await screen.findByRole('alert')).toHaveTextContent(/column "Date" more than once/);
   expect(start).not.toHaveBeenCalled();
 });
 

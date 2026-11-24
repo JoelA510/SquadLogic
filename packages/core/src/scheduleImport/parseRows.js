@@ -57,6 +57,7 @@ import {
   SCHEDULE_IMPORT_LIMITS,
   SCHEDULE_IMPORT_REASON as R,
   describeTooManyColumns,
+  describeTooManyRows,
 } from './reasonCodes.js';
 import { SCHEDULE_IMPORT_COLUMNS, SCHEDULE_IMPORT_TEMPLATE_HEADER } from './columns.js';
 
@@ -404,10 +405,7 @@ export function parseScheduleRows({ headers, rows, season, rowOffset = 0 }) {
     );
   }
   if (rowOffset + rows.length > SCHEDULE_IMPORT_LIMITS.MAX_ROWS) {
-    return fileRefusal(
-      R.TOO_MANY_ROWS,
-      `The file has ${(rowOffset + rows.length).toLocaleString('en-US')} rows; one import takes at most ${SCHEDULE_IMPORT_LIMITS.MAX_ROWS.toLocaleString('en-US')}. Split it and import the parts one after the other.`
-    );
+    return fileRefusal(R.TOO_MANY_ROWS, describeTooManyRows(rowOffset + rows.length));
   }
 
   /** @param {Record<string, unknown>} row @param {string} column */

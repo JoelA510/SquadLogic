@@ -115,6 +115,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Game schedule imports now accept formatted column names and keep their cells. Repeated names are reported before an import is created. The mock assigns new divisions to the default program for their season, which lets rollback remove an unused division.
+
 - Program settings now list the whole season in name order, and the delete and merge dialogs explain
   which program's settings are lost. Settings audit entries name the setting and its scope and report
   how many completed-season divisions kept their previous value.

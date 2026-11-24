@@ -13,12 +13,12 @@ import {
   describeScheduleImportReason,
   describeScheduleImportSkip,
   parseScheduleRows,
-  splitScheduleImportHeaders,
+  prepareGameImportFile,
   proposeScheduleMapping,
   resolveScheduleRows,
   scheduleImportConfirmCounts,
-  scheduleLabelKey,
-  SCHEDULE_IMPORT_COLUMNS,
+  scheduleImportColumnOf,
+  SCHEDULE_IMPORT_CHUNK_LIMITS,
   SCHEDULE_IMPORT_LIMITS,
 } from '@squadlogic/core/scheduleImport/index.js';
 import { supabase } from '../../lib/supabaseClient.js';
@@ -152,9 +152,9 @@ const KINDS = Object.freeze({
     noun: 'games',
     /** Whether the import reads a column of this name (a repeat of one it reads refuses the file). */
     headerReader: async () => (/** @type {string} */ name) =>
-      Object.values(SCHEDULE_IMPORT_COLUMNS).some(
-        (column) => scheduleLabelKey(column) === scheduleLabelKey(name)
-      ),
+      scheduleImportColumnOf(
+        sanitizeImportText(name, SCHEDULE_IMPORT_CHUNK_LIMITS.MAX_CELL_LENGTH)
+      ) !== undefined,
     title: 'Import a game schedule',
     intro:
       'Bring in a schedule that already exists. Conflicts in the file are imported and flagged, never refused; a game with no time is kept on its date as TIME TBD.',
@@ -162,12 +162,15 @@ const KINDS = Object.freeze({
       'Date, Start Time, End Time (or Length in minutes), Venue, Field, Division, Home Team, Away Team. Optional: Game ID, Week. Any other column is dropped and never stored.',
     // The browser's early reading is of what the client SENDS: the columns the import reads, found by name, so a wide
     // file is read whole and never refused for its width (the parse refuses more headers than a request takes).
-    parseFile: (/** @type {any} */ input) =>
-      parseScheduleRows({
-        headers: splitScheduleImportHeaders(input.headers, sanitizeImportText).read,
+    parseFile: (/** @type {any} */ input) => {
+      const sent = prepareGameImportFile({
+        headers: input.headers,
         rows: input.rows,
-        season: input.season,
-      }),
+        clean: sanitizeImportText,
+      });
+      if (sent.refusal) return { ok: false, refusal: sent.refusal };
+      return parseScheduleRows({ headers: sent.headers, rows: sent.rows, season: input.season });
+    },
     start: startGameImport,
     readStaged: readStagedGameRows,
     readLeague: readGameImportLeague,

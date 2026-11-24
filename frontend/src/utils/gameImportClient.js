@@ -19,13 +19,9 @@
 
 import {
   SCHEDULE_IMPORT_CHUNK_LIMITS,
-  splitScheduleImportHeaders,
+  prepareGameImportFile,
   stagedRowToParsed,
 } from '@squadlogic/core/scheduleImport/staging.js';
-import {
-  SCHEDULE_IMPORT_LIMITS,
-  describeTooManyColumns,
-} from '@squadlogic/core/scheduleImport/reasonCodes.js';
 import { buildScheduleCsv } from '@squadlogic/core/scheduleImport/scheduleCsv.js';
 import { fetchAllPages } from '../lib/pagedFetch.js';
 import { readCurrentSavedGameIds } from './gamePublishedClient.js';
@@ -108,15 +104,9 @@ export async function startGameImport(
   // Only the columns the import reads leave the browser, found by NAME as the stage finds them (a note, a coach or an
   // email in the file has no reason to travel). Nothing is cut by position, so a column the import reads is read
   // wherever it stands, and a wide file is never refused for its width. The dropped columns are named from here.
-  const { read, dropped } = splitScheduleImportHeaders(headers, sanitizeImportText);
-  // More columns to send than one request takes cannot happen today (the import reads eleven names; only a column
-  // given many times over could): refused here, in words, before a job is made, never cut.
-  if (read.length > SCHEDULE_IMPORT_LIMITS.MAX_COLUMNS) {
-    throw refusal(
-      describeTooManyColumns(read.length, SCHEDULE_IMPORT_LIMITS.MAX_COLUMNS),
-      'too-many-columns'
-    );
-  }
+  const prepared = prepareGameImportFile({ headers, rows, clean: sanitizeImportText });
+  if (prepared.refusal) throw refusal(prepared.refusal.message, prepared.refusal.code);
+  const { dropped } = prepared;
   const created = await client.rpc('create_import_job', {
     p_organization_id: organizationId,
     p_import_type: 'games',
@@ -145,7 +135,6 @@ export async function startGameImport(
     refused_rows: [],
   };
   const size = SCHEDULE_IMPORT_CHUNK_LIMITS.MAX_CHUNK_ROWS;
-  const sentRows = rows.map((row) => Object.fromEntries(read.map((h) => [h, row?.[h] ?? ''])));
   // A file with a header and no rows still goes to the function once, so the refusal or the empty answer is its own.
   for (let offset = 0; offset === 0 || offset < rows.length; offset += size) {
     const { data, error } = await client.functions.invoke('import-validation', {
@@ -154,8 +143,8 @@ export async function startGameImport(
         action: 'stage',
         organization_id: organizationId,
         import_job_id: jobId,
-        headers: read,
-        rows: sentRows.slice(offset, offset + size),
+        headers: prepared.headers,
+        rows: prepared.rows.slice(offset, offset + size),
         row_offset: offset,
       },
     });
@@ -377,23 +366,16 @@ export const GAME_IMPORT_DISCARDABLE_STATUS = 'ready_to_apply';
  * `import.canceled`), so it can no longer be mapped or applied. Its staged rows stay with the failed job (they hold
  * labels, dates and times, no person's data) and go when the job does.
  *
- * The job is read first, here, for every caller, and the call is made only for a job read as `ready_to_apply`; a job
- * that cannot be read is not discarded (the read's error is thrown). Since migration 20261122010000 the function
- * itself refuses a job that is not `ready_to_apply` (22023, `import_not_ready_to_apply`; before it, it marked an
- * APPLIED job `failed`, which took it out of the roll back). The read stays: it answers with the job's status without
- * a refused call, and it is the only check while a database still runs the older body. It may go once the migration
- * is deployed (docs/changes/2026-11-03-schedule-expansion.md). A job that changes between the read and the call is
- * refused by the function: that is not an error here, the job is read again and reported as not discarded.
+ * The RPC checks `ready_to_apply` under its lock (migration 20261122010000). After its specific status refusal,
+ * read the job so every caller can report what happened to it. A successful cancel needs no additional read.
  *
  * @param {any} client
  * @param {string} jobId
  * @returns {Promise<{ discarded: boolean, status: string | null }>} `discarded` false, with the status that was
- *   read, when the job was not one to discard: no call was made
+ *   read after the RPC refused it. A successful discard reports the status from which it was cancelled.
  */
 export async function discardGameImport(client, jobId) {
   requireClient(client);
-  const { status } = await readGameImportJobState(client, jobId);
-  if (status !== GAME_IMPORT_DISCARDABLE_STATUS) return { discarded: false, status };
   const { error } = await client.rpc('cancel_ready_import_job', {
     p_import_job_id: jobId,
     p_import_type: 'games',
@@ -402,7 +384,7 @@ export async function discardGameImport(client, jobId) {
     return { discarded: false, status: (await readGameImportJobState(client, jobId)).status };
   }
   if (error) throw fromRpc(error, 'The staged import could not be discarded.');
-  return { discarded: true, status };
+  return { discarded: true, status: GAME_IMPORT_DISCARDABLE_STATUS };
 }
 
 /**

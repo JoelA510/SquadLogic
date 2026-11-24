@@ -48,6 +48,7 @@ import { carryTeamRunResults } from '@squadlogic/core/utils/teamRunResults.js';
 import { sanitizeImportText } from '../utils/importRows.js';
 import { mockGameHeldIds } from './mockGameIdentity.js';
 import { mockGameHoldCode } from './mockGamePublished.js';
+import { defaultProgramOf } from './mockPrograms.js';
 
 export const GAME_IMPORT_RPCS = Object.freeze([
   'map_game_import_job',
@@ -1226,6 +1227,7 @@ function applyJob(db, job, dry, ctx, env) {
         organization_id: org,
         season_settings_id: seasonId,
         name: c.name,
+        program_id: defaultProgramOf(db, seasonId)?.id ?? null,
         created_at: stamp,
         updated_at: stamp,
       };

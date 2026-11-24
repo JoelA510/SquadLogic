@@ -19,6 +19,7 @@
  * Nothing else of the file is staged (a coach, an email, a phone, a note): the parse never read it.
  */
 
+import { prepareImportFile } from '../scheduleImport/prepareImportFile.js';
 import {
   practiceDivisionDecisionKey,
   practiceFieldDecisionKey,
@@ -172,51 +173,16 @@ export function describeTooManyReadColumns(count, max) {
  *   rows: Array<Record<string, unknown>>, dropped: string[] }}
  */
 export function preparePracticeImportFile({ headers, rows, clean }) {
-  if (!Array.isArray(headers)) {
-    throw new TypeError('preparePracticeImportFile: headers must be an array');
-  }
-  if (!Array.isArray(rows)) throw new TypeError('preparePracticeImportFile: rows must be an array');
-  if (typeof clean !== 'function') {
-    throw new TypeError('preparePracticeImportFile: clean must be the cell cleaner');
-  }
-  /** @type {Array<{ raw: string, name: string, column: string }>} */
-  const read = [];
-  /** @type {string[]} */
-  const dropped = [];
-  for (const header of headers) {
-    const name = clean(header, PRACTICE_IMPORT_STAGE_LIMITS.MAX_CELL_LENGTH);
-    if (name.trim() === '') continue;
-    const column = practiceImportColumnOf(name);
-    if (column === undefined) dropped.push(name.trim());
-    else read.push({ raw: String(header ?? ''), name, column });
-  }
-  /** @param {string} code @param {string} message @param {string} [column] */
-  const refused = (code, message, column) => ({
-    refusal: column === undefined ? { code, message } : { code, message, column },
-    headers: [],
-    rows: [],
-    dropped,
-  });
-  if (read.length > PRACTICE_IMPORT_STAGE_LIMITS.MAX_COLUMNS) {
-    return refused(
-      R.TOO_MANY_COLUMNS,
-      describeTooManyReadColumns(read.length, PRACTICE_IMPORT_STAGE_LIMITS.MAX_COLUMNS)
-    );
-  }
-  /** @type {Set<string>} */
-  const seen = new Set();
-  for (const { column } of read) {
-    if (seen.has(column)) {
-      return refused(R.DUPLICATE_COLUMN, describePracticeDuplicateColumn(column), column);
+  return prepareImportFile(
+    { headers, rows, clean },
+    {
+      maxLength: PRACTICE_IMPORT_STAGE_LIMITS.MAX_CELL_LENGTH,
+      maxColumns: PRACTICE_IMPORT_STAGE_LIMITS.MAX_COLUMNS,
+      columnOf: practiceImportColumnOf,
+      tooMany: describeTooManyReadColumns,
+      duplicate: describePracticeDuplicateColumn,
     }
-    seen.add(column);
-  }
-  return {
-    refusal: null,
-    headers: read.map((h) => h.name),
-    rows: rows.map((row) => Object.fromEntries(read.map((h) => [h.name, row?.[h.raw] ?? '']))),
-    dropped,
-  };
+  );
 }
 
 /**

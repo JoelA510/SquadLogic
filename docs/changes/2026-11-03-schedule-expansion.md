@@ -1596,8 +1596,8 @@ clocks skip, and the import refuses a file that names one, so the export has no 
    (a closed tab never runs it; the upload step lists what it left).
 5. **Closed by F11-2 (2026-11-11; and, 2026-11-12, the Import page's shared cancel path settles from the job when the
    function refuses it: `cancelDeferredImportJob` reads the job on `import_not_ready_to_apply` and the page clears its
-   state and says what happened, instead of failing until a reload. `discardGameImport`'s read-before-cancel may be
-   dropped once `20261122010000` is deployed; it is the only check against the older body).** `cancel_ready_import_job` refuses a job that is not `ready_to_apply` (the note for the next migration, above; fix
+   state and says what happened, instead of failing until a reload. Completion C5 confirmed migration
+   `20261122010000` in the production ledger and removed the games client's read-before-cancel).** `cancel_ready_import_job` refuses a job that is not `ready_to_apply` (the note for the next migration, above; fix
    round 3). Until then the Import page's own deferred-apply flow can still reach it blind: `ImportContext`'s
    `cancelDeferredImport` (`importDeferredActions.js`, `cancelDeferredImportJob`) is offered again after
    `applyDeferredImport` throws, for the coach, field, field availability, practice preference and evaluation
@@ -2014,11 +2014,9 @@ requirements of the PR 10 review and by this PR:
     import should read by name as well, rather than refuse a file of more than 200 columns, was open: **resolved
     2026-11-13**, #739: it reads by name on #734's contract, `preparePracticeImportFile`, with the header row cleaned once
     in the browser and the rows keyed by the cleaned names; a wide practice file imports and only more than 200 headers
-    SENT is refused. Follow-ups #739's review left: the games path picks columns by their cleaned name but keeps the rows
-    keyed by the raw header, so its early parse, its repeated-header check and its request can disagree with its stage
-    on a header with markup or raw text over 500 characters (`ScheduleImportPanel.jsx` games `parseFile` and
-    `headerReader`, `gameImportClient.js` `startGameImport`); and one header helper shared by both imports, rather than
-    `splitScheduleImportHeaders` and `preparePracticeImportFile`); every probable-move team has its own tick, the first 25 listed and "Show all N teams" for
+    SENT is refused. Completion C5 closed the header follow-ups from #739. Games and practices share
+    `prepareImportFile`, which reads cells under the original header and sends them under its cleaned name.
+    The games panel also checks repeated headers after cleaning. Every probable-move team has its own tick, the first 25 listed and "Show all N teams" for
     the rest (C6); a team the import creates is named on the TIME TBD list by the dry run's or the apply's own
     `arriving` rows (C8); every test of PR 11 that reads the date pins it (the world's `pinWorldClock`, the E2E's
     `page.clock.setFixedTime`; the TIME TBD rebuild counts only practices that end after today, so the E2E broke after
@@ -2029,7 +2027,7 @@ requirements of the PR 10 review and by this PR:
     `recordsBaseline`, `uploadNote`), with only `data-kind` left reading `kind`.
 11. **A defect of PR 10's mock, fixed**: a division the mock's apply created had no `program_id` (the SQL's trigger fills
     it), so the mock's read-time program backfill changed the row and the rollback kept the division as changed. The
-    games mock creates divisions the same way and was not changed (follow-up). Lesson 112.
+    games mock now assigns the season's default program on creation as well (completion C5). Lesson 112.
 
 The "a run fills the gaps" case stays in K2, as the plan allowed: the E2E sees the practices saved and locked in the
 result's words and does not open the Practices page.

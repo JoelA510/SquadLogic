@@ -599,7 +599,8 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         Object.keys(classification.unitsNeeded).filter(
           (teamId) => classification.targets[teamId] > 1
         )
-      )
+      ),
+      new Set(withSettings.teams.filter((t) => t.practicePairs?.length).map((t) => t.id))
     );
     if (outside.unchecked.length > 0) {
       const teamIds = [...new Set(outside.unchecked.map((u) => u.teamId))].sort();
@@ -725,6 +726,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         ...prepareTeam(t),
         // The store's settings (5c-bis), never the body's.
         practicesPerWeek: t.practicesPerWeek,
+        ...(t.practicePairs?.length ? { practicePairs: t.practicePairs } : {}),
         practiceMinutes: t.practiceMinutes,
       })),
       slots,
@@ -733,7 +735,13 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
     const teams = reserved.teams;
     const solverInput: PracticeSolverInput = {
       teams,
-      slots: reserved.slots,
+      slots: teams.some((t) => t.practicePairs?.length)
+        ? reserved.slots.map((slot) => ({
+            ...slot,
+            fieldId: venueDaylight.slots.get(slot.id)?.fieldId,
+            subunitId: venueDaylight.slots.get(slot.id)?.subunitId ?? null,
+          }))
+        : reserved.slots,
       // Every loaded row -- a TIME TBD series' row included -- is fixed occupancy, one entry per
       // ROW.
       locked: lock.rows.map((row) => ({
@@ -950,6 +958,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
     const daylight = run.daylight!;
     const warningCount =
       bestUnassigned.length +
+      (run.heldOutsidePairs?.length ?? 0) +
       daylight.pastSunset.length +
       daylight.unknown.length +
       daylight.lockedPastSunset.length;
@@ -1032,12 +1041,19 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
 
     const findings = bestUnassigned.map((u) => ({
       severity: 'warning',
-      finding_code: 'UNASSIGNED_TEAM',
+      finding_code:
+        u.rule === 'pairing' && u.reason === 'coach-preference'
+          ? 'PRACTICE_PAIR_COACH_PREFERENCE_CONFLICT'
+          : 'UNASSIGNED_TEAM',
       description:
         (u.target
           ? `Team ${u.teamId} could not be given one of its ${u.target} practices a week`
           : `Team ${u.teamId} could not be assigned`) +
-        `: ${u.reason}` +
+        (u.rule === 'pairing'
+          ? u.reason === 'coach-preference'
+            ? ": every available pair breaks a coach's must-keep preference"
+            : ': no paired slot on the same ground and clock window'
+          : `: ${u.reason}`) +
         // A verify-refused placement names the rule the server's check found it breaking.
         (u.rule ? ` (${u.rule})` : '') +
         (u.dimensions?.length ? ` (must_keep ${u.dimensions.join(', ')})` : ''),
@@ -1109,7 +1125,17 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       logCtx,
       {
         p_run_data: runData,
-        p_findings: [...findings, ...daylightFindings],
+        p_findings: [
+          ...findings,
+          ...(run.heldOutsidePairs ?? []).map((teamId) => ({
+            severity: 'warning',
+            finding_code: 'PRACTICE_HELD_OUTSIDE_PAIR',
+            description:
+              'A saved practice falls outside all allowed weekday pairs and stays on its saved day.',
+            affected_entities: [{ teamId }],
+          })),
+          ...daylightFindings,
+        ],
         p_metrics: metrics,
       }
     );
@@ -1239,6 +1265,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         practices: {
           teams: practiceTeams,
           overTarget: classification.overTarget,
+          ...(run.heldOutsidePairs ? { heldOutsidePairs: run.heldOutsidePairs } : {}),
           // Teams whose division gives no practice and that hold none: nothing to place, nothing
           // missing. The page leaves them out of the run's report and the readiness counts.
           noPractices: classification.noPractices,

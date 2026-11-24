@@ -1,5 +1,7 @@
 import React from 'react';
 import { assessTeamCount } from '@squadlogic/core/rosterSizing.js';
+import { resolveScopedSetting, scopedLevelsFor } from '@squadlogic/core/scopedSettings.js';
+import { useScopedSettings } from '../../hooks/useScopedSettings.js';
 import Button from '../ui/Button.jsx';
 import { movedHereNote } from '../../utils/seatNotes.js';
 
@@ -38,6 +40,39 @@ function movedNote(program) {
   return parts.length > 0 ? ` (${parts.join('; ')})` : '';
 }
 
+function PairedDaysSummary({ scope, weeklyCount }) {
+  const data = useScopedSettings(scope.organizationId, scope.seasonId);
+  if (data.loading) return <p>Loading paired practice days…</p>;
+  if (data.error) return <p role="status">{data.error}</p>;
+  const division = data.divisions.find((row) => row.id === scope.divisionId);
+  if (!division) return null;
+  const program = data.programs.find((row) => row.id === division.program_id);
+  const { value, source } = resolveScopedSetting(
+    scopedLevelsFor(
+      data.rows,
+      {
+        organizationId: scope.organizationId,
+        divisionId: division.id,
+        programId: division.program_id,
+        programIsDefault: program?.is_default,
+      },
+      'practice_pairs'
+    ),
+    'practice_pairs'
+  );
+  const text =
+    weeklyCount !== 2
+      ? 'Does not apply unless the division has two practices per week.'
+      : Array.isArray(value) && value.length
+        ? value.join(', ') + ' (' + source + ')'
+        : 'Any two weekdays.';
+  return (
+    <p className="text-xs text-text-muted mt-1">
+      Paired practice days. {text} Change this in Settings → General → Season &amp; Calendar.
+    </p>
+  );
+}
+
 export default function TeamingConfiguration({
   program,
   config,
@@ -46,6 +81,7 @@ export default function TeamingConfiguration({
   saving = false,
   saveDisabled = false,
   saveMessage = '',
+  pairingScope = null,
 }) {
   if (!program)
     return (
@@ -315,8 +351,11 @@ export default function TeamingConfiguration({
               >
                 {practicesInvalid
                   ? 'Enter a whole number from 0 to 7.'
-                  : 'How many practices each team gets, each on a different weekday. 0 gives none. Saved with the rules.'}
+                  : 'How many practices each team gets, each on a different weekday. 0 gives none.'}
               </p>
+              {pairingScope && (
+                <PairedDaysSummary scope={pairingScope} weeklyCount={config.practicesPerWeek} />
+              )}
             </div>
             <div>
               <label

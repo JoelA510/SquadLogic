@@ -583,7 +583,7 @@ describe('the settings come from the store, validated', () => {
     assert.equal(calls[0].table, 'teams');
     assert.match(
       calls[0].select,
-      /divisions!inner\(season_settings_id, practices_per_week, practice_minutes\)/
+      /divisions!inner\(season_settings_id, practices_per_week, practice_minutes, division_practice_pairs\)/
     );
     assert.deepEqual(calls[0].filters, [
       ['organization_id', 'org'],

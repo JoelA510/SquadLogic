@@ -91,3 +91,30 @@ Feature: Practices per division (Phase D PR B)
     Then the capacity panel verdict for "U10 Girls" says "slots fall on fewer weekdays than its practices a week"
     When I run the auto-scheduler on the Practice Scheduling page
     Then the panel says "Hawks" has 1 of 2 practices because the division's slots fall on fewer weekdays
+
+  Scenario Outline: Paired weekdays apply to both practices together
+    Given 24 players are imported into the "U10 Girls" program
+    When I set the "U10 Girls" division to 2 practices a week on the Teams page
+    And I open the Season and Calendar settings
+    And I set paired practice days for "U10 Girls" to "<pair>"
+    And these teams and coaches in "U10 Girls":
+      | team  | coach       |
+      | Hawks | Coach River |
+    And a Tuesday and a Thursday practice slot of 90 minutes with room for 2 teams each
+    And I run the auto-scheduler on the Practice Scheduling page
+    Then the auto-scheduler places <placed> practices and leaves <unplaced> unplaced
+
+    Examples:
+      | pair    | placed | unplaced |
+      | Tue/Thu | 2      | 0        |
+      | Mon/Wed | 0      | 2        |
+
+  Scenario: The paired weekdays selector remains usable in both themes
+    Given 24 players are imported into the "U10 Girls" program
+    When I set the "U10 Girls" division to 2 practices a week on the Teams page
+    And I open the Season and Calendar settings
+    And I set paired practice days for "U10 Girls" to "Tue/Thu"
+    Then axe finds no serious or critical violations on "/settings" in the "light" theme
+    When I switch to the dark theme on this page
+    And I set paired practice days for "U10 Girls" to "Wed/Fri"
+    Then axe finds no serious or critical violations on "/settings" in the "dark" theme

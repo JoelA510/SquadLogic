@@ -614,3 +614,37 @@ describe('practice repair launcher', () => {
     expect(screen.getByText(/Only an organization admin/)).toBeInTheDocument();
   });
 });
+
+it('flags a rehome that would leave the team on different clocks on its paired days', async () => {
+  const division = uuid(777);
+  h.tables.divisions = [
+    { id: division, organization_id: ORG, season_settings_id: SEASON, practices_per_week: 2 },
+  ];
+  h.tables.scoped_settings = [
+    { id: uuid(778), organization_id: ORG, key: 'practice_pairs', value: ['mon-wed'] },
+  ];
+  h.tables.teams[0].division_id = division;
+  h.tables.practice_assignments[2].team_id = T1;
+  await openPanel();
+  expect(screen.getByText(/This move breaks the team’s practice pair/)).toBeVisible();
+});
+
+it('judges each enact against the partner that is saved, even when the panel suggests moving both', async () => {
+  const division = uuid(779);
+  h.tables.divisions = [
+    { id: division, organization_id: ORG, season_settings_id: SEASON, practices_per_week: 2 },
+  ];
+  h.tables.scoped_settings = [
+    { id: uuid(780), organization_id: ORG, key: 'practice_pairs', value: ['mon-wed'] },
+  ];
+  h.tables.teams[0].division_id = division;
+  h.tables.practice_assignments = [assignment(A1, T1, SL1), assignment(A2, T1, SL2)];
+  h.tables.practice_slots = [
+    slot(SL1, F1, 'mon', '17:00', '18:00'),
+    slot(SL2, F1, 'wed', '17:00', '18:00'),
+    slot(SL3, F2, 'mon', '17:00', '18:00'),
+    slot(SL4, F2, 'wed', '17:00', '18:00'),
+  ];
+  await openPanel();
+  expect(screen.getAllByText(/This move breaks the team’s practice pair/)).toHaveLength(2);
+});

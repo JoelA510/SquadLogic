@@ -320,11 +320,11 @@ describe('scoped settings :: the core registry equals the migrations’ registry
       name: '99990101000000_scratch.sql',
       sql: `-- a later key, columns reordered
 INSERT INTO public.scoped_setting_keys (label, key, default_value, value_type, allowed_values)
-VALUES ('Paired practice days', 'practice_pairs', '[]'::jsonb, 'text_set', '["mon-wed", "tue-thu"]'::jsonb)
+VALUES ('Paired practice days', 'scratch_pairs', '[]'::jsonb, 'text_set', '["mon-wed", "tue-thu"]'::jsonb)
 ON CONFLICT (key) DO NOTHING;`,
     };
     const read = registryFromMigrations([...MIGRATIONS, scratch]);
-    expect(read.practice_pairs).toEqual({
+    expect(read.scratch_pairs).toEqual({
       type: 'text_set',
       allowed: ['mon-wed', 'tue-thu'],
       defaultValue: [],
@@ -353,7 +353,7 @@ ON CONFLICT (key) DO NOTHING;`,
         sql: "DELETE FROM public.scoped_setting_keys WHERE key = 'standings_count_outside_results';",
       },
     ]);
-    expect(gone).toEqual({});
+    expect(gone).toEqual({ practice_pairs: SCOPED_SETTING_KEYS.practice_pairs });
   });
 
   it('PLANT: a statement it cannot read fails the reader instead of being skipped', () => {

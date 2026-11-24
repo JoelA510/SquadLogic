@@ -145,7 +145,6 @@ When('I navigate to the Practice Scheduling page', async ({ page }) => {
   // The mock creates its store on first load, so the page is loaded, the slot
   // re-dated, and the page reloaded to read it.
   await page.goto('/schedule/practice');
-  await page.waitForLoadState('networkidle');
   await waitForMockClient(page);
   await page.evaluate(() => {
     // Seeded through the sanctioned producer (`window.__saveMockDB__`, which is
@@ -170,7 +169,7 @@ When('I navigate to the Practice Scheduling page', async ({ page }) => {
   });
 
   await page.reload();
-  await page.waitForLoadState('networkidle');
+  await expect(page.locator('section[aria-label="Auto-Scheduler"]')).toBeVisible();
 });
 
 // --- Panel visibility ---

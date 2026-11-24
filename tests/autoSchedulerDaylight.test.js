@@ -436,7 +436,7 @@ describe('the venue loader: from the database, as the caller, paged', () => {
     const fieldCalls = client.calls.filter((c) => c.table === 'fields');
     assert.equal(
       slotCalls[0].select,
-      'id, field_id, valid_from, valid_until, day_of_week, start_time, end_time'
+      'id, field_id, field_subunit_id, valid_from, valid_until, day_of_week, start_time, end_time'
     );
     assert.match(
       fieldCalls[0].select,
@@ -969,9 +969,11 @@ describe('auto-scheduler/index.ts wiring (source pin)', () => {
     assert.match(source, /effectiveDateRange: row\.effectiveDateRange,/);
     assert.match(source, /^ {8}daylight,$/m);
     assert.match(source, /daylightPastSunset: daylight\.pastSunset\.map\(/);
-    // W9: nothing in the handler reads a venue, coordinate or lighting key off a slot.
+    // C7 reads the pitch only from the RLS-scoped venue lookup. Every client-side read is still forbidden.
+    const persistedPitch = 'venueDaylight.slots.get(slot.id)?.fieldId';
+    assert.ok(source.includes(persistedPitch));
     assert.doesNotMatch(
-      source,
+      source.replaceAll(persistedPitch, ''),
       /\.(?:fieldId|latitude|longitude|lightingAvailable|lighting_available)\b/
     );
   });

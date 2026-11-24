@@ -37,6 +37,7 @@ export const PRACTICE_WRITER_GATE_RULE = Object.freeze({
   RESERVATION: 'reservation',
   LENGTH: 'length',
   WEEKDAY: 'weekday',
+  PAIRING: 'pairing',
   COUNT: 'count',
 });
 
@@ -56,6 +57,7 @@ export const VERIFY_REFUSAL_RULE = Object.freeze({
   CAPACITY: 'capacity',
   COACH_CONFLICT: 'coach-conflict',
   WEEKDAY: 'weekday',
+  PAIRING: 'pairing',
   MUST_KEEP: 'must-keep',
   UNKNOWN_PRACTICE: 'unknown-practice',
   UNKNOWN_SLOT: 'unknown-slot',
@@ -68,6 +70,7 @@ const REFUSAL_RULE_TEXT = Object.freeze({
   [VERIFY_REFUSAL_RULE.NO_LIVE_DATE]: 'the slot has no date left from today',
   [VERIFY_REFUSAL_RULE.CAPACITY]: 'the slot was already full',
   [VERIFY_REFUSAL_RULE.COACH_CONFLICT]: 'a coach would be in two places at once',
+  [VERIFY_REFUSAL_RULE.PAIRING]: 'no matching paired slot on an allowed weekday',
   [VERIFY_REFUSAL_RULE.WEEKDAY]: 'the team already practises on that weekday',
   [VERIFY_REFUSAL_RULE.MUST_KEEP]: "it breaks a coach's must-keep preference",
   [VERIFY_REFUSAL_RULE.UNKNOWN_PRACTICE]: 'the team has no practice to place',
@@ -102,6 +105,12 @@ export function describeUnplacedReason(reason, rule = undefined) {
     return why
       ? `the server's check refused the browser's placement: ${why}`
       : "the server's check refused the browser's placement";
+  }
+  if (rule === 'pairing' && key === PRACTICE_UNPLACED_REASON.NO_SLOT_AVAILABLE) {
+    return 'no paired slot is available on the same ground at the same time on an allowed partner day';
+  }
+  if (rule === 'pairing' && key === PRACTICE_UNPLACED_REASON.COACH_PREFERENCE) {
+    return "every available pair breaks a coach's must-keep preference";
   }
   if (key === 'optimizer-unplaced') return TEXT.optimizerUnplaced;
   return TEXT[key] ?? key;

@@ -227,6 +227,7 @@ export function storedWallSeconds(time: unknown, round: 'floor' | 'ceil'): numbe
 
 /** One run slot as `practice_slots` stores it. */
 export interface StoredSlot {
+  subunitId?: string | null;
   fieldId: string;
   validUntil: string | null;
   /**
@@ -355,7 +356,9 @@ export async function loadVenueDaylight(
     () =>
       client
         .from('practice_slots')
-        .select('id, field_id, valid_from, valid_until, day_of_week, start_time, end_time')
+        .select(
+          'id, field_id, field_subunit_id, valid_from, valid_until, day_of_week, start_time, end_time'
+        )
         .eq('organization_id', organizationId)
         .order('id', { ascending: true }),
     pageSize
@@ -372,6 +375,7 @@ export async function loadVenueDaylight(
     if (row.field_id == null) continue; // NOT NULL in the schema; unjudgeable if not
     storedById.set(String(row.id), {
       fieldId: String(row.field_id).toLowerCase(),
+      ...(row.field_subunit_id ? { subunitId: String(row.field_subunit_id).toLowerCase() } : {}),
       validUntil: isIsoDate(row.valid_until) ? row.valid_until : null,
       firstDate: storedFirstDate(row.valid_from, row.day_of_week),
       endMinutes: startMinutesOf(row.end_time),

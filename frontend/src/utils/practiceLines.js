@@ -15,7 +15,7 @@ const SETTINGS_REASONS = new Set([
  * the roster and each division's count, never from the placements, so a team given one of its two
  * practices is listed with the missing one's reason instead of vanishing from the report.
  *
- * @param {{ practices?: { teams?: Array<Object> }|null, unassigned?: Array<Object> }|null|undefined} result
+ * @param {{ practices?: { heldOutsidePairs?: string[], teams?: Array<Object> }|null, unassigned?: Array<Object> }|null|undefined} result
  * @param {Record<string, string>} teamNames
  * @returns {Array<{ teamId: string, name: string, have: number, target: number, reasons: string[] }>}
  */
@@ -34,6 +34,13 @@ export function practiceLines(result, teamNames) {
       // is the division's setting at work: say so instead of a bare "Unassigned".
       settingsOnly.set(entry.teamId, [reason]);
     }
+  }
+  for (const id of result?.practices?.heldOutsidePairs ?? []) {
+    const list = reasonsByTeam.get(id) ?? [];
+    list.push(
+      'a saved practice falls outside the allowed weekday pairs and stays on its saved day'
+    );
+    reasonsByTeam.set(id, list);
   }
   const lines = (result?.practices?.teams ?? []).map((team) => ({
     teamId: team.teamId,

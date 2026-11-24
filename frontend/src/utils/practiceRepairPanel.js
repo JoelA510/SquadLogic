@@ -35,6 +35,7 @@
  * @module utils/practiceRepairPanel
  */
 
+import { scopedLevelsFor, resolveScopedSetting } from '@squadlogic/core/scopedSettings.js';
 import { DAYLIGHT_UNKNOWN_CAUSE_TEXT } from './daylightReport.js';
 import {
   PRACTICE_REASON,
@@ -168,7 +169,30 @@ export function openPracticeRepair(rows, loss, { timeZone = null, baseFingerprin
   });
   const result = repairPracticeLoss(adapted.input);
   const state = createRecommendationState(adapted.input);
-  return { adapted, result, state, daylightPlan };
+  const pairsByDivision = new Map();
+  for (const division of rows.divisions ?? []) {
+    if (division.practices_per_week !== 2) continue;
+    const program = rows.programs?.find((row) => row.id === division.program_id);
+    const levels = scopedLevelsFor(
+      rows.scopedSettings ?? [],
+      {
+        divisionId: division.id,
+        organizationId: division.organization_id,
+        programId: division.program_id,
+        programIsDefault: program?.is_default,
+      },
+      'practice_pairs'
+    );
+    const { value } = resolveScopedSetting(levels, 'practice_pairs');
+    if (Array.isArray(value) && value.length) pairsByDivision.set(division.id, value);
+  }
+  const teamPairs = new Map(
+    (rows.teams ?? []).map((team) => [
+      String(team.id).toLowerCase(),
+      pairsByDivision.get(team.division_id),
+    ])
+  );
+  return { adapted, result, state, daylightPlan, teamPairs };
 }
 
 /** @param {ReturnType<typeof createRecommendationState>} state @param {string} assignmentId */
@@ -335,6 +359,62 @@ export function sunsetUnknownText(rec) {
   );
 }
 
+// Monday of the first/last week in which this weekday actually occurs in the window.
+function occurrenceWeeks(from, until, weekday) {
+  const day = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'].indexOf(weekday);
+  const first = Date.parse(from) / 86400000;
+  const last = Date.parse(until) / 86400000;
+  const firstDate = first + ((day - ((first + 3) % 7) + 7) % 7);
+  const lastDate = last - ((((last + 3) % 7) - day + 7) % 7);
+  return firstDate <= lastDate ? [firstDate - day, lastDate - day] : null;
+}
+
+/** Enact saves one row. Only a saved partner (including a saved relocation) is a commitment. */
+function breaksPair(opened, rec) {
+  const allowed = opened.teamPairs?.get(rec.teamId);
+  if (!allowed || !rec.to) return false;
+  const from = rec.window?.from ?? rec.effectiveFrom;
+  const until = rec.window?.until ?? rec.effectiveUntil;
+  const weeks = occurrenceWeeks(from, until, rec.to.weekday);
+  if (!weeks) return false;
+  for (const other of opened.adapted.context.snapshot) {
+    if (other.teamId !== rec.teamId || other.id === rec.assignmentId) continue;
+    const slot = opened.adapted.context.slots.get(other.slotId);
+    if (!slot) continue;
+    const exceptions = opened.adapted.context.liveExceptions.get(other.id) ?? [];
+    for (let monday = weeks[0]; monday <= weeks[1]; monday += 7) {
+      const spansWeek = (shape, lo, hi) => {
+        if (!shape) return false;
+        const range = occurrenceWeeks(lo, hi, shape.weekday);
+        return range && range[0] <= monday && monday <= range[1];
+      };
+      if (!other.range || !spansWeek(slot, other.range.from, other.range.until)) continue;
+      const saved = exceptions.find((window) => spansWeek(slot, window.from, window.until));
+      const twin = saved ? opened.adapted.context.slots.get(saved.slotId) : slot;
+      if (
+        !twin ||
+        twin.surfaceId !== rec.to.surfaceId ||
+        twin.startMinutes !== rec.to.startMinutes ||
+        twin.durationMinutes !== rec.to.durationMinutes ||
+        !allowed.some(
+          (pair) =>
+            pair ===
+            [rec.to.weekday, twin.weekday]
+              .sort(
+                (a, b) =>
+                  ['MON', 'TUE', 'WED', 'THU', 'FRI'].indexOf(a) -
+                  ['MON', 'TUE', 'WED', 'THU', 'FRI'].indexOf(b)
+              )
+              .join('-')
+              .toLowerCase()
+        )
+      )
+        return true;
+    }
+  }
+  return false;
+}
+
 /**
  * One view row per recommendation, in the repair's order (assignment id).
  *
@@ -355,6 +435,7 @@ export function panelRowsOf(opened, state, names) {
     tier: rec.tier,
     reason: rec.to ? null : rec.reason,
     reasonText: rec.to ? null : (TBD_REASON_TEXT[rec.reason] ?? rec.reason),
+    pairingBroken: breaksPair(opened, rec),
     pastSunset: rec.to ? pastSunsetText(rec) : null,
     sunsetUnknown: rec.to ? sunsetUnknownText(rec) : null,
     refusals: (refusals.get(rec.assignmentId) ?? []).map((r) => ({

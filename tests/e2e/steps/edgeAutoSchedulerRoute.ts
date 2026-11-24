@@ -50,6 +50,10 @@ import {
   anchorWallTimes,
   describeAnchorFailure,
 } from '../../../supabase/functions/_shared/timing/anchorWallTimes.js';
+import {
+  scopedLevelsFor,
+  resolveScopedSetting,
+} from '../../../packages/core/src/scopedSettings.js';
 import { prepareTeam } from '../../../supabase/functions/_shared/engines/practice-coaches.js';
 import { planTeamsForRun } from '../../../supabase/functions/_shared/engines/practice-lock.js';
 import {
@@ -111,13 +115,39 @@ async function practiceSettingsFromMock(page: Page, teamIds: string[]) {
     const division = (db.divisions ?? []).find((d) => d.id === key || d.name === key);
     if (!division) continue;
     for (const team of teams) {
-      if (teamIds.includes(team.id)) rows.push({ id: team.id, divisions: division });
+      if (teamIds.includes(team.id)) {
+        const levels = scopedLevelsFor(
+          db.scoped_settings ?? [],
+          {
+            organizationId: String(division.organization_id),
+            divisionId: String(division.id),
+            programId: division.program_id ? String(division.program_id) : null,
+            programIsDefault: Boolean(
+              db.programs?.find((p) => p.id === division.program_id)?.is_default
+            ),
+          },
+          'practice_pairs'
+        );
+        rows.push({
+          id: team.id,
+          divisions: {
+            ...division,
+            division_practice_pairs:
+              division.practices_per_week === 2
+                ? resolveScopedSetting(levels, 'practice_pairs').value
+                : [],
+          },
+        });
+      }
     }
   }
   const parsed = parseTeamPracticeSettings(rows);
   if (!parsed.ok)
     throw new Error('message' in parsed ? parsed.message : 'practice settings unreadable');
-  return parsed.byTeam;
+  return {
+    byTeam: parsed.byTeam,
+    slots: new Map((db.practice_slots ?? []).map((s) => [String(s.id), s])),
+  };
 }
 
 async function fulfillJson(route: Route, body: unknown, status = 200) {
@@ -196,13 +226,11 @@ export async function routeAutoSchedulerToEdgeSolver(page: Page): Promise<void> 
       slotId: row.slotId,
       effectiveDateRange: row.effectiveDateRange ?? null,
     }));
-    const settings = applyPracticeSettings(
-      input.teams,
-      await practiceSettingsFromMock(
-        page,
-        input.teams.map((t) => t.id)
-      )
+    const stored = await practiceSettingsFromMock(
+      page,
+      input.teams.map((team) => team.id)
     );
+    const settings = applyPracticeSettings(input.teams, stored.byTeam);
     const classification = planTeamsForRun(
       input.teams.map((t) => t.id),
       // The loader's row type carries more columns than the solver reads.
@@ -216,9 +244,19 @@ export async function routeAutoSchedulerToEdgeSolver(page: Page): Promise<void> 
       teams: settings.teams.map((t) => ({
         ...prepareTeam(t),
         practicesPerWeek: t.practicesPerWeek,
+        ...(t.practicePairs?.length ? { practicePairs: t.practicePairs } : {}),
         practiceMinutes: t.practiceMinutes,
       })),
-      slots,
+      slots: settings.teams.some((t) => t.practicePairs?.length)
+        ? slots.map((s) => {
+            const row = stored.slots.get(s.id);
+            return {
+              ...s,
+              fieldId: row?.field_id ? String(row.field_id) : null,
+              subunitId: row?.field_subunit_id ? String(row.field_subunit_id) : null,
+            };
+          })
+        : slots,
       locked: lockRows.map((row) => ({
         assignmentId: row.id,
         teamId: row.teamId,

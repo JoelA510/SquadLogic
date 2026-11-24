@@ -63,10 +63,10 @@ describe('the unplaced reasons: core and the Edge solver say the same things', (
 });
 
 describe('the writer gate’s rules: core and the SQL say the same things', () => {
-  const helper = MIGRATION.slice(
-    MIGRATION.indexOf('CREATE FUNCTION public.practice_new_auto_row_refusals'),
-    MIGRATION.indexOf('REVOKE ALL ON FUNCTION public.practice_new_auto_row_refusals')
-  );
+  const updated = read('supabase/migrations/20261127010000_paired_practice_days.sql');
+  const helper = updated
+    .split('CREATE OR REPLACE FUNCTION public.practice_new_auto_row_refusals')[1]
+    .split('$function$;')[0];
   const sqlRules = [...helper.matchAll(/'([a-z]+)'::text/g)].map((m) => m[1]);
 
   it('the helper names exactly the rules core lists, each once', () => {
@@ -75,11 +75,16 @@ describe('the writer gate’s rules: core and the SQL say the same things', () =
   });
 
   it('the smoke and the pgTAP file each exercise every rule by name', () => {
-    const smoke = read('docs/sql/20261105010000_smoke.sql');
-    const pgtap = read('supabase/tests/practice_writer_v3.sql');
+    const smoke =
+      read('docs/sql/20261105010000_smoke.sql') + read('docs/sql/20261127010000_smoke.sql');
+    const pgtap =
+      read('supabase/tests/practice_writer_v3.sql') + read('supabase/tests/practice_pairing.sql');
     for (const rule of Object.values(PRACTICE_WRITER_GATE_RULE)) {
       assert.ok(smoke.includes(`'${rule}'`), `the smoke never names ${rule}`);
-      assert.ok(pgtap.includes(`'%${rule}%'`), `the pgTAP file never names ${rule}`);
+      assert.ok(
+        pgtap.includes(`'%${rule}%'`) || pgtap.includes(`rule='${rule}'`),
+        `the pgTAP file never names ${rule}`
+      );
     }
   });
 
@@ -109,7 +114,7 @@ describe('the server’s check of a browser run: core and the Edge solver say th
     const shared = Object.values(PRACTICE_WRITER_GATE_RULE).filter((rule) =>
       verifyRules.includes(rule)
     );
-    assert.deepEqual(shared.sort(), ['capacity', 'length', 'reservation', 'weekday']);
+    assert.deepEqual(shared.sort(), ['capacity', 'length', 'pairing', 'reservation', 'weekday']);
   });
 
   it('verify-refused is not on the TIME TBD list, which the table’s CHECK spells: the writer labels it not-scheduled-yet', () => {

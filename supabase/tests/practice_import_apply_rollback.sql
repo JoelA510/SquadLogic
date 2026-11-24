@@ -33,7 +33,7 @@ BEGIN;
 \set squadlogic_practice_fixture_include 1
 \ir _practice_import_fixture.sql
 
-SELECT plan(111);
+SELECT plan(112);
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
 SET client_min_messages = warning;
@@ -182,7 +182,7 @@ SELECT is(pg_temp.val($$SELECT string_agg(p.proname || '=' || md5(replace(p.pros
                                         to_regprocedure('public.practice_new_auto_row_refusals(uuid,uuid[])'),
                                         to_regprocedure('public.refresh_schedule_tbd_practices(uuid)'),
                                         to_regprocedure('public.sync_schedule_tbd_practices(uuid,uuid,uuid,jsonb)'))$$),
-    'persist_practice_schedule=f33e164711af7a1412ab9596608f9531,practice_new_auto_row_refusals=5a6658441b95a7444bfcb99fef293042,refresh_schedule_tbd_practices=cd22827ffadb16a363deb06c5b3ef8b7,sync_schedule_tbd_practices=210bd955a160a980ba12e1bec62ca58c',
+    'persist_practice_schedule=f33e164711af7a1412ab9596608f9531,practice_new_auto_row_refusals=e8951c53e17926ad3710da80c19d143c,refresh_schedule_tbd_practices=cd22827ffadb16a363deb06c5b3ef8b7,sync_schedule_tbd_practices=210bd955a160a980ba12e1bec62ca58c',
     'K1: the writer, its gate, the TIME TBD refresh and its sync are the bodies they were');
 SELECT is(pg_temp.val($$SELECT string_agg(p.proname || ':' || has_function_privilege('authenticated', p.oid, 'EXECUTE')::text, ',' ORDER BY p.proname)
                         FROM pg_proc p WHERE p.proname IN ('ensure_practice_slot', 'practice_import_referenced_ids')$$),
@@ -236,6 +236,14 @@ RESET ROLE;
 SELECT pg_temp.fp() AS fp0 \gset
 SET LOCAL ROLE authenticated;
 INSERT INTO t_res VALUES ('dry', public.apply_practice_import_job((SELECT id FROM t_job WHERE k = 'J1'), true));
+-- Keep the test's scoped-setting write and its audit entry out of the original dry-run snapshot.
+SAVEPOINT paired_preview;
+SELECT public.admin_set_scoped_setting('practice_pairs','organization','a1111111-1111-1111-1111-111111111111','["mon-wed"]');
+INSERT INTO t_res VALUES ('pair-preview', public.apply_practice_import_job((SELECT id FROM t_job WHERE k='J1'), true));
+SELECT ((r #>> '{flags,pairing-differs,rows}')::int > 0 AND r->'refused_by_reason' = (SELECT r->'refused_by_reason' FROM t_res WHERE k='dry')) AS pair_flagged
+  FROM t_res WHERE k='pair-preview' \gset
+ROLLBACK TO paired_preview;
+SELECT ok(:'pair_flagged'::boolean,'an imported pair that differs is accepted and flagged');
 RESET ROLE;
 SELECT is(pg_temp.fp(), :'fp0', 'a dry run changes nothing: every table of the public schema reads back the same');
 SELECT is(pg_temp.n(r, 'dry_run'), 'true', 'the preview says it is one') FROM t_res WHERE k = 'dry';

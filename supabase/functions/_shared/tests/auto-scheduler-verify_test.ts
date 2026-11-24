@@ -254,3 +254,19 @@ Deno.test('a verify body keeps its claims and drops every input it tries to brin
     false
   );
 });
+
+Deno.test(
+  'a paired division gets both matching weekdays or neither under the Edge runtime',
+  async () => {
+    const input = league();
+    input.teams = input.teams.map((team) => ({ ...team, practicePairs: ['mon-wed'] }));
+    input.slots = input.slots.map((slot) => ({ ...slot, fieldId: slot.id.split('-')[0] }));
+    const run = await search(input);
+    const paired = run.placements.filter((p) => p.teamId === 't1');
+    assertEquals(paired.length, 2);
+    assertEquals(paired.map((p) => p.slotId.split('-')[1]).sort(), ['mon', 'wed']);
+    assertEquals(paired[0].slotId.replace(/mon|wed/, ''), paired[1].slotId.replace(/mon|wed/, ''));
+    assertEquals(verify(run.placements, input).refused, []);
+    assertEquals(verify(paired.slice(0, 1), input).refused[0].rule, 'pairing');
+  }
+);

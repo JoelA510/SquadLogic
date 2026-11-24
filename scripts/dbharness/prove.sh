@@ -290,6 +290,7 @@ M80="$REPO/supabase/migrations/20261123010000_practice_import.sql"
 # two bodies are re-aimed here (lesson 70). Its smoke holds the plants of its own, below; the pgTAP file
 # (supabase/tests/scoped_settings.sql) is CI's.
 M81="$REPO/supabase/migrations/20261124010000_settings_scope.sql"
+PAIRING="$REPO/supabase/migrations/20261127010000_paired_practice_days.sql"
 GAME_IMPORT_GUARDS="$REPO/supabase/migrations/20261125010000_game_import_guards.sql"
 LEGACY_GAMES_RETIRE="$REPO/supabase/migrations/20261126010000_retire_legacy_games.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
@@ -4915,14 +4916,14 @@ plant "M52 anyone can create a permit" "$M53" \
 # matter most in the writer's gate: a division's practice length is held for a new auto row (a 60-minute
 # division is not given a 45-minute slot by a client that bypassed the solver), and a team's practices fall
 # on different weekdays (two new auto rows of one team on one weekday are refused whatever their times).
-plant "M55 the writer does not check the division's practice length" "$M55" \
+plant "M55 the writer does not check the division's practice length" "$PAIRING" \
   "     WHERE j.practice_minutes IS NOT NULL
        AND (j.end_time - j.start_time) <> make_interval(mins => j.practice_minutes)" \
   "     WHERE j.practice_minutes IS NOT NULL
        AND false" \
   "smoke 20261105010000"
 
-plant "M55 the writer lets a team practise twice on one weekday" "$M55" \
+plant "M55 the writer lets a team practise twice on one weekday" "$PAIRING" \
   "        ON o.team_id = j.team_id AND o.id <> j.id AND o.day_of_week = j.day_of_week" \
   "        ON false AND o.team_id = j.team_id AND o.id <> j.id AND o.day_of_week = j.day_of_week" \
   "smoke 20261105010000"
@@ -5803,7 +5804,7 @@ plant "R71 the revert does not refuse while a score is recorded" "$R71" \
 #   - the rollback reads no reference, so a field an admin gave a blackout since is deleted with the blackout;
 #   and two the review round asked for: the job's status not judged after the locks (a completed job applied again), and a
 #   slot found by its key not compared with the row (a practice could outlive its slot).
-plant "M80 the dry run's sentinel is removed (a preview writes)" "$M80" \
+plant "M80 the dry run's sentinel is removed (a preview writes)" "$PAIRING" \
   "        IF v_dry THEN
             RAISE EXCEPTION 'practice import dry run: every write is undone' USING ERRCODE = 'SLD01';
         END IF;" \
@@ -5812,7 +5813,7 @@ plant "M80 the dry run's sentinel is removed (a preview writes)" "$M80" \
         END IF;" \
   "smoke 20261123010000"
 
-plant "M80 ON CONFLICT DO NOTHING is removed (a re-import fails)" "$M80" \
+plant "M80 ON CONFLICT DO NOTHING is removed (a re-import fails)" "$PAIRING" \
   "            ON CONFLICT (team_id, practice_slot_id, effective_date_range)
                 WHERE practice_slot_id IS NOT NULL AND effective_date_range IS NOT NULL
             DO NOTHING
@@ -5820,7 +5821,7 @@ plant "M80 ON CONFLICT DO NOTHING is removed (a re-import fails)" "$M80" \
   "            RETURNING id, team_id, practice_slot_id, effective_date_range" \
   "smoke 20261123010000"
 
-plant "M80 the flag step hands the gate auto rows only" "$M80" \
+plant "M80 the flag step hands the gate auto rows only" "$PAIRING" \
   "          FROM _pi_asg a WHERE COALESCE(a.existing_id, a.new_id) IS NOT NULL;" \
   "          FROM _pi_asg a JOIN public.practice_assignments pz ON pz.id = COALESCE(a.existing_id, a.new_id) WHERE pz.source = 'auto';" \
   "smoke 20261123010000"
@@ -5830,12 +5831,12 @@ plant "M80 the rollback no longer refuses after a change" "$M80" \
   "    IF false THEN" \
   "smoke 20261123010000"
 
-plant "M80 a probable move is added without its tick" "$M80" \
+plant "M80 a probable move is added without its tick" "$PAIRING" \
   "SET probable_move = true, held_back = NOT (a.row_key = ANY (v_add))" \
   "SET probable_move = true, held_back = false" \
   "smoke 20261123010000"
 
-plant "M80 the job's status is not judged after the locks (review round)" "$M80" \
+plant "M80 the job's status is not judged after the locks (review round)" "$PAIRING" \
   "    -- A finished job answers with the result it stored (a retry after a lost response writes nothing).
     IF v_job.status IN ('completed', 'completed_with_warnings') THEN
         IF v_job.warning_summary ? 'practice_import' THEN
@@ -5855,7 +5856,7 @@ plant "M80 the job's status is not judged after the locks (review round)" "$M80"
   "" \
   "smoke 20261123010000"
 
-plant "M80 a found slot is not compared with the row (review round)" "$M80" \
+plant "M80 a found slot is not compared with the row (review round)" "$PAIRING" \
   "         WHERE ps.id = g.slot_id AND NOT g.created" \
   "         WHERE ps.id = g.slot_id AND false" \
   "smoke 20261123010000"
@@ -5887,10 +5888,15 @@ plant "M81 the rollover does not copy division values" "$M81" \
 # The review round of #733 (two more): an organization change that does not hold a completed season's inheriting
 # divisions at their value (the smoke's freeze check: the completed division follows the organization), and the tenancy
 # trigger left out (the smoke's insert naming another organization's division goes through).
-plant "M81 an organization change rewrites a completed season (no freeze)" "$M81" \
+plant "M81 an organization change rewrites a completed season (no freeze)" "$PAIRING" \
   "        IF v_old_effective IS DISTINCT FROM COALESCE(v_value, v_key.default_value) THEN" \
   "        IF false THEN" \
   "smoke 20261124010000"
+
+plant "C7 a configured practice pair passes on the wrong day" "$PAIRING" \
+  "OR NOT (j.pairs ? (j.day_of_week::text" \
+  "OR false AND NOT (j.pairs ? (j.day_of_week::text" \
+  "smoke 20261127010000"
 
 plant "M81 no tenancy trigger on scoped_settings" "$M81" \
   "CREATE TRIGGER scoped_settings_enforce_tenancy

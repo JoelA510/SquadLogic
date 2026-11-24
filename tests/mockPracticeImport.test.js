@@ -138,8 +138,8 @@ function stageJob(db, id, mapping = W.mapping) {
       import_job_id: id,
       import_type: 'practice_schedule',
       source_row_number: s.source_row_number,
-      normalized_payload: s.normalized_payload,
-      validation_errors: s.validation_errors,
+      normalized_payload: structuredClone(s.normalized_payload),
+      validation_errors: structuredClone(s.validation_errors),
     });
   }
   const mapped = rpc(db, 'map_practice_import_job', { p_import_job_id: id, p_mapping: mapping });
@@ -416,7 +416,7 @@ describe('a probable move is held back until it is ticked, and pairs as core pai
         import_type: 'practice_schedule',
         source_row_number: s.source_row_number,
         normalized_payload: s === moved ? movedPayload : s.normalized_payload,
-        validation_errors: s.validation_errors,
+        validation_errors: structuredClone(s.validation_errors),
       });
     }
     expect(
@@ -921,4 +921,20 @@ describe("the rollback's reference list is the migrations' foreign keys onto the
     expect(mockPracticeImportReferenced(db, 'teams', 't1')).toBe(false);
     expect(mockPracticeImportReferenced(db, 'fields', 'f2')).toBe(false);
   });
+});
+
+it('accepts and flags an imported practice pattern that differs from the organization’s pair', () => {
+  const db = seedDb();
+  db.scoped_settings = [
+    { id: 'setting', organization_id: ORG, key: 'practice_pairs', value: ['mon-wed'] },
+  ];
+  stageJob(db, 'paired');
+  const { data, error } = rpc(db, 'apply_practice_import_job', {
+    p_import_job_id: 'paired',
+    p_dry_run: false,
+  });
+  expect(error).toBeNull();
+  expect(data.flags['pairing-differs'].rows).toBeGreaterThan(0);
+  expect(data.coverage.checked).toContain('pairing-differs');
+  expect(data.refused_by_reason).toEqual({ 'slot-overlaps-another': 1 });
 });

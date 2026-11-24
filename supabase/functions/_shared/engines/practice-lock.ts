@@ -35,6 +35,9 @@
  * Import-free (no Deno std, no esm.sh), so Vitest can execute it directly.
  */
 
+import type { StoredSlot } from './practice-daylight.ts';
+import type { OutsideHold } from './auto-scheduler-solver.ts';
+
 /** One `practice_assignments` row, as loaded for the lock. */
 export interface LoadedPracticeRow {
   id: string;
@@ -280,23 +283,14 @@ export function planTeamsForRun(
 export function outsideHoldsFor(
   rows: readonly LoadedPracticeRow[],
   runSlotIds: ReadonlySet<string>,
-  stored: ReadonlyMap<string, { firstDate?: string | null; validUntil?: string | null }>,
-  needing: ReadonlySet<string>
+  stored: ReadonlyMap<string, Partial<StoredSlot>>,
+  needing: ReadonlySet<string>,
+  pairedTeams: ReadonlySet<string> = new Set()
 ): {
-  holds: Array<{
-    teamId: string;
-    firstDate: string;
-    lastDate: string;
-    effectiveDateRange: string | null;
-  }>;
+  holds: OutsideHold[];
   unchecked: Array<{ teamId: string; slotId: string | null }>;
 } {
-  const holds: Array<{
-    teamId: string;
-    firstDate: string;
-    lastDate: string;
-    effectiveDateRange: string | null;
-  }> = [];
+  const holds: OutsideHold[] = [];
   const unchecked: Array<{ teamId: string; slotId: string | null }> = [];
   for (const row of rows) {
     if (!needing.has(row.teamId)) continue;
@@ -306,8 +300,23 @@ export function outsideHoldsFor(
       unchecked.push({ teamId: row.teamId, slotId: row.slotId });
       continue;
     }
+    const paired = pairedTeams.has(row.teamId);
+    if (paired && (!slot.fieldId || slot.startSeconds == null || slot.endSeconds == null)) {
+      unchecked.push({ teamId: row.teamId, slotId: row.slotId });
+      continue;
+    }
     holds.push({
       teamId: row.teamId,
+      ...(paired
+        ? {
+            surface: {
+              fieldId: slot.fieldId!,
+              subunitId: slot.subunitId ?? null,
+              startSec: slot.startSeconds!,
+              endSec: slot.endSeconds!,
+            },
+          }
+        : {}),
       firstDate: slot.firstDate,
       lastDate: slot.validUntil,
       effectiveDateRange: row.effectiveDateRange,

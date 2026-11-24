@@ -294,9 +294,7 @@ function PracticeLines({ result, teamNames }) {
             {lines.map((line) => (
               <li key={line.teamId}>
                 {line.name}: {line.have} of {line.target} practices
-                {line.have < line.target && line.reasons.length > 0
-                  ? ` (${line.reasons.join('; ')})`
-                  : ''}
+                {line.reasons.length > 0 ? ` (${line.reasons.join('; ')})` : ''}
               </li>
             ))}
           </ul>

@@ -11,6 +11,7 @@ import { SetScopedSettingSchema } from '../utils/scopedSettingSchemas.js';
  * own message names a season by its id ("Season <id> is completed ..."), which is not written for a person.
  */
 const REFUSAL_WORDS = {
+  practice_pairing_count: 'paired weekdays require exactly two practices per week.',
   season_completed:
     'this season is completed, so its programs’ and divisions’ settings are history and cannot be changed.',
   default_program: '“No program” holds no settings: its divisions follow the organization.',
@@ -106,7 +107,7 @@ async function readScopedSettings(organizationId, seasonId) {
           fetchAllPages(() =>
             supabase
               .from('divisions')
-              .select('id, name, program_id')
+              .select('id, name, program_id, practices_per_week')
               .eq('organization_id', organizationId)
               .eq('season_settings_id', seasonId)
           ),
@@ -158,7 +159,8 @@ export function useScopedSettings(organizationId, seasonId) {
     readFor: /** @type {string | null} */ (null),
     error: /** @type {string | null} */ (null),
     programs: /** @type {Array<{ id: string, name: string, is_default?: boolean }>} */ ([]),
-    divisions: /** @type {Array<{ id: string, name: string, program_id: string | null }>} */ ([]),
+    divisions:
+      /** @type {Array<{ id: string, name: string, program_id: string | null, practices_per_week: number }>} */ ([]),
     rows: /** @type {Array<Record<string, any>>} */ ([]),
   });
   // The pair the latest read is for: an answer for any other is dropped when it lands.

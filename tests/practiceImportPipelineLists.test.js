@@ -264,12 +264,12 @@ describe('the SQL functions that name an existing type are classified, and the l
     }
   });
 
-  it('K1: persist_practice_schedule and its gate are not replaced by this migration', () => {
+  it('the practice import uses the persisted writer and its paired-days gate', () => {
     expect(functions.get('persist_practice_schedule')?.file).toBe(
       '20261108020000_schedule_tbd.sql'
     );
     expect(functions.get('practice_new_auto_row_refusals')?.file).toBe(
-      '20261105010000_practices_per_division.sql'
+      '20261127010000_paired_practice_days.sql'
     );
     expect(functions.get('refresh_schedule_tbd_practices')?.file).toBe(
       '20261108020000_schedule_tbd.sql'

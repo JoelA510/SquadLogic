@@ -1290,6 +1290,9 @@ export default function TeamAnalysisPage() {
     [selectedProgramId, programs]
   );
 
+  const pairingDivision =
+    selectedProgram && findDivisionRowForProgram(selectedProgram, divisionRows ?? []);
+
   useEffect(() => {
     if (basePrograms.length === 0 || divisionRows === null) return;
 
@@ -2522,6 +2525,15 @@ export default function TeamAnalysisPage() {
             {/* 3. Configuration (Right 1/3) */}
             <div className="lg:col-span-1">
               <TeamingConfiguration
+                pairingScope={
+                  pairingDivision?.id
+                    ? {
+                        organizationId: currentOrganization?.id,
+                        seasonId: currentSeasonSetting?.id,
+                        divisionId: pairingDivision.id,
+                      }
+                    : null
+                }
                 program={selectedProgram}
                 config={selectedProgram ? configs[selectedProgram.id] : null}
                 onUpdate={updateConfig}

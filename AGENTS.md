@@ -87,12 +87,12 @@ CLI version CI pins (pgTAP, the harness), Deno (the Edge mirror tests) and Playw
 **Ask first** before: force-pushing or rewriting history; deleting a branch, a tag, data or a
 Docker volume; installing a tool on the machine (the owner has pre-authorized, for an agent on
 the owner's machine, the toolchain named above with gh and a bash shell, each at the version
-this repository pins, and nothing else); anything that writes to the hosted Supabase project
-(CI is the only writer, §11; an agent reads production only through the read-only,
-project-scoped connector); tagging, releasing or publishing; changing agent or workflow
-permissions. Reading anything here, running the gates, and edits inside the task's scope need no
-answer. For Codex, `.codex/rules/blast-radius.rules` puts a prompt or a refusal on the usual
-spelling of several of these.
+this repository pins, and what the current plan's T0 lists, and nothing else); anything that
+writes to the hosted Supabase project (CI is the only writer, §11; an agent reads production only
+through the read-only, project-scoped connector); tagging, releasing or publishing; changing
+agent or workflow permissions. Reading anything here, running the gates, and edits inside the
+task's scope need no answer. For Codex, `.codex/rules/blast-radius.rules` puts a prompt or a
+refusal on the usual spelling of several of these.
 
 ### Operating rules
 

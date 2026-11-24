@@ -290,6 +290,7 @@ M80="$REPO/supabase/migrations/20261123010000_practice_import.sql"
 # two bodies are re-aimed here (lesson 70). Its smoke holds the plants of its own, below; the pgTAP file
 # (supabase/tests/scoped_settings.sql) is CI's.
 M81="$REPO/supabase/migrations/20261124010000_settings_scope.sql"
+GAME_IMPORT_GUARDS="$REPO/supabase/migrations/20261125010000_game_import_guards.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -5599,7 +5600,7 @@ plant "M69 the season of a named game is not checked" "$M71" \
 #   - the guard's rollback exemption is gone, so the rollback cannot take a Published game back;
 #   - the metrics view counts an outside club as one of the organization's teams (the condition is kept in the text, so the
 #     migration's own end-state check, which wants the view to name the column, does not catch it first).
-plant "M70 a dry run writes" "$M71" \
+plant "M70 a dry run writes" "$GAME_IMPORT_GUARDS" \
   "    IF v_dry THEN
         RETURN v_result;
     END IF;" \
@@ -5608,29 +5609,29 @@ plant "M70 a dry run writes" "$M71" \
     END IF;" \
   "smoke 20261121010000"
 
-plant "M70 a Game ID is matched by its tuple, not by (season, Game ID)" "$M71" \
+plant "M70 a Game ID is matched by its tuple, not by (season, Game ID)" "$GAME_IMPORT_GUARDS" \
   "                                AND CASE WHEN w.game_id IS NOT NULL
                                          THEN ga.season_settings_id = v_season AND ga.external_ref = w.game_id" \
   "                                AND CASE WHEN false
                                          THEN ga.season_settings_id = v_season AND ga.external_ref = w.game_id" \
   "smoke 20261121010000"
 
-plant "M70 a held game is updated, not skipped" "$M71" \
+plant "M70 a held game is updated, not skipped" "$GAME_IMPORT_GUARDS" \
   "            WHEN g.match_id = ANY (v_held) THEN 'skip-held'" \
   "            WHEN false THEN 'skip-held'" \
   "smoke 20261121010000"
 
-plant "M70 the rollback no longer refuses after a change" "$M71" \
+plant "M70 the rollback no longer refuses after a change" "$GAME_IMPORT_GUARDS" \
   "    IF cardinality(v_changed) + cardinality(v_changed_tbd) > 0 THEN" \
   "    IF false THEN" \
   "smoke 20261121010000"
 
-plant "M70 the rollback does not judge a TIME TBD game against what the apply left" "$M71" \
+plant "M70 the rollback does not judge a TIME TBD game against what the apply left" "$GAME_IMPORT_GUARDS" \
   "                        ELSE s.id IS NULL OR NOT public.game_import_row_unchanged(to_jsonb(s), r.applied_payload) END) x;" \
   "                        ELSE false END) x;" \
   "smoke 20261121010000"
 
-plant "M70 a re-import is never nothing to apply" "$M71" \
+plant "M70 a re-import is never nothing to apply" "$GAME_IMPORT_GUARDS" \
   "    v_nothing := (v_work = 0);" \
   "    v_nothing := false;" \
   "smoke 20261121010000"
@@ -5654,7 +5655,7 @@ plant "M70 the stored mapping's audit row cites no job" "$M70" \
   "        PERFORM public.record_audit_event(v_job.organization_id, 'import.mapped', 'import_job', gen_random_uuid()," \
   "smoke 20261121010000"
 
-plant "M70 two labels that create one team are two creations" "$M71" \
+plant "M70 two labels that create one team are two creations" "$GAME_IMPORT_GUARDS" \
   "               first_value(k3.own_id) OVER (PARTITION BY k3.kind, k3.division_ref, public.normalise_external_label(k3.cname) ORDER BY k3.tkey) AS new_id," \
   "               k3.own_id AS new_id," \
   "smoke 20261121010000"
@@ -5668,43 +5669,43 @@ plant "M70 two labels that create one team are two creations" "$M71" \
 # The pgTAP files (supabase/tests/game_import_round2.sql and game_import_apply_rollback.sql) hold the full table; the plants
 # the smoke does not catch (a venue, a division, an outside club named with a run of spaces; another Game ID on a held TIME
 # TBD tuple; the conversion warning) were run against the pgTAP stand-in only and are in the pull request.
-plant "M70 the shells' team run carries no teamsByDivision" "$M71" \
+plant "M70 the shells' team run carries no teamsByDivision" "$GAME_IMPORT_GUARDS" \
   "                'teamsByDivision', v_grouped," \
   "                'teamsByDivisionMissing', v_grouped," \
   "smoke 20261121010000"
 
-plant "M70 a TIME TBD game is not found by its Game ID" "$M71" \
+plant "M70 a TIME TBD game is not found by its Game ID" "$GAME_IMPORT_GUARDS" \
   "                            AND ((w.game_id IS NOT NULL AND s.external_ref = w.game_id)" \
   "                            AND ((false AND s.external_ref = w.game_id)" \
   "smoke 20261121010000"
 
-plant "M70 a TIME TBD game's date is not stored" "$M71" \
+plant "M70 a TIME TBD game's date is not stored" "$GAME_IMPORT_GUARDS" \
   "v_run_id, t.game_id, t.gdate
           FROM _gi_t t WHERE t.verdict = 'insert';" \
   "v_run_id, t.game_id, NULL
           FROM _gi_t t WHERE t.verdict = 'insert';" \
   "smoke 20261121010000"
 
-plant "M70 a held game's TIME TBD row converts it" "$M71" \
+plant "M70 a held game's TIME TBD row converts it" "$GAME_IMPORT_GUARDS" \
   "            WHEN t.ga_id IS NOT NULL AND t.ga_id = ANY (v_held) THEN 'skip-held'" \
   "            WHEN false THEN 'skip-held'" \
   "smoke 20261121010000"
 
-plant "M70 a swap has no step-out" "$M71" \
+plant "M70 a swap has no step-out" "$GAME_IMPORT_GUARDS" \
   "         WHERE ga.id IN (SELECT g.match_id FROM _gi_g g WHERE g.verdict = 'update' AND g.leaves)
            AND EXISTS (SELECT 1 FROM _gi_g h" \
   "         WHERE false AND ga.id IN (SELECT g.match_id FROM _gi_g g WHERE g.verdict = 'update' AND g.leaves)
            AND EXISTS (SELECT 1 FROM _gi_g h" \
   "smoke 20261121010000"
 
-plant "M70 a swap is a clash (the games the file moves still hold their places)" "$M71" \
+plant "M70 a swap is a clash (the games the file moves still hold their places)" "$GAME_IMPORT_GUARDS" \
   "                          AND g2.id NOT IN (SELECT x.match_id FROM _gi_g x WHERE x.verdict = 'update' AND x.leaves)
                           AND g2.id NOT IN (SELECT t.ga_id FROM _gi_t t WHERE t.conv));" \
   "                          AND g2.id NOT IN (SELECT x.match_id FROM _gi_g x WHERE false)
                           AND g2.id NOT IN (SELECT t.ga_id FROM _gi_t t WHERE t.conv));" \
   "smoke 20261121010000"
 
-plant "M70 the rollback does not step a swapped pair out of the unique place" "$M71" \
+plant "M70 the rollback does not step a swapped pair out of the unique place" "$GAME_IMPORT_GUARDS" \
   "       AND r.target_table = 'game_assignments' AND r.operation = 'updated' AND r.rolled_back_at IS NULL
        AND (ga.home_team_id, ga.away_team_id, ga.game_slot_id, ga.week_index)
            IS DISTINCT FROM ((r.previous_payload" \
@@ -5713,19 +5714,19 @@ plant "M70 the rollback does not step a swapped pair out of the unique place" "$
            IS DISTINCT FROM ((r.previous_payload" \
   "smoke 20261121010000"
 
-plant "M70 a team name with a run of spaces is not the name that exists" "$M71" \
+plant "M70 a team name with a run of spaces is not the name that exists" "$GAME_IMPORT_GUARDS" \
   "                    WHERE t.division_id = j.division_existing AND public.normalise_external_label(t.name) = public.normalise_external_label(j.cname))) AS name_taken," \
   "                    WHERE t.division_id = j.division_existing AND lower(btrim(t.name)) = lower(btrim(j.cname)))) AS name_taken," \
   "smoke 20261121010000"
 
-plant "M70 the rollback does not stand a converted game up again" "$M71" \
+plant "M70 the rollback does not stand a converted game up again" "$GAME_IMPORT_GUARDS" \
   "       AND r.operation = 'deleted' AND r.rolled_back_at IS NULL;
     GET DIAGNOSTICS n_games_reinserted = ROW_COUNT;" \
   "       AND r.operation = 'deleted' AND r.rolled_back_at IS NULL AND false;
     GET DIAGNOSTICS n_games_reinserted = ROW_COUNT;" \
   "smoke 20261121010000"
 
-plant "M70 a placed game made TIME TBD is not warned" "$M71" \
+plant "M70 a placed game made TIME TBD is not warned" "$GAME_IMPORT_GUARDS" \
   "              FROM _gi_t t WHERE t.conv) w;" \
   "              FROM _gi_t t WHERE false) w;" \
   "smoke 20261121010000"

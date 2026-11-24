@@ -13,6 +13,7 @@
  *   D  a game moved onto a place another game of the same file leaves is written, with the warning `games-swapped`; a place
  *      a game the file does not move holds still refuses; a held game is never moved; the rollback restores every game.
  */
+import { confirmGameImport } from './helpers/confirmGameImport.js';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -218,7 +219,7 @@ function addJob(db, rows) {
     id,
     organization_id: ORG,
     job_type: 'games',
-    status: 'importing',
+    status: 'ready_to_apply',
     season_settings_id: SEASON,
     warning_summary: {},
   });
@@ -279,7 +280,7 @@ describe('C: TIME TBD holds a date and no time, found by Game ID, changed in pla
   it('a dry run writes nothing', () => {
     expect(afterDry).toBe(before);
   });
-  const out = rpc(db, 'apply_game_import_job', { p_import_job_id: id });
+  const out = confirmGameImport(rpc, db, id);
   it('counts what the pgTAP file counts', () => {
     expect(out.error).toBeNull();
     expect(out.data.time_tbd).toEqual({
@@ -369,7 +370,7 @@ describe('C: TIME TBD holds a date and no time, found by Game ID, changed in pla
     const again = addJob(db, fileC());
     const fp = fingerprint(db);
     const runs = db.scheduler_runs.filter((r) => r.run_type === 'game').length;
-    const second = rpc(db, 'apply_game_import_job', { p_import_job_id: again });
+    const second = confirmGameImport(rpc, db, again);
     expect(second.data.nothing_to_apply).toBe(true);
     expect(second.data.time_tbd).toEqual({
       inserted: 0,
@@ -401,7 +402,7 @@ describe('D: swaps are warnings, not blockers', () => {
   const before = fingerprint(db);
   const id = addJob(db, fileD());
   const dry = rpc(db, 'apply_game_import_job', { p_import_job_id: id, p_dry_run: true }).data;
-  const out = rpc(db, 'apply_game_import_job', { p_import_job_id: id });
+  const out = confirmGameImport(rpc, db, id);
   const startOf = (gid) => {
     const g = db.game_assignments.find((x) => x.id === gid);
     return `${db.game_slots.find((x) => x.id === g.game_slot_id).start_time}`;

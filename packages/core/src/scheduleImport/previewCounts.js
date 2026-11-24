@@ -5,8 +5,8 @@
  * The confirm screen shows the result of `apply_game_import_job(job, dry_run => true)`. Between that
  * preview and the confirm another admin can change the schedule, and the apply plans again against the
  * state it finds: its counts can differ from the ones on screen. So the confirm sends the counts it
- * showed, the Edge function (`import-validation`, `action: 'apply'`) runs the dry run again, and when
- * the two differ it refuses with `game_import_preview_stale`, both sets of counts, and writes nothing.
+ * showed. The database compares them under the writer locks. A difference refuses the write with
+ * `game_import_preview_stale`. The Edge function fetches a fresh preview for the admin.
  *
  * ## Which counts
  *

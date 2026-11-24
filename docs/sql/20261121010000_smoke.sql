@@ -230,6 +230,7 @@ BEGIN
             '["smoke u10","bravo"]', jsonb_build_object('action', 'map', 'id', v_b),
             '["smoke u10","charlie"]', jsonb_build_object('action', 'map', 'id', v_c),
             '["smoke u10","visiting club"]', jsonb_build_object('action', 'outside')));
+    PERFORM public.mark_import_job_ready_to_apply(v_job, 'games', '[]'::jsonb);
     PERFORM public.map_game_import_job(v_job, v_mapping);
     IF (SELECT count(*) FROM public.audit_log WHERE action = 'import.mapped' AND resource_id = v_job) <> 1
        OR (SELECT metadata #>> '{decisions,teams,outside}' FROM public.audit_log WHERE action = 'import.mapped' AND resource_id = v_job) IS DISTINCT FROM '1'
@@ -242,7 +243,7 @@ BEGIN
     v_dry := public.apply_game_import_job(v_job, true);
     IF pg_temp.fp() IS DISTINCT FROM v_fp THEN RAISE EXCEPTION 'a dry run wrote something (a table of the public schema changed)'; END IF;
     IF (v_dry ->> 'dry_run') <> 'true' OR (v_dry #>> '{ids,run_id}') IS NOT NULL THEN RAISE EXCEPTION 'a dry run says it was not one, or made a run'; END IF;
-    v_apply := public.apply_game_import_job(v_job, false);
+    v_apply := public.apply_game_import_job(v_job, false, public.game_import_confirm_counts(v_dry));
     IF (v_apply #>> '{rows,staged}') <> '6' OR (v_apply #>> '{rows,refused}') <> '1'
        OR (v_apply #>> '{games,inserted}') <> '1' OR (v_apply #>> '{games,updated}') <> '1' OR (v_apply #>> '{games,unchanged}') <> '1'
        OR (v_apply #>> '{games,skipped,skipped-published}') <> '1' OR (v_apply #>> '{games,repointed}') <> '2'
@@ -295,9 +296,10 @@ BEGIN
     PERFORM pg_temp.stage(v_org, v_job2, 4, 'ok',  'S-4', 'Smoke U10', 'Smoke Park', 'Smoke Field', 'Charlie', 'Visiting Club',  '2026-05-16', '09:00', '10:00', 3);
     PERFORM pg_temp.stage(v_org, v_job2, 5, 'tbd', 'S-5', 'Smoke U10', '',           '',            'Bravo',   'Alpha',          '2026-05-16', NULL,    NULL,    3);
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    PERFORM public.mark_import_job_ready_to_apply(v_job2, 'games', '[]'::jsonb);
     PERFORM public.map_game_import_job(v_job2, jsonb_set(v_mapping, ARRAY['teams', '["smoke u10","visiting club"]'], jsonb_build_object('action', 'map', 'id', v_club)));
     SELECT count(*) INTO v_n FROM public.scheduler_runs WHERE organization_id = v_org;
-    v_again := public.apply_game_import_job(v_job2, false);
+    v_again := public.apply_game_import_job(v_job2, false, public.game_import_confirm_counts(public.apply_game_import_job(v_job2, true)));
     IF (v_again ->> 'nothing_to_apply') <> 'true' OR (v_again #>> '{games,inserted}') <> '0' OR (v_again #>> '{games,updated}') <> '0'
        OR (v_again #>> '{games,unchanged}') <> '3' OR (v_again #>> '{games,skipped,skipped-published}') <> '1' OR (v_again #>> '{games,repointed}') <> '0'
        OR (v_again #>> '{time_tbd,unchanged}') <> '1'
@@ -355,6 +357,7 @@ BEGIN
     PERFORM pg_temp.stage(v_org, v_job3, 1, 'ok', 'S-6', 'Smoke U10',   'Smoke Park', 'Smoke Field', 'Zed FC', 'Alpha', '2026-05-23', '09:00', '10:00', 4);
     PERFORM pg_temp.stage(v_org, v_job3, 2, 'ok', 'S-7', 'Smoke U10 B', 'Smoke Park', 'Smoke Field', 'Zed FC', 'Bravo', '2026-05-23', '10:00', '11:00', 4);
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    PERFORM public.mark_import_job_ready_to_apply(v_job3, 'games', '[]'::jsonb);
     PERFORM public.map_game_import_job(v_job3, jsonb_build_object(
         'divisions', jsonb_build_object('smoke u10', jsonb_build_object('action', 'map', 'id', v_div), 'smoke u10 b', jsonb_build_object('action', 'map', 'id', v_div)),
         'venues', jsonb_build_object('smoke park', jsonb_build_object('action', 'map', 'id', v_loc)),
@@ -365,7 +368,7 @@ BEGIN
                                     '["smoke u10 b","zed fc"]', jsonb_build_object('action', 'create'))));
     v_dry := public.apply_game_import_job(v_job3, true);
     IF (v_dry #>> '{created,teams}') <> '1' THEN RAISE EXCEPTION 'the preview counts % new teams for two labels of one name, not 1', v_dry #>> '{created,teams}'; END IF;
-    v_apply := public.apply_game_import_job(v_job3, false);
+    v_apply := public.apply_game_import_job(v_job3, false, public.game_import_confirm_counts(v_dry));
     IF (SELECT count(*) FROM public.teams WHERE division_id = v_div AND name = 'Zed FC') <> 1
        OR (v_apply #>> '{games,inserted}') <> '2' OR (v_apply -> 'created') IS DISTINCT FROM (v_dry -> 'created') THEN
         RAISE EXCEPTION 'two labels of one new team were not written as one team the preview counted: %', v_apply;
@@ -396,8 +399,9 @@ BEGIN
     PERFORM pg_temp.stage(v_org, v_job4, 3, 'ok',  'G-CV1', 'Smoke U10', 'Smoke Park', 'Smoke Field', 'Charlie', 'Alpha', '2026-06-06', '10:00', '11:00', 6);
     PERFORM pg_temp.stage(v_org, v_job4, 4, 'tbd', 'G-TB1', 'Smoke U10', '',           '',            'Bravo',   'Charlie', '2026-06-13', NULL, NULL, 7);
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    PERFORM public.mark_import_job_ready_to_apply(v_job4, 'games', '[]'::jsonb);
     PERFORM public.map_game_import_job(v_job4, jsonb_set(v_mapping, '{options,arrive_published}', 'false'));
-    v_apply := public.apply_game_import_job(v_job4, false);
+    v_apply := public.apply_game_import_job(v_job4, false, public.game_import_confirm_counts(public.apply_game_import_job(v_job4, true)));
     IF (v_apply #>> '{games,inserted}') <> '3' OR (v_apply #>> '{time_tbd,inserted}') <> '1'
        OR NOT EXISTS (SELECT 1 FROM public.schedule_tbd WHERE organization_id = v_org AND external_ref = 'G-TB1' AND game_date = '2026-06-13' AND week_index = 7) THEN
         RAISE EXCEPTION 'the first round-2 file did not write 3 games and a dated TIME TBD game: %', v_apply;
@@ -415,12 +419,13 @@ BEGIN
     -- A Published game the file now gives no time: not converted (a held game is never taken out); the row is skipped.
     PERFORM pg_temp.stage(v_org, v_job5, 6, 'tbd', 'S-1',   'Smoke U10', '',           '',            'Alpha',   'Bravo',   '2026-05-02', NULL, NULL, 1);
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    PERFORM public.mark_import_job_ready_to_apply(v_job5, 'games', '[]'::jsonb);
     PERFORM public.map_game_import_job(v_job5, jsonb_set(jsonb_set(v_mapping, '{options,arrive_published}', 'false'),
         ARRAY['teams', '["smoke u10","dupe"]'], jsonb_build_object('action', 'create', 'name', 'Zed  FC')));
     v_fp := pg_temp.fp();
     v_dry := public.apply_game_import_job(v_job5, true);
     IF pg_temp.fp() IS DISTINCT FROM v_fp THEN RAISE EXCEPTION 'the preview of the second round-2 file wrote something'; END IF;
-    v_apply := public.apply_game_import_job(v_job5, false);
+    v_apply := public.apply_game_import_job(v_job5, false, public.game_import_confirm_counts(v_dry));
     IF (v_dry - 'dry_run' - 'ids') IS DISTINCT FROM (v_apply - 'dry_run' - 'ids') THEN
         RAISE EXCEPTION 'the second round-2 file: the preview was not the apply: % against %', v_dry - 'dry_run' - 'ids', v_apply - 'dry_run' - 'ids';
     END IF;

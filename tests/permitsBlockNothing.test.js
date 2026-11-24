@@ -45,6 +45,8 @@ const ALLOWED = new Set([
   'supabase/migrations/20261121010000_game_import.sql',
   // 20261122010000 replaces rollback_game_import_job whole (a scored game refuses it); the copy keeps the guards above.
   'supabase/migrations/20261122010000_game_scores.sql',
+  // C8 keeps the two permit-scope checks in rollback when it also protects division settings.
+  'supabase/migrations/20261125010000_game_import_guards.sql',
 ]);
 
 // What reads a permit: the tables, the RPC, the hooks and the core helpers. In JavaScript the tables

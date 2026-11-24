@@ -9,6 +9,7 @@
  *   F2  two rows of one file that resolve to ONE saved record: the row that carries the Game ID is kept, the other is
  *       refused `duplicate-row` in words that say so, and the preview's result is the apply's.
  */
+import { confirmGameImport } from './helpers/confirmGameImport.js';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -177,7 +178,7 @@ function run(db, rows) {
     id,
     organization_id: ORG,
     job_type: 'games',
-    status: 'importing',
+    status: 'ready_to_apply',
     season_settings_id: SEASON,
     warning_summary: {},
   });
@@ -194,7 +195,7 @@ function run(db, rows) {
     rpc(db, 'map_game_import_job', { p_import_job_id: id, p_mapping: mapping() }).error
   ).toBeNull();
   const dry = rpc(db, 'apply_game_import_job', { p_import_job_id: id, p_dry_run: true });
-  const out = rpc(db, 'apply_game_import_job', { p_import_job_id: id });
+  const out = confirmGameImport(rpc, db, id);
   return { id, dry, out };
 }
 const strip = (result) => ({ ...result, dry_run: undefined, ids: undefined });

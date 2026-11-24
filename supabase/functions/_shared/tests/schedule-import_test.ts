@@ -168,29 +168,36 @@ const result = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-/** A database that answers the dry run with `previews` in turn, and records every call. */
-function fakeRpc(previews: unknown[]): { rpc: GameImportRpc; calls: Array<[string, boolean]> } {
-  const calls: Array<[string, boolean]> = [];
-  let i = 0;
+const staleResponse = { data: null, error: { code: '22023', details: GAME_IMPORT_PREVIEW_STALE } };
+type RpcResponse = Awaited<ReturnType<GameImportRpc>>;
+
+/** Record the full arguments and refuse an unexpected extra request. */
+function fakeRpc(...responses: RpcResponse[]) {
+  const calls: Array<[string, Record<string, unknown>]> = [];
   const rpc: GameImportRpc = (name, params) => {
-    calls.push([name, params.p_dry_run === true]);
-    if (params.p_dry_run === true) {
-      return Promise.resolve({ data: previews[Math.min(i++, previews.length - 1)], error: null });
-    }
-    return Promise.resolve({ data: { ...result(), dry_run: false }, error: null });
+    calls.push([name, params]);
+    const response = responses.shift();
+    if (!response) throw new Error('unexpected RPC call');
+    return Promise.resolve(response);
   };
   return { rpc, calls };
 }
 
-Deno.test('F7 control: an unchanged schedule applies (one dry run, then the apply)', async () => {
+Deno.test('F7 control: confirm sends the displayed counts with its only write', async () => {
   const confirmed = gameImportConfirmCounts(result());
   assert(isGameImportConfirmCounts(confirmed));
-  const { rpc, calls } = fakeRpc([result()]);
+  const { rpc, calls } = fakeRpc({ data: { ...result(), dry_run: false }, error: null });
   const out = await applyGameImportConfirmed({ rpc, jobId: 'job', confirmed });
   assertEquals(out.kind, 'applied');
   assertEquals(calls, [
-    ['apply_game_import_job', true],
-    ['apply_game_import_job', false],
+    [
+      'apply_game_import_job',
+      {
+        p_import_job_id: 'job',
+        p_dry_run: false,
+        p_confirmed_counts: confirmed,
+      },
+    ],
   ]);
 });
 
@@ -203,7 +210,7 @@ Deno.test(
       games: { inserted: 2, updated: 1, unchanged: 0, repointed: 3, skipped: {} },
       not_in_file: { count: 3, ids: [] },
     });
-    const { rpc, calls } = fakeRpc([now]);
+    const { rpc, calls } = fakeRpc(staleResponse, { data: now, error: null });
     const out = await applyGameImportConfirmed({ rpc, jobId: 'job', confirmed });
     assertEquals(out.kind, 'stale');
     if (out.kind !== 'stale') throw new Error('unreachable');
@@ -211,8 +218,13 @@ Deno.test(
     assertEquals(out.differing, ['games.inserted', 'games.updated', 'not_in_file']);
     assertEquals(out.confirmed['games.inserted'], 3);
     assertEquals(out.current['games.inserted'], 2);
-    // the apply was never called: only the dry run
-    assertEquals(calls, [['apply_game_import_job', true]]);
+    assertEquals(calls, [
+      [
+        'apply_game_import_job',
+        { p_import_job_id: 'job', p_dry_run: false, p_confirmed_counts: confirmed },
+      ],
+      ['apply_game_import_job', { p_import_job_id: 'job', p_dry_run: true }],
+    ]);
   }
 );
 
@@ -248,7 +260,10 @@ Deno.test(
       isGameImportConfirmCounts({ ...gameImportConfirmCounts(result()), 'rows.staged': 'three' }),
       false
     );
-    const { rpc, calls } = fakeRpc([{ ...result(), dry_run: false, replayed: true }]);
+    const { rpc, calls } = fakeRpc({
+      data: { ...result(), dry_run: false, replayed: true },
+      error: null,
+    });
     const out = await applyGameImportConfirmed({
       rpc,
       jobId: 'job',
@@ -259,22 +274,39 @@ Deno.test(
   }
 );
 
-Deno.test(
-  'F7: a database refusal of the dry run or of the apply is passed on, never read as success',
-  async () => {
-    const refusing: GameImportRpc = () =>
-      Promise.resolve({
-        data: null,
-        error: { code: '22023', message: 'no', details: 'season_completed' },
-      });
-    const out = await applyGameImportConfirmed({
-      rpc: refusing,
-      jobId: 'job',
-      confirmed: gameImportConfirmCounts(result()),
+Deno.test('F7: a database refusal of the apply is passed on', async () => {
+  const refusing: GameImportRpc = () =>
+    Promise.resolve({
+      data: null,
+      error: { code: '22023', message: 'no', details: 'season_completed' },
     });
-    assertEquals(out.kind, 'error');
-    if (out.kind !== 'error') throw new Error('unreachable');
-    assertEquals(out.stage, 'preview');
-    assertEquals(out.error.details, 'season_completed');
+  const out = await applyGameImportConfirmed({
+    rpc: refusing,
+    jobId: 'job',
+    confirmed: gameImportConfirmCounts(result()),
+  });
+  assertEquals(out.kind, 'error');
+  if (out.kind !== 'error') throw new Error('unreachable');
+  assertEquals(out.stage, 'apply');
+  assertEquals(out.error.details, 'season_completed');
+});
+
+Deno.test(
+  'F7: a stale preview reread reports its own failure or the concurrent completed result',
+  async () => {
+    const confirmed = gameImportConfirmCounts(result());
+    const error = { code: '42501', message: 'access denied' };
+    const failed = fakeRpc(staleResponse, { data: null, error });
+    assertEquals(await applyGameImportConfirmed({ rpc: failed.rpc, jobId: 'job', confirmed }), {
+      kind: 'error',
+      stage: 'preview',
+      error,
+    });
+    const replay = { ...result(), dry_run: false, replayed: true };
+    const completed = fakeRpc(staleResponse, { data: replay, error: null });
+    assertEquals(await applyGameImportConfirmed({ rpc: completed.rpc, jobId: 'job', confirmed }), {
+      kind: 'applied',
+      result: replay,
+    });
   }
 );

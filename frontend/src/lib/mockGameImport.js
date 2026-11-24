@@ -153,7 +153,7 @@ export function handleGameImportRpc(db, name, params, ctx) {
   if (gated.error) return gated;
   if (name === 'map_game_import_job') return mapJob(db, gated.job, params?.p_mapping, ctx, env);
   if (name === 'rollback_game_import_job') return rollbackJob(db, gated.job, ctx, env);
-  return applyJob(db, gated.job, params?.p_dry_run === true, ctx, env);
+  return applyJob(db, gated.job, params?.p_dry_run === true, params?.p_confirmed_counts, ctx, env);
 }
 
 // --------------------------------------------------------------------------------------------- ensure_game_slot
@@ -441,7 +441,7 @@ const latestGameRun = (db, org, season) =>
         String(b.created_at ?? '').localeCompare(String(a.created_at ?? ''))
     )[0];
 
-function applyJob(db, job, dry, ctx, env) {
+function applyJob(db, job, dry, confirmed, ctx, env) {
   if (job.status === 'completed' || job.status === 'completed_with_warnings') {
     const stored = job.warning_summary?.game_import;
     if (stored) return { data: { ...stored, replayed: true }, error: null };
@@ -450,8 +450,12 @@ function applyJob(db, job, dry, ctx, env) {
   if (job.status === 'failed' || job.status === 'needs_fix') {
     return fail(
       '22023',
-      `${job.status === 'failed' ? 'Failed' : 'Needs_fix'} import job ${job.id} cannot be applied: a new file is a new job`
+      `${job.status === 'failed' ? 'Failed' : 'Needs_fix'} import job ${job.id} cannot be applied: a new file is a new job`,
+      'import_not_ready_to_apply'
     );
+  }
+  if (job.status !== 'ready_to_apply') {
+    return fail('22023', 'Stage the whole file before applying.', 'import_not_ready_to_apply');
   }
   const season = jobSeason(db, job);
   if (!season)
@@ -1196,6 +1200,20 @@ function applyJob(db, job, dry, ctx, env) {
     ids: { run_id: null, team_run_ids: [] },
   };
   if (dry) return { data: result, error: null };
+  if (!isScheduleImportConfirmCounts(confirmed)) {
+    return fail(
+      '22023',
+      'Preview the import and confirm its counts before applying.',
+      'confirmed_counts_required'
+    );
+  }
+  if (diffScheduleImportConfirmCounts(confirmed, scheduleImportConfirmCounts(result)).length > 0) {
+    return fail(
+      '22023',
+      'The schedule changed after this preview. Review the new preview and confirm again.',
+      'game_import_preview_stale'
+    );
+  }
 
   // ---------------------------------------------------------------------------------------- the writes
   const stamp = env.now();
@@ -1803,7 +1821,8 @@ function rollbackJob(db, job, ctx, env) {
       .filter(
         (id) =>
           !(db.teams || []).some((t) => same(t.division_id, id)) &&
-          !attached('schedule_tbd', 'division_id', id)
+          !attached('schedule_tbd', 'division_id', id) &&
+          !attached('scoped_settings', 'division_id', id)
       )
   );
   // The import's own game run goes last, and stays when something else names it.
@@ -2001,7 +2020,11 @@ export function handleGameImportFunction(db, body, ctx) {
       handleGameImportRpc(
         db,
         'apply_game_import_job',
-        { p_import_job_id: job.id, p_dry_run: dry },
+        {
+          p_import_job_id: job.id,
+          p_dry_run: dry,
+          ...(dry ? {} : { p_confirmed_counts: body.confirmed }),
+        },
         { ...ctx, newId, now }
       );
     const refused = (error) => {
@@ -2021,6 +2044,15 @@ export function handleGameImportFunction(db, body, ctx) {
         })
       );
     };
+    const applied = call(false);
+    if (!applied.error) {
+      return done(
+        { data: { status: 'success', import_type: 'games', result: applied.data }, error: null },
+        applied.data?.replayed !== true
+      );
+    }
+    if (applied.error.code !== '22023' || applied.error.details !== 'game_import_preview_stale')
+      return refused(applied.error);
     const preview = call(true);
     if (preview.error) return refused(preview.error);
     if (preview.data?.replayed === true) {
@@ -2031,25 +2063,17 @@ export function handleGameImportFunction(db, body, ctx) {
     }
     const current = scheduleImportConfirmCounts(preview.data);
     const differing = diffScheduleImportConfirmCounts(body.confirmed, current);
-    if (differing.length > 0) {
-      return done(
-        httpRefusal(409, {
-          status: 'error',
-          code: 'game_import_preview_stale',
-          message:
-            'The schedule changed after this preview was made, so the import would no longer do what was confirmed. Nothing was written. Review the new preview and confirm again.',
-          differing,
-          confirmed: body.confirmed,
-          current,
-          preview: preview.data,
-        })
-      );
-    }
-    const applied = call(false);
-    if (applied.error) return refused(applied.error);
     return done(
-      { data: { status: 'success', import_type: 'games', result: applied.data }, error: null },
-      true
+      httpRefusal(409, {
+        status: 'error',
+        code: 'game_import_preview_stale',
+        message:
+          'The schedule changed after this preview was made, so the import would no longer do what was confirmed. Nothing was written. Review the new preview and confirm again.',
+        differing,
+        confirmed: body.confirmed,
+        current,
+        preview: preview.data,
+      })
     );
   }
 

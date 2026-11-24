@@ -25,6 +25,7 @@
  * `teamsByDivision` and `team_players` in `frontend/src` and `packages/core/src`, whose result is pinned below so a new
  * reader fails the pin until it is classified.
  */
+import { confirmGameImport } from './helpers/confirmGameImport.js';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -189,7 +190,7 @@ function applied() {
     id,
     organization_id: ORG,
     job_type: 'games',
-    status: 'importing',
+    status: 'ready_to_apply',
     season_settings_id: SEASON,
     warning_summary: {},
   });
@@ -221,7 +222,7 @@ function applied() {
   expect(
     rpc(db, 'map_game_import_job', { p_import_job_id: id, p_mapping: mapping }).error
   ).toBeNull();
-  const out = rpc(db, 'apply_game_import_job', { p_import_job_id: id });
+  const out = confirmGameImport(rpc, db, id);
   expect(out.error).toBeNull();
   expect(out.data.created).toMatchObject({ teams: 2, outside_teams: 1 });
   return { db, id, result: out.data };

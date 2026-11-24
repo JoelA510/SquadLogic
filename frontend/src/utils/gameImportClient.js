@@ -255,7 +255,7 @@ export async function previewGameImport(client, jobId) {
 
 /**
  * The confirm. `confirmed` is the counts the admin saw (`scheduleImportConfirmCounts` of the preview on screen); the
- * Edge function runs the dry run again and applies only when they still hold.
+ * database applies only when the counts still match under its writer locks.
  *
  * @param {any} client
  * @param {{ organizationId: string, jobId: string, confirmed: Record<string, number | boolean> }} input

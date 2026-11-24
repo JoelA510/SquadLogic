@@ -208,7 +208,7 @@ const KINDS = Object.freeze({
       )} put back as they were.`,
   },
   // PR 11: the practice schedule (plan 4.11). Its file has no clock (a weekday and wall times), its preview is the
-  // database's dry run, and its confirm re-runs the dry run and refuses a stale one, as the games confirm does.
+  // database's dry run, and its confirm refuses a stale preview in both import flows.
   practices: {
     noun: 'practices',
     title: 'Import a practice schedule',

@@ -14,6 +14,7 @@
  * half), and the comparison can fail (a planted wrong count is shown to be a mismatch). The PR 4 fixture (574 games)
  * is then run through the mock and held to core's own resolution of the same file.
  */
+import { confirmGameImport } from './helpers/confirmGameImport.js';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,6 +24,7 @@ import {
   parseScheduleRows,
   proposeScheduleMapping,
   resolveScheduleRows,
+  scheduleImportConfirmCounts,
   teamDecisionKey,
   toStagedGameRow,
 } from '../packages/core/src/scheduleImport/index.js';
@@ -198,7 +200,7 @@ function addJob(db, rows, mapping) {
     id,
     organization_id: ORG,
     job_type: 'games',
-    status: 'importing',
+    status: 'ready_to_apply',
     season_settings_id: SEASON,
     warning_summary: {},
   });
@@ -595,6 +597,63 @@ const CREATED = { divisions: 1, venues: 1, fields: 1, teams: 3, outside_teams: 1
 const REFUSED = { 'bad-date': 1, 'same-team': 1, 'unknown-team': 2, 'duplicate-row': 2 };
 const WARNINGS = ['field-overlap', 'team-double-booked', 'team-double-booked', 'time-ambiguous'];
 
+describe('games import apply and rollback guards', () => {
+  it('reads the deployed confirm signature when testing the mock against the latest SQL', () => {
+    expect(GAME_IMPORT_SQL).toContain(
+      'public.apply_game_import_job(p_import_job_id uuid, p_dry_run boolean DEFAULT false, p_confirmed_counts jsonb DEFAULT NULL)'
+    );
+  });
+
+  it('refuses both preview and apply until the staged job is ready', () => {
+    const db = world();
+    const id = addJob(db, FILE(), MAPPING());
+    db.import_jobs.find((job) => job.id === id).status = 'importing';
+    const before = JSON.stringify(db);
+    for (const dry of [true, false]) {
+      const out = rpc(db, 'apply_game_import_job', { p_import_job_id: id, p_dry_run: dry });
+      expect(out.error?.details).toBe('import_not_ready_to_apply');
+    }
+    expect(JSON.stringify(db)).toBe(before);
+  });
+
+  it('compares the confirmed counts before writing and reports a retained scoped division on rollback', () => {
+    const db = world();
+    const id = addJob(db, FILE(), MAPPING());
+    const preview = rpc(db, 'apply_game_import_job', { p_import_job_id: id, p_dry_run: true });
+    expect(preview.error).toBeNull();
+    const confirmed = scheduleImportConfirmCounts(preview.data);
+    expect(confirmed['games.inserted']).toBe(8);
+    const before = JSON.stringify(db);
+    expect(rpc(db, 'apply_game_import_job', { p_import_job_id: id }).error?.details).toBe(
+      'confirmed_counts_required'
+    );
+    const stale = rpc(db, 'apply_game_import_job', {
+      p_import_job_id: id,
+      p_confirmed_counts: { ...confirmed, 'games.inserted': 0 },
+    });
+    expect(stale.error?.details).toBe('game_import_preview_stale');
+    expect(JSON.stringify(db)).toBe(before);
+    const applied = rpc(db, 'apply_game_import_job', {
+      p_import_job_id: id,
+      p_confirmed_counts: confirmed,
+    });
+    expect(applied.error).toBeNull();
+    const division = db.divisions.find((d) => d.name === 'U14 Boys');
+    const setting = {
+      organization_id: ORG,
+      division_id: division.id,
+      key: 'standings_count_outside_results',
+      value: true,
+    };
+    db.scoped_settings = [setting];
+    const undone = rpc(db, 'rollback_game_import_job', { p_import_job_id: id });
+    expect(undone.error).toBeNull();
+    expect(undone.data.kept).toContainEqual({ table: 'divisions', id: division.id });
+    expect(db.divisions).toContainEqual(division);
+    expect(db.scoped_settings).toEqual([setting]);
+  });
+});
+
 describe('the mock applies the world as the database does', () => {
   const db = world();
   const jobId = addJob(db, FILE(), MAPPING());
@@ -613,7 +672,7 @@ describe('the mock applies the world as the database does', () => {
     expect(dry.data.ids.run_id).toBeNull();
   });
 
-  const applied = rpc(db, 'apply_game_import_job', { p_import_job_id: jobId, p_dry_run: false });
+  const applied = confirmGameImport(rpc, db, jobId);
   const strip = (result) => {
     const rest = { ...result };
     for (const key of ['dry_run', 'ids', 'replayed']) delete rest[key];
@@ -732,7 +791,7 @@ describe('the mock applies the world as the database does', () => {
       m.teams[key] = { action: 'map', id: find(name) };
     }
     const second = addJob(db, rows, m);
-    const out = rpc(db, 'apply_game_import_job', { p_import_job_id: second, p_dry_run: false });
+    const out = confirmGameImport(rpc, db, second);
     expect(out.error).toBeNull();
     for (const [pathText, value] of Object.entries(REIMPORT_NUMBERS)) {
       expect(String(at(out.data, pathText)), pathText).toBe(value);
@@ -804,7 +863,7 @@ describe('the mock refuses as the database does', () => {
       id: 'reg',
       organization_id: ORG,
       job_type: 'registration',
-      status: 'importing',
+      status: 'ready_to_apply',
       season_settings_id: SEASON,
     });
     expect(rpc(db, 'apply_game_import_job', { p_import_job_id: 'reg' }).error.code).toBe('22023');
@@ -825,7 +884,7 @@ describe('the mock refuses as the database does', () => {
       id: 'nomap',
       organization_id: ORG,
       job_type: 'games',
-      status: 'importing',
+      status: 'ready_to_apply',
       season_settings_id: SEASON,
       warning_summary: {},
     });
@@ -901,9 +960,7 @@ describe('a scored game and the import (20261122010000): the mock answers as the
   it('the rollback is refused after a score, naming the game, and deletes nothing; with the score cleared it restores', () => {
     const db = world();
     const id = addJob(db, FILE(), MAPPING());
-    expect(
-      rpc(db, 'apply_game_import_job', { p_import_job_id: id, p_dry_run: false }).error
-    ).toBeNull();
+    expect(confirmGameImport(rpc, db, id).error).toBeNull();
     const imported = db.game_assignments.find((g) => g.external_ref === 'G-101');
     const score = scoring(db);
     expect(score(imported.id, 2, 0).error).toBeNull();
@@ -933,9 +990,7 @@ describe('a scored game and the import (20261122010000): the mock answers as the
   it('a changed row for a scored game is skipped: as Published while it is, as scored once changes are allowed', () => {
     const db = world();
     const id = addJob(db, FILE(), MAPPING());
-    expect(
-      rpc(db, 'apply_game_import_job', { p_import_job_id: id, p_dry_run: false }).error
-    ).toBeNull();
+    expect(confirmGameImport(rpc, db, id).error).toBeNull();
     const imported = db.game_assignments.find((g) => g.external_ref === 'G-101');
     const score = scoring(db);
     expect(score(imported.id, 2, 0).error).toBeNull();
@@ -980,7 +1035,7 @@ describe('the rollback refuses after a change and restores exactly before one', 
     const db = world();
     const original = JSON.stringify(db.game_assignments.map((g) => ({ ...g })));
     const id = addJob(db, FILE(), MAPPING());
-    const ok = rpc(db, 'apply_game_import_job', { p_import_job_id: id, p_dry_run: false });
+    const ok = confirmGameImport(rpc, db, id);
     expect(ok.error).toBeNull();
     const imported = db.game_assignments.find((g) => g.external_ref === 'G-102');
     imported.published = false;
@@ -1091,7 +1146,7 @@ describe("the PR 4 fixture through the mock equals core's own resolution of it",
       }
     }
     const id = addJob(db, parsed.rows.map(toStagedGameRow), effective);
-    const out = rpc(db, 'apply_game_import_job', { p_import_job_id: id, p_dry_run: false });
+    const out = confirmGameImport(rpc, db, id);
     expect(out.error).toBeNull();
     expect(out.data.rows.staged).toBe(parsed.rows.length);
     expect(out.data.games.inserted + out.data.time_tbd.inserted).toBe(
@@ -1197,7 +1252,7 @@ describe('fix round 1: the mock and the pgTAP file agree (the same inputs, the s
     const dry = rpc(db, 'apply_game_import_job', { p_import_job_id: id, p_dry_run: true });
     expect(dry.data.created.teams).toBe(1);
     pgtapAsserts(/'created,teams'\), '1', 'the dry run counts ONE new team for the two labels/);
-    const out = rpc(db, 'apply_game_import_job', { p_import_job_id: id });
+    const out = confirmGameImport(rpc, db, id);
     expect(out.error).toBeNull();
     expect(db.teams.filter((t) => t.division_id === U(300) && t.name === 'Dupe FC')).toHaveLength(
       1
@@ -1277,7 +1332,7 @@ describe('fix round 1: the mock and the pgTAP file agree (the same inputs, the s
     expect(PGTAP).toContain(
       `'{"divisions": 1, "venues": 1, "fields": 1, "teams": 1, "outside_teams": 1, "slots": 2}'::jsonb`
     );
-    const out = rpc(db, 'apply_game_import_job', { p_import_job_id: id });
+    const out = confirmGameImport(rpc, db, id);
     expect(out.error).toBeNull();
     expect(out.data.created).toEqual(dry.data.created);
     const count = (rows, test) => rows.filter(test).length;
@@ -1332,7 +1387,7 @@ describe('fix round 1: the mock and the pgTAP file agree (the same inputs, the s
       ],
       m
     );
-    const out = rpc(db, 'apply_game_import_job', { p_import_job_id: id });
+    const out = confirmGameImport(rpc, db, id);
     expect(out.error).toBeNull();
     expect(out.data.refused_by_reason).toEqual({ 'label-is-own-team': 1 });
     expect(out.data.games.inserted).toBe(1);
@@ -1382,7 +1437,7 @@ describe('fix round 1: the mock and the pgTAP file agree (the same inputs, the s
     }).rows;
     expect(parsedRow.status).toBe('tbd');
     const id = addJob(db, [toStagedGameRow(parsedRow)], fixBase());
-    const out = rpc(db, 'apply_game_import_job', { p_import_job_id: id });
+    const out = confirmGameImport(rpc, db, id);
     expect(out.error).toBeNull();
     expect(out.data.time_tbd.inserted).toBe(1);
     pgtapAsserts(
@@ -1427,7 +1482,7 @@ describe('fix round 1: the mock and the pgTAP file agree (the same inputs, the s
       )
     );
     const id = addJob(db, rows, m);
-    expect(rpc(db, 'apply_game_import_job', { p_import_job_id: id }).error).toBeNull();
+    expect(confirmGameImport(rpc, db, id).error).toBeNull();
     const field = (name) => db.fields.find((f) => f.name === name).id;
     const venue = (name) => db.locations.find((l) => l.name === name).id;
     db.facility_permit_scopes.push({
@@ -1507,7 +1562,7 @@ describe('fix round 1: the mock and the pgTAP file agree (the same inputs, the s
       ],
       m
     );
-    expect(rpc(db, 'apply_game_import_job', { p_import_job_id: id }).error).toBeNull();
+    expect(confirmGameImport(rpc, db, id).error).toBeNull();
     const shell = db.teams.find((t) => t.name === 'Dupe FC').id;
     db.scheduler_runs.push({
       id: U(320),
@@ -1600,7 +1655,7 @@ describe('fix round 1: the mock and the pgTAP file agree (the same inputs, the s
       ],
       fixBase()
     );
-    const out = rpc(db, 'apply_game_import_job', { p_import_job_id: id });
+    const out = confirmGameImport(rpc, db, id);
     expect(out.error).toBeNull();
     expect(out.data.refused_by_reason).toEqual({});
     // Each game stands on the other's old place.

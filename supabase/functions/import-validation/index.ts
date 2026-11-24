@@ -560,8 +560,8 @@ const ImportValidationPayload = z.object({
  * alias map), a chunk is at most 500 rows of a file of at most 2,400, and the confirm is a second action.
  *
  * - `action: 'stage'` (the default): read one chunk and stage it. The season, and so the clock, is the JOB's.
- * - `action: 'apply'`: the confirm. `confirmed` is the counts the admin saw; the dry run is run again and the apply
- *   is refused with `game_import_preview_stale` when its counts differ (task F7).
+ * - `action: 'apply'`: the confirm. `confirmed` is the counts the admin saw; the apply compares them under its writer locks
+ *   and refuses with `game_import_preview_stale` when its counts differ (task F7).
  */
 const GamesImportPayload = z.object({
   import_type: z.literal('games'),

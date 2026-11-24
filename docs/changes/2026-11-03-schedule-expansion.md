@@ -1516,7 +1516,7 @@ AGENTS.md section 3). What differs from the text above, each a decision of the b
   the cell exactly) and says the date in Notes; the Day Sheet lists a dated game under its date only; the Games page
   gains a "TIME TBD games" list. `get_schedule_tbd` does not return `game_date`: the client reads it from the table.
 - F7: the comparison is every count the confirm screen shows (`scheduleImportConfirmCounts`); `games.repointed` and
-  `reused.slots` are not shown and not compared. The re-run and the apply are two statements.
+  `reused.slots` are not shown and not compared. Originally the re-run and apply were two statements. Completion C8 compares the counts inside the locked apply.
 - Plan 4.4's preview audit (coach overlap, hosting balance, judged in the browser) is **not** in the preview: it states
   what it did not check, as the SQL result does (`not_judged`).
 - Found while building: the mock resolved a single match with no stored decision; the database does not. Core takes

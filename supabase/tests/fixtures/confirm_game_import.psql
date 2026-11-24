@@ -1,0 +1,6 @@
+-- Normal write path for fixtures whose purpose is the applied schedule or its rollback.
+-- A dry run counts what is about to be confirmed. A stale or missing-count test calls the RPC directly.
+CREATE FUNCTION pg_temp.confirm_game_import(p_job uuid) RETURNS jsonb LANGUAGE sql AS $f$
+    SELECT public.apply_game_import_job(p_job, false,
+        public.game_import_confirm_counts(public.apply_game_import_job(p_job, true)))
+$f$;

@@ -112,7 +112,6 @@ export function seedLeague({ flags = { score_entry: true, standings: true } } = 
     scheduler_runs: [],
     game_assignments: [],
     game_scores: [],
-    games: [],
     practice_assignments: [],
     practice_exceptions: [],
     audit_log: [],

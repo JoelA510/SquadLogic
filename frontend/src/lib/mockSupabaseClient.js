@@ -454,7 +454,6 @@ const initialMockData = {
   ],
   game_assignments: [],
   // The legacy table: kept, unread by any page since F11-3, and seeded with nothing (F11-5 drops it).
-  games: [],
   scheduler_runs: [
     {
       id: 'run-practice-1',
@@ -952,14 +951,8 @@ const rangeLastDay = (range) => {
 // means it runs forever and is therefore CERTAINLY affected. Two
 // different answers, never collapsed into one.
 //
-// **One enumerator, no options -- both callers see the same five kinds.**
-//
-// An earlier version made `games` and slot-reached assignments DELETE-only
-// on the reasoning that a retirement destroys nothing. That was wrong in
-// the same way the SQL was: a retirement that cannot see the fixture on
-// its ground UNDER-REPORTS, and the operator confirms against an
-// incomplete list. What differs between the two callers is the DATE and
-// nothing else, so that is the only parameter.
+// Retirement and deletion enumerate the same bookings, including saved assignments
+// reached through slots. The date filter distinguishes the two operations.
 //
 // **SCOPED as of 20260911000000, and scoped HERE rather than twinned.**
 // Retiring a venue asks about every pitch at the site and retiring a
@@ -998,7 +991,7 @@ export const mockFieldBookings = (db, orgId, scopeId, after, scope = 'field') =>
     throw new Error('mockFieldBookings requires an organization and a scope id');
   }
   // `public.estate_scope_covers`, in JavaScript. One rule, three scopes, and
-  // the five kinds that cannot name a sub-surface pass `null` for the second
+  // the kinds that cannot name a sub-surface pass `null` for the second
   // argument -- which is why they match nothing at subunit scope, as a fact
   // about the schema rather than an oversight.
   const scopeCovers = (rowFieldId, rowSubunitId) => {
@@ -1107,35 +1100,6 @@ export const mockFieldBookings = (db, orgId, scopeId, after, scope = 'field') =>
     // reproduced the defect the SQL had already been fixed for. A mock
     // that disagrees with the database about who is affected is a second
     // answer to a question that is supposed to have one.
-    // `games` carries no field_id and dies with the slot, score and all.
-    // A census by column name could not see it; this list comes from the
-    // cascade closure instead. Its date is its slot's, so a retirement
-    // judges it against the same day the slot is judged against.
-    ...(db.games || [])
-      .filter((row) => {
-        if (!gameSlotIds.has(String(row.game_slot_id))) return false;
-        const slot = (db.game_slots || []).find(
-          (candidate) => String(candidate.id) === String(row.game_slot_id)
-        );
-        return !past(slot ? gameDate(slot) : null);
-      })
-      .map((row) => {
-        const slot = (db.game_slots || []).find(
-          (candidate) => String(candidate.id) === String(row.game_slot_id)
-        );
-        return {
-          kind: 'game',
-          id: row.id,
-          on_date: slot ? gameDate(slot) : null,
-          week_index: slot?.week_index ?? null,
-          undated: !(slot && gameDate(slot)),
-          unbounded: false,
-          cascades: true,
-          // `games` carries no field_id of its own; its ground is its slot's,
-          // exactly as the SQL arm projects `gs.field_id`.
-          field_id: slot?.field_id ?? null,
-        };
-      }),
     ...(db.game_assignments || [])
       .filter(
         (row) =>
@@ -4334,13 +4298,12 @@ export const mockSupabase = {
         // and the effect cannot disagree.
         //
         // Keyed by KIND, not pooled into one id set: a pooled set is correct
-        // only while ids never collide across `games`, `game_assignments` and
+        // only while ids never collide across `game_assignments` and
         // `practice_assignments`, which is an assumption about test fixtures
         // rather than a property of the data.
         const TABLE_FOR_KIND = {
           game_slot: 'game_slots',
           practice_slot: 'practice_slots',
-          game: 'games',
           game_assignment: 'game_assignments',
           practice_assignment: 'practice_assignments',
           availability_profile: 'field_availability_profiles',
@@ -4360,7 +4323,6 @@ export const mockSupabase = {
         destroy('field_blackouts', onField('field_blackouts'));
         // The permit scopes naming the field cascade (the permits themselves stay).
         destroy('facility_permit_scopes', onField('facility_permit_scopes'));
-        destroy('games', reported('games'));
         destroy('game_assignments', reported('game_assignments'));
         destroy('practice_assignments', reported('practice_assignments'));
         destroy('game_slots', onField('game_slots'));
@@ -7038,13 +7000,11 @@ export const mockSupabase = {
           // **Both CASCADE columns, matching the SQL and the practice arm one
           // branch down.** `game_assignments` reaches a slot through
           // `game_slot_id` AND `slot_id`, and this read only the first.
-          const inUse =
-            owned('games').some((g) => String(g.game_slot_id) === String(record.target_id)) ||
-            owned('game_assignments').some(
-              (ga) =>
-                String(ga.game_slot_id) === String(record.target_id) ||
-                String(ga.slot_id) === String(record.target_id)
-            );
+          const inUse = owned('game_assignments').some(
+            (ga) =>
+              String(ga.game_slot_id) === String(record.target_id) ||
+              String(ga.slot_id) === String(record.target_id)
+          );
           return inUse ? { reason: 'game_slot_in_use' } : null;
         }
         if (record.target_table === 'practice_slots') {
@@ -7962,10 +7922,6 @@ export const mockSupabase = {
         });
       }
 
-      const games = cascadeDoomed(
-        'games',
-        (g) => sameTeam(g.home_team_id) || sameTeam(g.away_team_id)
-      );
       const playerIds = (db.players || [])
         .filter((player) => sameTeam(player.team_id))
         .map((player) => player.id)
@@ -7976,7 +7932,6 @@ export const mockSupabase = {
       const counts = {
         practice_exceptions_deleted: archived.length,
         practice_assignments_deleted: series.length,
-        games_deleted: games.length,
         // 20261122010000 (F11 decision D5): the scores of the team's games go first and are counted. A property before
         // the games' own, so it reads them while they still stand.
         game_scores_deleted: cascadeDoomed('game_scores', (score) =>
@@ -8013,7 +7968,6 @@ export const mockSupabase = {
         name: team.name,
         division_id: team.division_id,
         ...counts,
-        game_ids: games.map((g) => g.id).sort(),
         player_ids_unassigned: playerIds,
         withdrawn_exception_ids: withdrawn.map((row) => row.id),
         archived_exceptions: archived,

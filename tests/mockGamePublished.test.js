@@ -106,7 +106,6 @@ const seed = () => {
       game(R, OTHER_ORG, 'gp-o1', 'gp-o2', 1, { published: true }),
     ],
     audit_log: [],
-    games: [],
   });
   sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify({ user: { id: 'mock-admin-id' } }));
 };

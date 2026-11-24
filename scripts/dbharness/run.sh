@@ -1357,7 +1357,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000 20261105010000 20261106010000 20261108010000 20261108020000 20261110010000 20261111010000 20261112010000 20261113010000 20261114010000 20261115010000 20261116010000 20261117010000 20261118010000 20261119010000 20261120010000 20261121010000 20261122010000 20261123010000 20261124010000 20261125010000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000 20261105010000 20261106010000 20261108010000 20261108020000 20261110010000 20261111010000 20261112010000 20261113010000 20261114010000 20261115010000 20261116010000 20261117010000 20261118010000 20261119010000 20261120010000 20261121010000 20261122010000 20261123010000 20261124010000 20261125010000 20261126010000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -5097,55 +5097,25 @@ echo "=== legacy scores: the copy to game_scores (planted, then 20261122010000 a
 LS_ID=20261122010000
 LS_FILE="$(ls "$REPO"/supabase/migrations/${LS_ID}_*.sql 2>/dev/null | head -n 1)"
 LS_PREV="$(ls "$REPO"/supabase/migrations/*.sql | sort | grep -B1 "/${LS_ID}_" | head -n 1 | xargs -r basename | cut -c1-14)"
-LS_SEED="INSERT INTO public.organizations (id, name, slug) VALUES
-            ('2a000000-0000-4000-8000-00000000000a','Legacy Scores Org','legacy-scores');
-          INSERT INTO public.season_settings (id, organization_id, name) VALUES
-            ('2a000000-0000-4000-8000-0000000000a1','2a000000-0000-4000-8000-00000000000a','Legacy Scores Season');
-          INSERT INTO public.divisions (id, organization_id, season_settings_id, name) VALUES
-            ('2a000000-0000-4000-8000-0000000000a2','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000a1','Legacy Scores Division');
-          INSERT INTO public.teams (id, organization_id, division_id, name) VALUES
-            ('2a000000-0000-4000-8000-0000000000b1','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000a2','Legacy One'),
-            ('2a000000-0000-4000-8000-0000000000b2','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000a2','Legacy Two'),
-            ('2a000000-0000-4000-8000-0000000000b3','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000a2','Legacy Three');
-          INSERT INTO public.locations (id, organization_id, name) VALUES
-            ('2a000000-0000-4000-8000-0000000000e1','2a000000-0000-4000-8000-00000000000a','Legacy Park');
-          INSERT INTO public.fields (id, organization_id, location_id, name) VALUES
-            ('2a000000-0000-4000-8000-0000000000e2','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000e1','Legacy Field');
-          INSERT INTO public.game_slots (id, organization_id, field_id, slot_date, week_index) VALUES
-            ('2a000000-0000-4000-8000-0000000000d1','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000e2','2026-04-04',1),
-            ('2a000000-0000-4000-8000-0000000000d2','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000e2','2026-04-11',2),
-            ('2a000000-0000-4000-8000-0000000000d3','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000e2','2026-04-18',3);
-          INSERT INTO public.scheduler_runs (id, organization_id, season_settings_id, run_type, status, completed_at) VALUES
-            ('2a000000-0000-4000-8000-0000000000aa','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000a1','game','completed','2026-03-01T00:00:00Z');
-          INSERT INTO public.game_assignments (id, organization_id, run_id, game_slot_id, slot_id, home_team_id, away_team_id, division, week_index) VALUES
-            ('2a000000-0000-4000-8000-0000000000c1','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000aa','2a000000-0000-4000-8000-0000000000d1','2a000000-0000-4000-8000-0000000000d1','2a000000-0000-4000-8000-0000000000b1','2a000000-0000-4000-8000-0000000000b2','Legacy Scores Division',1),
-            ('2a000000-0000-4000-8000-0000000000c2','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000aa','2a000000-0000-4000-8000-0000000000d2','2a000000-0000-4000-8000-0000000000d2','2a000000-0000-4000-8000-0000000000b1','2a000000-0000-4000-8000-0000000000b3','Legacy Scores Division',1);
-          INSERT INTO public.games (id, organization_id, game_slot_id, home_team_id, away_team_id, score_home, score_away) VALUES
-            ('2a000000-0000-4000-8000-0000000000f1','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000d1','2a000000-0000-4000-8000-0000000000b1','2a000000-0000-4000-8000-0000000000b2',4,2),
-            ('2a000000-0000-4000-8000-0000000000f2','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000d2','2a000000-0000-4000-8000-0000000000b1','2a000000-0000-4000-8000-0000000000b3',NULL,NULL),
-            ('2a000000-0000-4000-8000-0000000000f3','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000d3','2a000000-0000-4000-8000-0000000000b2','2a000000-0000-4000-8000-0000000000b3',7,NULL);"
+LS_SEED="$REPO/docs/sql/tests/20261122010000_legacy_fixture.sql"
 if [ -z "$LS_FILE" ] || [ -z "$LS_PREV" ] || [ "$LS_PREV" = "$LS_ID" ]; then
   echo "FAIL legacy scores ${LS_ID}: could not find the migration or the one before it (${LS_FILE:-none} / ${LS_PREV:-none})"; STATUS=1
 elif ! fresh_db; then
   echo "FAIL legacy scores ${LS_ID}: could not build a fresh database"; STATUS=1
 elif ! apply_all "$LS_PREV"; then
   echo "FAIL legacy scores ${LS_ID}: could not build up to ${LS_PREV}"; STATUS=1
-elif ! psql_cmd "$LS_SEED" >$SCRATCH/harness_ls_seed 2>&1; then
+elif ! psql_file "$LS_SEED" >$SCRATCH/harness_ls_seed 2>&1; then
   echo "FAIL legacy scores ${LS_ID}: the legacy rows could not be planted"; dump 10 $SCRATCH/harness_ls_seed; STATUS=1
 elif ! psql_file "$LS_FILE" >$SCRATCH/harness_ls 2>&1; then
   echo "FAIL legacy scores ${LS_ID}: the migration did not apply onto one matching result, one unscored row and one one-sided row"
   dump 10 $SCRATCH/harness_ls; STATUS=1
-elif [ "$(psql_cmd "SELECT (SELECT count(*) FROM public.game_scores) || ':' ||
-                 COALESCE((SELECT score_home || '-' || score_away FROM public.game_scores WHERE game_id = '2a000000-0000-4000-8000-0000000000c1'), 'none') || ':' ||
-                 (SELECT count(*) FROM public.games WHERE organization_id = '2a000000-0000-4000-8000-00000000000a');" 2>/dev/null)" != "1:4-2:3" ]; then
+elif ! psql_file "$REPO/docs/sql/tests/20261122010000_legacy_check.sql" >$SCRATCH/harness_ls_check 2>&1; then
   echo "FAIL legacy scores ${LS_ID}: planted one matching result (4-2), one unscored row and one one-sided row; game_scores does not hold exactly the first, or a legacy row was changed"
   STATUS=1
 else
   echo "PASS legacy scores ${LS_ID}: the one result that matches a saved game was copied (4-2), the unscored and the one-sided rows were not, and the legacy rows stay"
   # The refusal: a scored legacy row that matches no saved game stops the migration, and nothing of it is applied.
-  if ! fresh_db || ! apply_all "$LS_PREV" >/dev/null || ! psql_cmd "$LS_SEED
-          INSERT INTO public.games (id, organization_id, home_team_id, away_team_id, score_home, score_away) VALUES
-            ('2a000000-0000-4000-8000-0000000000f4','2a000000-0000-4000-8000-00000000000a','2a000000-0000-4000-8000-0000000000b2','2a000000-0000-4000-8000-0000000000b3',1,1);" >$SCRATCH/harness_ls_seed 2>&1; then
+  if ! fresh_db || ! apply_all "$LS_PREV" >/dev/null || ! psql_file "$LS_SEED" >$SCRATCH/harness_ls_seed 2>&1 || ! psql_file "$REPO/docs/sql/tests/20261122010000_unmatched_score.sql" >$SCRATCH/harness_ls_seed 2>&1; then
     echo "FAIL legacy scores ${LS_ID}: could not build and plant the unmatched result"; dump 10 $SCRATCH/harness_ls_seed; STATUS=1
   elif psql_file "$LS_FILE" >$SCRATCH/harness_ls 2>&1; then
     echo "FAIL legacy scores ${LS_ID}: planted a scored legacy row that matches no saved game and the migration applied"; STATUS=1
@@ -5156,6 +5126,23 @@ else
   else
     echo "PASS legacy scores ${LS_ID}: a scored legacy row that matches no saved game refuses the migration by name, and nothing of it is applied"
   fi
+fi
+
+# Retiring the legacy table must preserve every row when the table is populated.
+echo "=== legacy games retirement: refusal on a populated table ==="
+LG_FILE="$MIGRATION_DIR/20261126010000_retire_legacy_games.sql"
+if ! fresh_db || ! apply_all 20261125010000; then
+  echo "FAIL legacy games retirement: could not build the previous schema"; STATUS=1
+elif ! psql_file "$LS_SEED" >$SCRATCH/harness_lg_seed 2>&1; then
+  echo "FAIL legacy games retirement: could not plant the legacy rows"; dump 10 $SCRATCH/harness_lg_seed; STATUS=1
+elif psql_file "$LG_FILE" >$SCRATCH/harness_lg 2>&1; then
+  echo "FAIL legacy games retirement: a populated table was retired"; STATUS=1
+elif ! grep -Fq '3 row(s) remain' $SCRATCH/harness_lg || ! grep -Fq 'legacy_games_not_empty' $SCRATCH/harness_lg; then
+  echo "FAIL legacy games retirement: the refusal did not report the three rows"; dump 10 $SCRATCH/harness_lg; STATUS=1
+elif ! psql_file "$REPO/docs/sql/tests/20261126010000_refused_intact.sql" >$SCRATCH/harness_lg_check 2>&1; then
+  echo "FAIL legacy games retirement: the refusal changed the previous state"; dump 10 $SCRATCH/harness_lg_check; STATUS=1
+else
+  echo "PASS legacy games retirement: three legacy fixtures refused the migration and all survived"
 fi
 
 # ---------------------------------------------------------------------------

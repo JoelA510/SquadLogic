@@ -372,13 +372,9 @@ describe('field import rollback :: the booking guard the mock never had', () => 
     // read off the mock, and a fixture that stops satisfying them fails loudly
     // rather than turning this into a test of the refusal path.
     await seedJob([]);
-    const held = new Set([
-      ...getMockData('games').map((g) => String(g.game_slot_id)),
-      ...getMockData('game_assignments').flatMap((a) => [
-        String(a.game_slot_id),
-        String(a.slot_id),
-      ]),
-    ]);
+    const held = new Set(
+      getMockData('game_assignments').flatMap((a) => [String(a.game_slot_id), String(a.slot_id)])
+    );
     const seededSlot = getMockData('game_slots').find(
       (slot) => String(slot.organization_id) === ORG && !held.has(String(slot.id))
     );

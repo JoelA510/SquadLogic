@@ -86,21 +86,6 @@ VALUES ('c0000000-0000-0000-0000-0000000000d6',
         'c0000000-0000-0000-0000-0000000000c5',
         daterange(current_date, current_date + 60, '[]'));
 
--- `games` carries no field_id and dies with the slot, recorded score included.
--- A census by column name cannot see it; the cascade closure can.
-INSERT INTO public.teams (id, organization_id, division_id, name)
-VALUES ('c0000000-0000-0000-0000-0000000000c8',
-        'a1111111-1111-1111-1111-111111111111',
-        'a1111111-1111-1111-1111-11111111abcd', 'Guard Opponent')
-ON CONFLICT (id) DO NOTHING;
-
-INSERT INTO public.games (id, organization_id, game_slot_id, home_team_id, away_team_id)
-VALUES ('c0000000-0000-0000-0000-0000000000c9',
-        'a1111111-1111-1111-1111-111111111111',
-        'c0000000-0000-0000-0000-0000000000c3',
-        'aaaaaaaa-0000-0000-0000-000000000001',
-        'c0000000-0000-0000-0000-0000000000c8');
-
 -- The unguarded two-argument overload must not exist. Argument TYPES, not
 -- pg_get_function_identity_arguments, which carries parameter names and would
 -- match nothing whatever the database held.
@@ -150,8 +135,8 @@ SELECT is(
             'c0000000-0000-0000-0000-0000000000c2'
         )->>'affected_count'
     ),
-    '7',
-    'the refusal counts every row the delete reaches: 2 slots, 2 games-side rows, 2 assignments, 1 fixture'
+    '6',
+    'the refusal counts every row the delete reaches: 2 slots and 4 assignments'
 );
 
 SELECT is(
@@ -164,8 +149,8 @@ SELECT is(
                  )->'affected'
                ) x
     ),
-    ARRAY['game','game_assignment','game_slot','practice_assignment','practice_slot'],
-    'the refusal names all five kinds, including games, which carries no field_id'
+    ARRAY['game_assignment','game_slot','practice_assignment','practice_slot'],
+    'the refusal names the four seeded slot and assignment kinds'
 );
 
 SELECT is(
@@ -205,10 +190,9 @@ SELECT is(
       + (SELECT count(*) FROM public.practice_slots WHERE id = 'c0000000-0000-0000-0000-0000000000c5')
       + (SELECT count(*) FROM public.practice_assignments
           WHERE id IN ('c0000000-0000-0000-0000-0000000000c6','c0000000-0000-0000-0000-0000000000d6'))
-      + (SELECT count(*) FROM public.games WHERE id = 'c0000000-0000-0000-0000-0000000000c9')
     )::integer,
-    7,
-    'a refused delete destroys none of the seven rows it named'
+    6,
+    'a refused delete destroys none of the six rows it named'
 );
 
 -- **The per-row disposition, on two rows of one table.** A version reporting
@@ -279,10 +263,9 @@ SELECT is(
     (
         (SELECT count(*) FROM public.game_slots WHERE id = 'c0000000-0000-0000-0000-0000000000c3')
       + (SELECT count(*) FROM public.practice_slots WHERE id = 'c0000000-0000-0000-0000-0000000000c5')
-      + (SELECT count(*) FROM public.games WHERE id = 'c0000000-0000-0000-0000-0000000000c9')
     )::integer,
     0,
-    'the slot tables and the fixture hanging off them cascade with the field'
+    'the slot tables cascade with the field'
 );
 
 -- **The rows the RPC promised to destroy really are destroyed.** This is the

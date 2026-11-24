@@ -74,14 +74,14 @@ const migrationKinds = () => {
   const sql = definingMigration('field_bookings');
   const body = sql.slice(
     sql.indexOf('CREATE OR REPLACE FUNCTION public.field_bookings('),
-    sql.indexOf('REVOKE ALL ON FUNCTION public.field_bookings')
+    sql.indexOf('$function$;', sql.indexOf('CREATE OR REPLACE FUNCTION public.field_bookings('))
   );
   expect(body.length, 'the shared enumerator moved; this parse is stale').toBeGreaterThan(100);
   const kinds = [...new Set([...body.matchAll(/SELECT '([a-z_]+)'::text/g)].map((m) => m[1]))];
   // A parse that matched nothing would make every `kinds.includes(...)` below
   // fail loudly rather than pass, but an empty set is still a stale parse.
-  // Six as of 20260909000000, which added `availability_profile`.
-  expect(kinds.length).toBe(6);
+  // Two slot and assignment families and the field availability profile.
+  expect(kinds.length).toBe(5);
   return kinds.sort();
 };
 
@@ -660,16 +660,10 @@ describe('field lifecycle RPCs :: the affected-booking family is the migration s
     // below assert that the mock produces the empty set, which every possible
     // mock satisfies.
     const kinds = migrationKinds();
-    // FIVE, not four. `games` carries no field_id and is destroyed with its
-    // slot anyway, so a retirement that could not see it under-reported what it
-    // stranded -- and this assertion, pinned at four, certified the shortfall.
-    // SIX as of 20260909000000, which added `availability_profile`: the FK to
-    // `fields` became CASCADE, so a delete destroys the profile rather than
-    // stranding it, and an operator must be shown that before confirming.
-    expect(kinds.length).toBe(6);
+    // The two slot and assignment families plus the availability profile.
+    expect(kinds.length).toBe(5);
     expect(kinds).toEqual([
       'availability_profile',
-      'game',
       'game_assignment',
       'game_slot',
       'practice_assignment',
@@ -920,16 +914,6 @@ describe('field lifecycle RPCs :: the affected-booking family is the migration s
       field_id: field.id,
       effective_date_range: '[2098-01-01,2099-06-30]',
     });
-    // The fifth kind: a fixture on the seeded slot. A retirement strands it
-    // exactly as it strands the slot, and until this PR neither arm said so.
-    await supabase.from('games').insert({
-      id: 'fam-g',
-      organization_id: ORG,
-      game_slot_id: 'fam-gs',
-    });
-    // The sixth, added by 20260909000000: an availability profile claiming
-    // ground past the retirement date. Its FK is CASCADE now, so a delete
-    // destroys it and a retirement must at least say it is stranded.
     await supabase.from('field_availability_profiles').insert({
       id: 'fam-fap',
       organization_id: ORG,
@@ -956,7 +940,7 @@ describe('field lifecycle RPCs :: the affected-booking family is the migration s
     // ... and each seeded row is there by id, so "the kind appeared" is not
     // satisfied by some other row of the same kind already in the corpus.
     const byId = new Map(data.affected.map((a) => [String(a.id), a]));
-    for (const id of ['fam-gs', 'fam-ga', 'fam-ps', 'fam-pa', 'fam-g', 'fam-fap']) {
+    for (const id of ['fam-gs', 'fam-ga', 'fam-ps', 'fam-pa', 'fam-fap']) {
       expect(byId.has(id)).toBe(true);
     }
     expect(byId.get('fam-ga').on_date).toBe('2099-01-02');

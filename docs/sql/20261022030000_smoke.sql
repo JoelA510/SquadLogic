@@ -151,7 +151,7 @@ BEGIN
     INSERT INTO public.practice_exceptions (organization_id, season_settings_id, team_id, assignment_id, "window", kind,
         practice_slot_id, cause_kind)
         VALUES (v_org, v_s, v_t, v_pa, '[2026-09-08,2026-09-22)', 'relocated', v_thu, 'retirement');
-    INSERT INTO public.games (organization_id, home_team_id, away_team_id, start_time)
+    INSERT INTO public.game_assignments (organization_id, home_team_id, away_team_id, "start")
         VALUES (v_org, v_t, v_o, '2026-11-07 15:00+00') RETURNING id INTO v_g;
     INSERT INTO public.players (organization_id, division_id, first_name, last_name) VALUES (v_org, v_d, 'R2', 'One') RETURNING id INTO v_p;
     INSERT INTO public.team_players (team_id, player_id, organization_id) VALUES (v_t, v_p, v_org);
@@ -171,7 +171,7 @@ BEGIN
     PERFORM public.admin_delete_team(v_t);
 
     IF EXISTS (SELECT 1 FROM public.teams WHERE id = v_t)
-       OR EXISTS (SELECT 1 FROM public.games WHERE id = v_g)
+       OR EXISTS (SELECT 1 FROM public.game_assignments WHERE id = v_g)
        OR EXISTS (SELECT 1 FROM public.practice_assignments WHERE id = v_pa)
        OR EXISTS (SELECT 1 FROM public.practice_exceptions WHERE assignment_id = v_pa) THEN
         RAISE EXCEPTION 'the team, its game, its series or its exception survived the delete';
@@ -190,11 +190,11 @@ BEGIN
     IF v_meta ? 'event_rsvps_deleted' OR v_meta ? 'team_messages_deleted' THEN
         RAISE EXCEPTION 'team.deleted still counts a dropped table: %', v_meta;
     END IF;
-    IF v_meta->>'games_deleted' IS DISTINCT FROM '1'
+    IF v_meta->>'game_assignments_deleted' IS DISTINCT FROM '1'
        OR v_meta->>'practice_assignments_deleted' IS DISTINCT FROM '1'
        OR v_meta->>'practice_exceptions_deleted' IS DISTINCT FROM '1'
        OR v_meta->>'team_players_deleted' IS DISTINCT FROM '1'
-       OR v_meta->'game_ids' IS DISTINCT FROM jsonb_build_array(v_g) THEN
+       OR v_meta ?| ARRAY['games_deleted','game_ids'] THEN
         RAISE EXCEPTION 'team.deleted did not record what the delete took: %', v_meta;
     END IF;
 

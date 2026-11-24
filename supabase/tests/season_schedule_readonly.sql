@@ -125,19 +125,22 @@ SELECT cmp_ok((SELECT count(*)::int FROM public.game_assignments WHERE organizat
 -- The practice saves rebuilt each season's TIME TBD list (20261108020000): a team with no practice has a row.
 SELECT cmp_ok((SELECT count(*)::int FROM public.schedule_tbd WHERE season_settings_id = 'a1111111-1111-1111-1111-1111111100ff'), '>=', 1, 'and a TIME TBD row for the old season');
 SELECT cmp_ok((SELECT count(*)::int FROM public.schedule_tbd WHERE season_settings_id = 'a1111111-1111-1111-1111-111111111aaa'), '>=', 1, 'and for the active one');
--- A season's scores live in games (the only table that holds results; the standings are a view of it).
+-- Dedicated saved games and their scores exercise the completed-season trigger separately from the RPC controls.
 UPDATE public.organizations SET feature_flags = COALESCE(feature_flags, '{}'::jsonb) || '{"score_entry": true}'::jsonb
  WHERE id = 'a1111111-1111-1111-1111-111111111111';
-INSERT INTO public.games (id, organization_id, season_id, home_team_id, away_team_id, week_index) VALUES
+INSERT INTO public.game_assignments (id, organization_id, season_settings_id, home_team_id, away_team_id, week_index) VALUES
     ('a1111111-1111-1111-1111-0000000ff0a9', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-1111111100ff',
      'a1111111-1111-1111-1111-0000000ff001', 'a1111111-1111-1111-1111-0000000ff002', 1),
     ('a1111111-1111-1111-1111-0000000ff1a9', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111aaa',
      'aaaaaaaa-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000003', 1);
+INSERT INTO public.game_scores (game_id,organization_id,home_team_id,away_team_id,score_home,score_away)
+SELECT id, organization_id, home_team_id, away_team_id, 1, 0 FROM public.game_assignments
+ WHERE id IN ('a1111111-1111-1111-1111-0000000ff0a9','a1111111-1111-1111-1111-0000000ff1a9');
 CREATE TEMP TABLE ids ON COMMIT DROP AS
     SELECT (SELECT id FROM public.practice_assignments WHERE team_id = 'a1111111-1111-1111-1111-0000000ff001' LIMIT 1) AS old_pa,
            (SELECT id FROM public.practice_assignments WHERE team_id = 'aaaaaaaa-0000-0000-0000-000000000001' LIMIT 1) AS live_pa,
-           (SELECT id FROM public.game_assignments WHERE home_team_id = 'a1111111-1111-1111-1111-0000000ff001' LIMIT 1) AS old_ga,
-           (SELECT id FROM public.game_assignments WHERE home_team_id = 'aaaaaaaa-0000-0000-0000-000000000001' LIMIT 1) AS live_ga,
+           (SELECT id FROM public.game_assignments WHERE run_id IS NOT NULL AND home_team_id = 'a1111111-1111-1111-1111-0000000ff001' LIMIT 1) AS old_ga,
+           (SELECT id FROM public.game_assignments WHERE run_id IS NOT NULL AND home_team_id = 'aaaaaaaa-0000-0000-0000-000000000001' LIMIT 1) AS live_ga,
            (SELECT id FROM public.schedule_tbd WHERE season_settings_id = 'a1111111-1111-1111-1111-1111111100ff' LIMIT 1) AS old_tbd,
            (SELECT id FROM public.schedule_tbd WHERE season_settings_id = 'a1111111-1111-1111-1111-111111111aaa' LIMIT 1) AS live_tbd;
 GRANT SELECT ON ids TO PUBLIC;
@@ -217,17 +220,17 @@ SELECT is(pg_temp.err($$UPDATE public.practice_exceptions SET tbd_reason = 'late
     '22023:season_completed', 'practice_exceptions (TIME TBD): an update is refused');
 SELECT is(pg_temp.err($$DELETE FROM public.practice_exceptions WHERE id = 'a1111111-1111-1111-1111-0000000ff0e4'$$),
     '22023:season_completed', 'a delete');
-SELECT is(pg_temp.err($$DELETE FROM public.game_assignments WHERE home_team_id = 'a1111111-1111-1111-1111-0000000ff001'$$),
+SELECT is(pg_temp.err($$DELETE FROM public.game_assignments WHERE id = (SELECT old_ga FROM ids)$$),
     '22023:season_completed', 'game_assignments: a delete is refused');
 SELECT is(pg_temp.err($$UPDATE public.game_assignments SET assignment_source = 'manual' WHERE home_team_id = 'a1111111-1111-1111-1111-0000000ff001'$$),
     '22023:season_completed', 'an update');
-SELECT is(pg_temp.err($$UPDATE public.games SET score_home = 9 WHERE id = 'a1111111-1111-1111-1111-0000000ff0a9'$$),
-    '22023:season_completed', 'games: a direct score update of a completed season is refused');
-SELECT is(pg_temp.err($$DELETE FROM public.games WHERE id = 'a1111111-1111-1111-1111-0000000ff0a9'$$),
+SELECT is(pg_temp.err($$UPDATE public.game_scores SET score_home = 9 WHERE game_id = 'a1111111-1111-1111-1111-0000000ff0a9'$$),
+    '22023:season_completed', 'game_scores: a direct score update of a completed season is refused');
+SELECT is(pg_temp.err($$DELETE FROM public.game_scores WHERE game_id = 'a1111111-1111-1111-1111-0000000ff0a9'$$),
     '22023:season_completed', 'a delete');
-SELECT is(pg_temp.err($$INSERT INTO public.games (organization_id, season_id, home_team_id, away_team_id, week_index)
-        VALUES ('a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-1111111100ff',
-                'a1111111-1111-1111-1111-0000000ff002', 'a1111111-1111-1111-1111-0000000ff001', 2)$$),
+SELECT is(pg_temp.err($$INSERT INTO public.game_scores (game_id, organization_id, home_team_id, away_team_id, score_home, score_away)
+        SELECT id, organization_id, home_team_id, away_team_id, 1, 2 FROM public.game_assignments
+         WHERE id=(SELECT old_ga FROM ids)$$),
     '22023:season_completed', 'an insert');
 SELECT is(pg_temp.err($$UPDATE public.teams SET notes = 'live' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001'$$),
     'no error', 'control: the same update on the active season''s team is allowed');
@@ -262,7 +265,7 @@ SELECT is(pg_temp.err($$DELETE FROM public.practice_exceptions WHERE id = 'a1111
     'no error', 'TIME TBD exceptions too');
 SELECT is(pg_temp.err($$DELETE FROM public.practice_assignments WHERE team_id = 'a1111111-1111-1111-1111-0000000ff001'$$),
     'no error', 'and practice assignments');
-SELECT is(pg_temp.err($$UPDATE public.games SET score_home = 2 WHERE id = 'a1111111-1111-1111-1111-0000000ff0a9'$$),
+SELECT is(pg_temp.err($$UPDATE public.game_scores SET score_home = 2 WHERE game_id = 'a1111111-1111-1111-1111-0000000ff0a9'$$),
     'no error', 'and its scores');
 SELECT is(pg_temp.err($$DELETE FROM public.schedule_tbd WHERE season_settings_id = 'a1111111-1111-1111-1111-1111111100ff'$$),
     'no error', 'and its TIME TBD rows');
@@ -281,26 +284,22 @@ INSERT INTO public.players (id, organization_id, division_id, first_name, last_n
 INSERT INTO public.team_players (organization_id, team_id, player_id) VALUES ('d4444444-4444-4444-4444-444444444444', 'd4444444-4444-4444-4444-4444444d0001', 'd4444444-4444-4444-4444-4444444d00a1');
 INSERT INTO public.teams (id, organization_id, division_id, name) VALUES
     ('d4444444-4444-4444-4444-4444444d0002', 'd4444444-4444-4444-4444-444444444444', 'd4444444-4444-4444-4444-44444444d0d1', 'D Two');
-INSERT INTO public.games (id, organization_id, season_id, home_team_id, away_team_id, score_home, score_away) VALUES
+INSERT INTO public.game_assignments (id, organization_id, season_settings_id, home_team_id, away_team_id) VALUES
     ('d4444444-4444-4444-4444-4444444d00f1', 'd4444444-4444-4444-4444-444444444444', 'd4444444-4444-4444-4444-4444444444d1',
-     'd4444444-4444-4444-4444-4444444d0001', 'd4444444-4444-4444-4444-4444444d0002', 1, 0);
+     'd4444444-4444-4444-4444-4444444d0001', 'd4444444-4444-4444-4444-4444444d0002');
+INSERT INTO public.game_scores (game_id,organization_id,home_team_id,away_team_id,score_home,score_away)
+SELECT id, organization_id, home_team_id, away_team_id, 2, 1 FROM public.game_assignments
+ WHERE id='d4444444-4444-4444-4444-4444444d00f1';
 UPDATE public.season_settings SET status = 'completed' WHERE id = 'd4444444-4444-4444-4444-4444444444d1';
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 SELECT is(pg_temp.err($$DELETE FROM public.organizations WHERE id = 'd4444444-4444-4444-4444-444444444444'$$),
     'no error', 'a signed-in caller can still delete an organization whose season is completed');
 SELECT is((SELECT count(*)::int FROM public.teams WHERE organization_id = 'd4444444-4444-4444-4444-444444444444')
         + (SELECT count(*)::int FROM public.team_players WHERE team_id = 'd4444444-4444-4444-4444-4444444d0001')
-        + (SELECT count(*)::int FROM public.games WHERE organization_id = 'd4444444-4444-4444-4444-444444444444'), 0,
+        + (SELECT count(*)::int FROM public.game_scores WHERE organization_id = 'd4444444-4444-4444-4444-444444444444'), 0,
     'and its teams, rosters and scores went with it');
 
--- Deleting a completed season outright still cascades through its teams and rosters. (A games row is not
--- part of this case, and no assertion in a pgTAP file can show why. A season whose games were committed
--- earlier, which is the only way an application has them, deletes cleanly: its teams take their games
--- with them, and a game whose teams are in another season is kept with its season set null. Only inside
--- the one transaction that also inserted the game, as every file here is, does the delete fail: the SET NULL
--- of games.season_id runs after the cascade removed the game's teams, and Postgres re-checks the team
--- foreign key on an update of a row the same transaction inserted. Measured on a scratch cluster built
--- from the migrations, docs/changes/2026-11-01-followups-f1.md, item 1.)
+-- Deleting a completed season also cascades through its teams and rosters.
 INSERT INTO public.organizations (id, name, slug) VALUES ('f7777777-7777-7777-7777-777777777701', 'Org F', 'org-f-readonly');
 DELETE FROM public.season_settings WHERE organization_id = 'f7777777-7777-7777-7777-777777777701';
 INSERT INTO public.season_settings (id, organization_id, name, status, season_year) VALUES
@@ -336,8 +335,8 @@ SELECT is(
     (SELECT array_agg(c.relname::text ORDER BY c.relname::text) FROM pg_trigger g JOIN pg_class c ON c.oid = g.tgrelid
       WHERE g.tgname LIKE '%\_readonly\_when\_completed' AND NOT g.tgisinternal AND g.tgenabled = 'O'
         AND g.tgfoid = 'public.season_schedule_readonly_when_completed()'::regprocedure),
-    ARRAY['coach_practice_preferences', 'game_assignments', 'game_scores', 'games', 'practice_assignments', 'practice_exceptions', 'schedule_tbd', 'team_coach_assignments', 'team_players', 'teams'],
-    'the eight schedule tables, the practice preference rules (20261112010000) and the score table (20261122010000) carry the trigger, enabled');
+    ARRAY['coach_practice_preferences', 'game_assignments', 'game_scores', 'practice_assignments', 'practice_exceptions', 'schedule_tbd', 'team_coach_assignments', 'team_players', 'teams'],
+    'all nine live schedule, preference and score tables carry the enabled trigger');
 SELECT is(has_function_privilege('authenticated', 'public.season_schedule_readonly_when_completed()', 'EXECUTE')
           OR has_function_privilege('anon', 'public.season_schedule_readonly_when_completed()', 'EXECUTE'), false,
     'and the trigger function is nobody''s to call');

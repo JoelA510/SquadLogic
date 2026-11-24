@@ -69,7 +69,7 @@ INSERT INTO public.fields (id, organization_id, location_id, name, active) VALUE
 INSERT INTO public.game_slots (id, organization_id, field_id, slot_date, week_index) VALUES
     ('f2000000-0000-4000-8000-000000000001', 'a1111111-1111-1111-1111-111111111111', 'f1000000-0000-4000-8000-000000000011', current_date + 7, 1),
     ('f2000000-0000-4000-8000-000000000004', 'a1111111-1111-1111-1111-111111111111', 'f1000000-0000-4000-8000-000000000014', current_date + 7, 1);
-INSERT INTO public.games (id, organization_id, game_slot_id, home_team_id, away_team_id) VALUES
+INSERT INTO public.game_assignments (id, organization_id, game_slot_id, home_team_id, away_team_id) VALUES
     ('f3000000-0000-4000-8000-000000000001', 'a1111111-1111-1111-1111-111111111111', 'f2000000-0000-4000-8000-000000000001',
      'aaaaaaaa-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-0000000000a3'),
     ('f3000000-0000-4000-8000-000000000004', 'a1111111-1111-1111-1111-111111111111', 'f2000000-0000-4000-8000-000000000004',

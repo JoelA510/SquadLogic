@@ -177,7 +177,6 @@ function world() {
       },
     ],
     game_scores: [],
-    games: [{ id: 'legacy-1', organization_id: ORG }],
     audit_log: [],
   });
 }
@@ -314,10 +313,7 @@ describe('mock update_game_score for a saved game :: the answers the database gi
 
   it('an id that names no saved game is not found: there is no legacy arm (F11-3)', () => {
     const db = world();
-    // A row of the legacy `games` table is not a game a score can name, as in the database.
-    db.games = [{ id: 'legacy-1', organization_id: ORG, home_team_id: 't', away_team_id: 'u' }];
-    expect(score(db, 'legacy-1', 1, 0)).toBe('42501:');
-    expect(db.games[0].score_home).toBeUndefined();
+    expect(score(db, 'missing-game', 1, 0)).toBe('42501:');
     expect(db.game_scores ?? []).toEqual([]);
   });
 });

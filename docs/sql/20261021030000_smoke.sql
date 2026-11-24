@@ -68,9 +68,9 @@ BEGIN
         practice_slot_id, tbd_reason, cause_kind, run_id, withdrawn_at) VALUES
         (v_org, v_s, v_t, v_pa, '[2026-09-08,2026-09-22)', 'relocated', v_thu, NULL, 'retirement', v_run, NULL),
         (v_org, v_s, v_t, v_pa, '[2026-09-22,2026-09-29)', 'time_tbd', NULL, 'contended', 'blackout', v_run, now() - interval '1 day');
-    INSERT INTO public.games (organization_id, home_team_id, away_team_id, start_time)
+    INSERT INTO public.game_assignments (organization_id, home_team_id, away_team_id, "start")
         VALUES (v_org, v_t, v_o, '2026-11-07 15:00+00') RETURNING id INTO v_g;
-    INSERT INTO public.games (organization_id, home_team_id, away_team_id, start_time)
+    INSERT INTO public.game_assignments (organization_id, home_team_id, away_team_id, "start")
         VALUES (v_org, v_o, v_x, '2026-11-14 15:00+00') RETURNING id INTO v_g2;
     INSERT INTO public.players (organization_id, division_id, first_name, last_name) VALUES (v_org, v_d, 'DT', 'One') RETURNING id INTO v_p1;
     INSERT INTO public.players (organization_id, division_id, first_name, last_name, team_id) VALUES (v_org, v_d, 'DT', 'Two', v_t) RETURNING id INTO v_p2;
@@ -146,13 +146,13 @@ BEGIN
      WHERE action = 'team.deleted' AND resource_id = v_t;
     IF v_meta->>'practice_exceptions_deleted' IS DISTINCT FROM '2'
        OR v_meta->>'practice_assignments_deleted' IS DISTINCT FROM '2'
-       OR v_meta->>'games_deleted' IS DISTINCT FROM '1'
+       OR v_meta->>'game_assignments_deleted' IS DISTINCT FROM '1'
        OR v_meta->>'team_players_deleted' IS DISTINCT FROM '1'
        OR jsonb_array_length(v_meta->'player_ids_unassigned') IS DISTINCT FROM 2 THEN
         RAISE EXCEPTION 'team.deleted did not record what the delete took: %', v_meta;
     END IF;
     RAISE NOTICE 'team.deleted records the counts, the game and the unassigned players';
-    IF EXISTS (SELECT 1 FROM public.games WHERE id = v_g) THEN
+    IF EXISTS (SELECT 1 FROM public.game_assignments WHERE id = v_g) THEN
         RAISE EXCEPTION 'the deleted team''s game survived the delete';
     END IF;
 END;

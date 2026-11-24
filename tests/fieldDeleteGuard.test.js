@@ -80,18 +80,18 @@ const migrationDispositions = () => {
   // so retire and delete give one answer; reading the RPC body would now match
   // no table name at all and pass by looking at nothing.
   const start = sql.indexOf(PRODUCER_SIGNATURE);
-  const end = sql.indexOf('REVOKE ALL ON FUNCTION public.field_bookings');
+  const end = sql.indexOf('$function$;', start);
   expect(start, 'the shared enumerator moved; this parse is stale').toBeGreaterThan(-1);
   expect(end).toBeGreaterThan(start);
   const arms = sql.slice(start, end).split('UNION ALL');
   // The meta-assertion. A parse that found no arms would produce an empty map
   // and every comparison below would pass by comparing nothing with nothing.
-  // Six as of 20260909000000, which added `availability_profile`.
-  expect(arms.length).toBe(6);
+  // Two slot and assignment families and the field availability profile.
+  expect(arms.length).toBe(5);
   /** @type {Record<string, string>} */
   const map = {};
   for (const arm of arms) {
-    const kind = /'([a-z_]+)'::text/.exec(arm);
+    const kind = /\bSELECT\s+'([a-z_]+)'::text/i.exec(arm);
     expect(kind, `an arm of the union names no kind: ${arm.slice(0, 80)}`).not.toBeNull();
     // An arm whose `cascades` is a flat `true` is always destroyed; one that
     // asks `EXISTS (... its slot ...)` decides per row. Reporting the latter as
@@ -153,10 +153,6 @@ const seedEveryKind = async (fieldId) => {
       valid_until: '2099-06-30',
     },
   ]);
-  // `games` carries no field_id at all and dies with the slot, score included.
-  await supabase
-    .from('games')
-    .insert([{ id: 'guard-game', organization_id: ORG, game_slot_id: 'guard-game-slot' }]);
   await supabase.from('game_assignments').insert([
     // Free-standing: a field_id and no slot behind it. Unassigned by SET NULL.
     {
@@ -298,7 +294,6 @@ const seedEveryKind = async (fieldId) => {
   for (const [table, ids] of [
     ['game_slots', ['guard-game-slot']],
     ['practice_slots', ['guard-practice-slot']],
-    ['games', ['guard-game']],
     [
       'game_assignments',
       ['guard-game-assignment', 'guard-game-assignment-slotted', 'guard-game-assignment-slot-only'],
@@ -350,7 +345,6 @@ const AFFECTED_TABLES = [
   'fields',
   'game_slots',
   'practice_slots',
-  'games',
   'game_assignments',
   'practice_assignments',
   'field_blackouts',
@@ -387,7 +381,6 @@ describe('field delete guard :: the mock agrees with the migration about consequ
     const expected = migrationDispositions();
     expect(Object.keys(expected).sort()).toEqual([
       'availability_profile',
-      'game',
       'game_assignment',
       'game_slot',
       'practice_assignment',
@@ -400,7 +393,6 @@ describe('field delete guard :: the mock agrees with the migration about consequ
     expect(expected.practice_assignment).toBe('per-row');
     expect(expected.game_slot).toBe('deleted');
     expect(expected.practice_slot).toBe('deleted');
-    expect(expected.game).toBe('deleted');
     expect(expected.availability_profile).toBe('deleted');
 
     const byId = new Map(data.affected.map((row) => [String(row.id), row]));
@@ -417,7 +409,6 @@ describe('field delete guard :: the mock agrees with the migration about consequ
     }
     expect([...seen].sort()).toEqual([
       'availability_profile',
-      'game',
       'game_assignment',
       'game_slot',
       'practice_assignment',
@@ -453,7 +444,6 @@ describe('field delete guard :: the mock agrees with the migration about consequ
     for (const [table, id] of [
       ['game_slots', 'guard-game-slot'],
       ['practice_slots', 'guard-practice-slot'],
-      ['games', 'guard-game'],
       ['game_assignments', 'guard-game-assignment'],
       ['game_assignments', 'guard-game-assignment-slotted'],
       ['game_assignments', 'guard-game-assignment-slot-only'],
@@ -506,7 +496,6 @@ describe('field delete guard :: the mock agrees with the migration about consequ
     const TABLE_FOR_KIND = {
       game_slot: 'game_slots',
       practice_slot: 'practice_slots',
-      game: 'games',
       game_assignment: 'game_assignments',
       practice_assignment: 'practice_assignments',
       availability_profile: 'field_availability_profiles',

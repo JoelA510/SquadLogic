@@ -242,10 +242,10 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
--- 4. Why four arms are EMPTY at subunit scope -- read from the schema
+-- 4. Why three arms are EMPTY at subunit scope -- read from the schema
 -- ---------------------------------------------------------------------------
 --
--- At `subunit` scope the game_slot, game, game_assignment and
+-- At `subunit` scope the game_slot, game_assignment and
 -- availability_profile arms match nothing. **That is a claim about the
 -- schema**, not an oversight, and asserting it from `information_schema` is
 -- what makes it one: if `game_slots` ever gains a `field_subunit_id`, its arm
@@ -266,13 +266,16 @@ BEGIN
       v_named;
   END IF;
 
-  FOREACH t IN ARRAY ARRAY['game_slots','games','game_assignments','field_availability_profiles'] LOOP
+  FOREACH t IN ARRAY ARRAY['game_slots','game_assignments','field_availability_profiles'] LOOP
+    IF to_regclass(format('public.%I', t)) IS NULL THEN
+      RAISE EXCEPTION 'expected booking table public.% is missing', t;
+    END IF;
     IF EXISTS (SELECT 1 FROM information_schema.columns
                 WHERE table_schema='public' AND table_name=t AND column_name='field_subunit_id')
     THEN RAISE EXCEPTION '% can name a sub-surface now; its arm passes NULL and would miss it', t; END IF;
     v_n := v_n + 1;
   END LOOP;
-  IF v_n <> 4 THEN RAISE EXCEPTION 'checked % arms, expected 4', v_n; END IF;
+  IF v_n <> 3 THEN RAISE EXCEPTION 'checked % arms, expected 3', v_n; END IF;
 
   -- And the cascade that makes the subunit arm's `cascades` true.
   IF NOT EXISTS (
@@ -286,7 +289,7 @@ BEGIN
     RAISE EXCEPTION 'practice_slots does not CASCADE from field_subunits; the arm claims a destruction that does not happen';
   END IF;
 
-  RAISE NOTICE 'subunit scope: 1 table names a sub-surface, 4 arms structurally empty, cascade confirmed';
+  RAISE NOTICE 'subunit scope: 1 table names a sub-surface, % arms structurally empty, cascade confirmed', v_n;
 END $$;
 
 -- ---------------------------------------------------------------------------

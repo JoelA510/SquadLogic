@@ -848,6 +848,8 @@ describe('a file is checked under one rule (mock of import_age_rule and age_rule
 describe('a completed season is read-only for its schedule (mock of the schedule triggers)', () => {
   const TEAM = 'ms-team-old';
   const LIVE_TEAM = 'ms-team-live';
+  const OLD_OPPONENT = 'ms-opponent-old';
+  const LIVE_OPPONENT = 'ms-opponent-live';
   const OLD = 'ms-season-old';
   const OLD_DIVISION = 'ms-division-old';
   beforeEach(() => {
@@ -869,6 +871,18 @@ describe('a completed season is read-only for its schedule (mock of the schedule
       teams: [
         { id: TEAM, organization_id: MOCK_ORG_ID, division_id: OLD_DIVISION, name: 'Old' },
         { id: LIVE_TEAM, organization_id: MOCK_ORG_ID, division_id: U10, name: 'Live' },
+        {
+          id: OLD_OPPONENT,
+          organization_id: MOCK_ORG_ID,
+          division_id: OLD_DIVISION,
+          name: 'Old opponent',
+        },
+        {
+          id: LIVE_OPPONENT,
+          organization_id: MOCK_ORG_ID,
+          division_id: U10,
+          name: 'Live opponent',
+        },
       ],
       team_players: [
         { team_id: TEAM, player_id: 'ms-p1', organization_id: MOCK_ORG_ID },
@@ -907,34 +921,48 @@ describe('a completed season is read-only for its schedule (mock of the schedule
           ? { ...org, feature_flags: { ...org.feature_flags, score_entry: true } }
           : org
       ),
-      games: [
+      game_scores: [
         {
-          id: 'ms-game-old',
+          game_id: 'ms-scored-old',
           organization_id: MOCK_ORG_ID,
-          season_id: OLD,
           home_team_id: TEAM,
-          away_team_id: LIVE_TEAM,
+          away_team_id: OLD_OPPONENT,
+          score_home: 1,
+          score_away: 0,
         },
         {
-          id: 'ms-game-live',
+          game_id: 'ms-scored-live',
           organization_id: MOCK_ORG_ID,
-          season_id: MOCK_SEASON_ID,
           home_team_id: LIVE_TEAM,
-          away_team_id: TEAM,
+          away_team_id: LIVE_OPPONENT,
+          score_home: 1,
+          score_away: 0,
         },
       ],
       game_assignments: [
         {
+          id: 'ms-scored-old',
+          organization_id: MOCK_ORG_ID,
+          home_team_id: TEAM,
+          away_team_id: OLD_OPPONENT,
+        },
+        {
+          id: 'ms-scored-live',
+          organization_id: MOCK_ORG_ID,
+          home_team_id: LIVE_TEAM,
+          away_team_id: LIVE_OPPONENT,
+        },
+        {
           id: 'ms-ga-old',
           organization_id: MOCK_ORG_ID,
           home_team_id: TEAM,
-          away_team_id: null,
+          away_team_id: OLD_OPPONENT,
         },
         {
           id: 'ms-ga-live',
           organization_id: MOCK_ORG_ID,
           home_team_id: LIVE_TEAM,
-          away_team_id: null,
+          away_team_id: LIVE_OPPONENT,
         },
       ],
     });
@@ -959,19 +987,20 @@ describe('a completed season is read-only for its schedule (mock of the schedule
     expect(getMockData('practice_assignments').map((a) => a.id)).toContain('ms-pa-old');
     expect(getMockData('game_assignments').map((a) => a.id)).toContain('ms-ga-old');
 
-    // A score names a saved game: a row of the legacy `games` table is not found (F11-3; a completed season's SAVED
-    // game refusing a score is `tests/mockGameScores.test.js`, held to the pgTAP text).
+    // An unknown game ID must leave the stored scores alone.
     expect(
       (
         await rpc('update_game_score', {
           p_organization_id: MOCK_ORG_ID,
-          p_game_id: 'ms-game-old',
+          p_game_id: 'ms-unknown-game',
           p_score_home: 3,
           p_score_away: 1,
         })
       ).error
     ).toMatchObject({ code: '42501' });
-    expect(getMockData('games').find((g) => g.id === 'ms-game-old').score_home).toBeUndefined();
+    expect(getMockData('game_scores').find((g) => g.game_id === 'ms-scored-old').score_home).toBe(
+      1
+    );
     expect(
       (await rpc('admin_update_team', { p_team_id: LIVE_TEAM, p_patch: { notes: 'ok' } })).error
     ).toBeNull();
@@ -983,7 +1012,7 @@ describe('a completed season is read-only for its schedule (mock of the schedule
     ).toBeNull();
   });
 
-  it('refuses a direct write to each of the six tables, and allows the active season’s', async () => {
+  it('refuses direct writes to completed-season schedule tables, and allows the active season’s', async () => {
     const write = async (table, run) => (await run(supabase.from(table))).error;
     expect(
       await write('teams', (t) =>
@@ -1026,11 +1055,13 @@ describe('a completed season is read-only for its schedule (mock of the schedule
 
     // The scores table is one too.
     expect(
-      await write('games', (t) => t.update({ score_home: 9 }).eq('id', 'ms-game-old'))
+      await write('game_scores', (t) => t.update({ score_home: 9 }).eq('game_id', 'ms-scored-old'))
     ).toMatchObject(refused);
-    expect(await write('games', (t) => t.delete().eq('id', 'ms-game-old'))).toMatchObject(refused);
     expect(
-      await write('games', (t) => t.update({ score_home: 2 }).eq('id', 'ms-game-live'))
+      await write('game_scores', (t) => t.delete().eq('game_id', 'ms-scored-old'))
+    ).toMatchObject(refused);
+    expect(
+      await write('game_scores', (t) => t.update({ score_home: 2 }).eq('game_id', 'ms-scored-live'))
     ).toBeNull();
     // The TIME TBD list is a schedule table too.
     expect(

@@ -175,9 +175,6 @@ COMPOSITE_SEEDS = {
          "VALUES (v_org, %(field)s, v_seed_slot, v_seed_slot, "
          "(current_date + %(at)s) + time '18:00', 1);",
          'game_assignments'),
-        ("INSERT INTO public.games (organization_id, game_slot_id, home_team_id, away_team_id) "
-         "VALUES (v_org, v_seed_slot, v_team, v_team_b);",
-         'games'),
     ],
     'scheduled_practice': [
         ("INSERT INTO public.practice_slots "
@@ -195,15 +192,7 @@ COMPOSITE_SEEDS = {
 
 
 def booking_count_sql(table):
-    """Count the rows of `table` that this field's delete would reach.
-
-    `games` carries no field_id, so it is counted through the slot it hangs
-    off -- the same reading admin_delete_field takes.
-    """
-    if table == 'games':
-        return ("SELECT count(*) INTO v_n FROM public.games g "
-                "JOIN public.game_slots gs ON gs.id = g.game_slot_id "
-                "WHERE gs.field_id = v_field;")
+    """Count the current booking rows whose field would be deleted."""
     return f"SELECT count(*) INTO v_n FROM public.{table} WHERE field_id = v_field;"
 
 
@@ -987,7 +976,7 @@ def main():
         'DECLARE',
         '  v_org uuid; v_loc uuid; v_field uuid; v_user uuid := gen_random_uuid();',
         '  v_res jsonb; v_active boolean; v_eff date; v_n int; v_before_n int; v_ran int := 0;',
-        '  v_team uuid; v_team_b uuid; v_season uuid; v_div uuid;',
+        '  v_team uuid; v_season uuid; v_div uuid;',
         '  v_phases text[]; v_words text[]; v_seed_slot uuid;',
         # 8.4 gap A: the edit cases need the window they edit, the id the call
         # is aimed at, the row read back from the table, and one import-owned
@@ -1024,10 +1013,6 @@ def main():
         "  VALUES (v_org, v_season, 'Scenario Division') RETURNING id INTO v_div;",
         "  INSERT INTO public.teams (organization_id, division_id, name)",
         "  VALUES (v_org, v_div, 'Scenario Team') RETURNING id INTO v_team;",
-        # `games` has a CHECK that the two teams differ, so the composite seed
-        # needs a second one.
-        "  INSERT INTO public.teams (organization_id, division_id, name)",
-        "  VALUES (v_org, v_div, 'Scenario Team B') RETURNING id INTO v_team_b;",
         '',
     ]
     for i, scenario in enumerate(fields, start=1):

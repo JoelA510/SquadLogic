@@ -334,14 +334,6 @@ const PLANTS = [
     replace: '    scopeCovers(row.field_id, null);',
   },
   {
-    // `games` carries no field_id; only the cascade closure reaches it.
-    // `games` carries no field_id; only the cascade closure reaches it. Both
-    // callers enumerate it now, so this is aimed at the shared producer.
-    label: 'the enumerator stops seeing the fixtures on its slots',
-    find: '        if (!gameSlotIds.has(String(row.game_slot_id))) return false;',
-    replace: '        if (true) return false;',
-  },
-  {
     // **The shared enumerator's `after: null` contract.** `null` means no date
     // applies -- a deletion takes everything -- which is a different answer
     // from comparing against the string "null". Get that wrong and every
@@ -380,13 +372,11 @@ const PLANTS = [
     replace: "        // destroy('game_slots', onField('game_slots'));",
   },
   {
-    // The report and the effect are held together by reading the doomed ids
-    // out of `affected`. Recomputing them independently is how the two come
-    // to disagree.
-    label: 'a confirmed delete stops destroying the fixtures it reported',
+    // Every slotted assignment reported as deleted must disappear on the next read.
+    label: 'a confirmed delete keeps the game assignments it reported as deleted',
     suite: 'tests/fieldDeleteGuard.test.js',
-    find: "        destroy('games', reported('games'));",
-    replace: "        // destroy('games', reported('games'));",
+    find: "        destroy('game_assignments', reported('game_assignments'));",
+    replace: "        // destroy('game_assignments', reported('game_assignments'));",
   },
   {
     // The tombstone is what makes a delete of a SEEDED row durable across
@@ -669,10 +659,10 @@ const PLANTS = [
     // The game arm's missing column, which its practice sibling always had.
     label: 'the game_slots arm forgets slot_id again',
     suite: 'tests/fieldImportRollbackGuard.test.js',
-    find: `              (ga) =>
-                String(ga.game_slot_id) === String(record.target_id) ||
-                String(ga.slot_id) === String(record.target_id)`,
-    replace: '              (ga) => String(ga.game_slot_id) === String(record.target_id)',
+    find: `            (ga) =>
+              String(ga.game_slot_id) === String(record.target_id) ||
+              String(ga.slot_id) === String(record.target_id)`,
+    replace: '            (ga) => String(ga.game_slot_id) === String(record.target_id)',
   },
   {
     // The counter that testified to a restore nobody performed.

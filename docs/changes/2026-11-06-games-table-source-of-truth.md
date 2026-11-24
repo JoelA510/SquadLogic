@@ -747,6 +747,11 @@ Depends on: F11-3 and the owner's word. Drops the table, removes the four SQL ar
 eight pgTAP files that insert into `games`. Proved by the census going green with the table gone and by `field_bookings` and
 `rollback_field_import_job` keeping their pgTAP.
 
+**As built in completion item C9.** Migration `20261126010000` locks the legacy table and refuses to retire it
+when any row remains. The saved schedule and scores retain their tables and IDs. The live reader census has an
+empty allow-list. The database harness tests historical score copying before retirement and proves the refusal
+leaves every legacy fixture intact.
+
 ## What PR 5, and the other pull requests, must do or avoid because of this plan
 
 **PR 5 is merged as #719 (`ad18861`)**, specified with the amendments below (statically checked on 2026-11-10 in

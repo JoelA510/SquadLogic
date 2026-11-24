@@ -234,7 +234,7 @@ function anchorSandbox() {
 const PREFLIGHT_TIMEOUT_MS = 60_000;
 
 const BOUNDARY_PLANT =
-  'plant "ONLY-SCEN the practice range boundary is read exclusively again" "$M7" \\';
+  'plant "ONLY-SCEN the practice range boundary is read exclusively again" "$LEGACY_GAMES_RETIRE" \\';
 
 describe('dbharness anchor pre-flight', () => {
   it(
@@ -264,7 +264,9 @@ describe('dbharness anchor pre-flight', () => {
       expect(lines.filter((l) => l === BOUNDARY_PLANT)).toHaveLength(1);
       fs.writeFileSync(
         proveSh(dir),
-        lines.map((l) => (l === BOUNDARY_PLANT ? l.replace('"$M7"', '"$M5"') : l)).join('\n')
+        lines
+          .map((l) => (l === BOUNDARY_PLANT ? l.replace('"$LEGACY_GAMES_RETIRE"', '"$M5"') : l))
+          .join('\n')
       );
 
       const { status, output } = anchors(dir);

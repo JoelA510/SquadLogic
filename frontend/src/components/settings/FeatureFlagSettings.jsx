@@ -5,7 +5,6 @@ import { useOrganization } from '../../contexts/OrganizationContext.jsx';
 import { useAuth } from '../../contexts/AuthContext.jsx';
 import { supabase } from '../../lib/supabaseClient.js';
 import {
-  FEATURE_FLAGS,
   FEATURE_CATALOG,
   FEATURE_DEFAULTS,
   GENDER_MODEL_KEY,
@@ -18,33 +17,6 @@ import Modal from '../ui/Modal.jsx';
 import Button from '../ui/Button.jsx';
 import LoadingScreen from '../LoadingScreen.jsx';
 
-/** Legacy operational flags retained below the feature catalog. */
-const ADVANCED_FLAGS = [
-  {
-    key: FEATURE_FLAGS.ADVANCED_FAIRNESS,
-    label: 'Advanced Fairness Evaluation',
-    description:
-      'Enables multi-weighted metrics for team balancing including commute time and coach experience.',
-  },
-  {
-    key: FEATURE_FLAGS.COACH_OVERLAP_STRICT,
-    label: 'Strict Coach Conflict Enforcement',
-    description:
-      'Prevents any scheduling that results in a coach having overlapping practice slots across multiple teams.',
-  },
-  {
-    key: FEATURE_FLAGS.LIST_VIEW_TOGGLE,
-    label: 'Enable Dashboard List View',
-    description: 'Allows users to toggle between graphical and tabular views of the dashboard.',
-  },
-  {
-    key: FEATURE_FLAGS.FUZZY_IMPORT_MAPPING,
-    label: 'Fuzzy Data Alignment (AI)',
-    description:
-      'Uses intelligent string matching to automatically align CSV headers with internal data fields.',
-  },
-];
-
 const FORMAT_OPTIONS = [
   { value: 'split', title: 'Boys / Girls split', examples: ['U8B', 'U8G', 'U10B', 'U10G'] },
   { value: 'coed', title: 'Co-ed (combined)', examples: ['U8', 'U10', 'U12', 'U14'] },
@@ -52,8 +24,7 @@ const FORMAT_OPTIONS = [
 
 /**
  * Feature configuration panel ("FeatureControls" in the design prototype):
- * division format (split/co-ed) cards, the optional-features catalog, and
- * legacy advanced flags. Persists via the audited update_org_feature_flags
+ * division format (split/co-ed) cards, the optional-features catalog and buddy rule. Persists via the audited update_org_feature_flags
  * RPC through OrganizationContext.updateFeatureFlags.
  *
  * When teams already exist, switching the division format asks whether to
@@ -327,40 +298,6 @@ export default function FeatureFlagSettings({
             <div className="muted text-xs" id="buddy-rule-description">
               {buddyRuleChoice.description}
             </div>
-          </div>
-        </div>
-      </div>
-
-      <div>
-        <div className="section-title">Advanced</div>
-        <div className="card">
-          <div className="card-body flush">
-            {ADVANCED_FLAGS.map((flag, index) => (
-              <div
-                key={flag.key}
-                style={{
-                  display: 'flex',
-                  gap: 12,
-                  alignItems: 'center',
-                  padding: '13px 16px',
-                  borderBottom:
-                    index < ADVANCED_FLAGS.length - 1 ? '1px solid var(--border-soft)' : 'none',
-                }}
-              >
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600 }}>{flag.label}</div>
-                  <div className="muted" style={{ fontSize: 12.5 }} id={`flag-desc-${flag.key}`}>
-                    {flag.description}
-                  </div>
-                </div>
-                <Toggle
-                  checked={!!features[flag.key]}
-                  onChange={(next) => handleToggle(flag.key, next)}
-                  label={flag.label}
-                  disabled={saving}
-                />
-              </div>
-            ))}
           </div>
         </div>
       </div>

@@ -305,13 +305,26 @@ describe('FeatureFlagSettings (FeatureControls)', () => {
     });
   });
 
-  it('keeps legacy advanced flags togglable', async () => {
-    mocks.featureFlags = { advanced_fairness: true };
+  it('loads the current settings when retired flags are stored and offers only the working switches', async () => {
+    mocks.featureFlags = FeatureFlagSchema.parse({
+      advanced_fairness: true,
+      list_view_toggle: false,
+      player_rating: true,
+    });
     render(<FeatureFlagSettings />);
-    const fairness = screen.getByRole('switch', { name: 'Advanced Fairness Evaluation' });
-    expect(fairness).toHaveAttribute('aria-checked', 'true');
-    fireEvent.click(fairness);
-    await waitFor(() => expect(mocks.updateFeatureFlags).toHaveBeenCalled());
-    expect(mocks.updateFeatureFlags.mock.calls[0][0]).toMatchObject({ advanced_fairness: false });
+    for (const name of [
+      'Advanced Fairness Evaluation',
+      'Strict Coach Conflict Enforcement',
+      'Enable Dashboard List View',
+      'Fuzzy Data Alignment (AI)',
+    ]) {
+      expect(screen.queryByRole('switch', { name })).toBeNull();
+    }
+    const rating = screen.getByRole('switch', { name: 'Player Rating' });
+    expect(rating).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(rating);
+    await waitFor(() =>
+      expect(mocks.updateFeatureFlags).toHaveBeenCalledWith({ player_rating: false })
+    );
   });
 });

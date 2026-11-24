@@ -45,7 +45,7 @@ const COMPLETED = {
   created_at: '2025-01-01T00:00:00Z',
 };
 
-async function mount() {
+async function mount(featureFlags = {}) {
   vi.resetModules();
   vi.doMock('../frontend/src/lib/supabaseClient.js', () => ({
     supabase: {
@@ -63,7 +63,7 @@ async function mount() {
                     organization_id: ORG,
                     profile_id: 'user-1',
                     role: mocks.role,
-                    organizations: { id: ORG, name: 'Org One' },
+                    organizations: { id: ORG, name: 'Org One', feature_flags: featureFlags },
                   },
                 ],
                 error: null,
@@ -117,6 +117,20 @@ afterEach(() => {
 });
 
 describe('signing in (docs/changes/2026-10-27-admin-only.md)', () => {
+  it('loads supported organization settings even when a retired flag holds a legacy JSON value', async () => {
+    const seen = await mount({
+      ghost_rosters: { enabled: true },
+      advanced_fairness: true,
+      accessibility_list_view: false,
+      player_rating: true,
+    });
+    expect(seen.current.featureFlags).toEqual({
+      accessibility_list_view: false,
+      player_rating: true,
+    });
+    expect(mocks.rpcCalls).toEqual([]);
+  });
+
   // The provider used to call link_my_coach_record on every sign-in. No coach signs in, and the
   // function goes in the server change, so nothing may call it.
   it('calls no RPC to link the account to a coach record', async () => {

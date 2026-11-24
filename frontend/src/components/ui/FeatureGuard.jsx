@@ -14,7 +14,7 @@ import { IS_DEV_SERVER } from '../../env.js';
  * and on everywhere else.
  *
  * @param {Object} props
- * @param {string} props.flag - The key of the feature flag to check (e.g., 'advanced_fairness').
+ * @param {string} props.flag - The key of the feature flag to check (e.g., FEATURE_FLAGS.WAITLIST).
  * @param {React.ReactNode} props.children - The content to show if the flag is enabled.
  * @param {React.ReactNode} [props.fallback] - Optional content to show if the flag is disabled.
  * @param {boolean} [props.inverted] - If true, shows children when the flag is FALSE.

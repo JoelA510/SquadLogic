@@ -99,6 +99,23 @@ Then('the scan sees {string} on the page', async ({ page }, content: string) => 
   await expect(page.getByText(content).first()).toBeVisible({ timeout: 20_000 });
 });
 
+When('I open the Features settings tab', async ({ page }) => {
+  await page.getByRole('tab', { name: 'Features', exact: true }).click();
+});
+
+Then('the Features panel offers Player Rating and omits the retired switches', async ({ page }) => {
+  const panel = page.getByRole('tabpanel', { name: 'Features' });
+  await expect(panel.getByRole('switch', { name: 'Player Rating' })).toBeVisible();
+  for (const name of [
+    'Advanced Fairness Evaluation',
+    'Strict Coach Conflict Enforcement',
+    'Enable Dashboard List View',
+    'Fuzzy Data Alignment (AI)',
+  ]) {
+    await expect(panel.getByRole('switch', { name })).toHaveCount(0);
+  }
+});
+
 When('I switch to the dark theme on this page', async ({ page }) => {
   // The top bar's toggle, without leaving the page: content it holds only in memory (an invite
   // just generated, a schedule staged for review) is still there for the dark scan.

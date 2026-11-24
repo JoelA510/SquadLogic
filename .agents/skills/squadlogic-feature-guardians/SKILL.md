@@ -69,6 +69,8 @@ How to add, gate, and retire an organization-level feature flag safely.
 - **Gating is not authorization:** a flag hides UI; permissions and RLS decide who may act.
 - **Retiring:** when a feature becomes standard, remove the `FeatureGuard` wrapper but keep the
   key in `FEATURE_FLAGS` until no stored organization still carries it, so the schema doesn't
-  start dropping it as unknown.
+  start dropping it as unknown. For a switch that never had a reader, completion C6 removed the
+  key and its control together. The schema ignores unknown stored keys before their values can
+  invalidate the organization's active settings.
 - **Rollout:** toggle the flag through the settings page (mock mode, or a preview) and check
   both states before merging; that path goes through the audited RPC.

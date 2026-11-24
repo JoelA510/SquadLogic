@@ -65,8 +65,8 @@ describe('FeatureFlagSchema with gender_model', () => {
     expect(parsed).toEqual({
       years_played: true,
       gender_model: 'coed',
-      advanced_fairness: false,
     });
+    expect(FeatureFlagSchema.safeParse({ years_played: { enabled: true } }).success).toBe(false);
   });
 
   it('drops invalid gender_model values and unknown keys', () => {

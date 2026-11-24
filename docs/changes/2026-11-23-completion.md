@@ -89,8 +89,8 @@ numbers are as of `7405db3` and will move: search by name.
 | C6  | Retire the flags nothing reads                                                            | done                     | #748         | 2026-11-23 |
 | C8  | Games import: two SQL guards                                                              | done                     | #749         | 2026-11-24 |
 | C9  | Retire the legacy `games` table (F11-5)                                                   | done                     | #750         | 2026-11-24 |
-| C7  | Paired practice days (PR 12)                                                              | done                     | this change  | 2026-11-24 |
-| C10 | Manual QA workbook                                                                        | not started              |              |            |
+| C7  | Paired practice days (PR 12)                                                              | done                     | #751         | 2026-11-24 |
+| C10 | Manual QA workbook                                                                        | done                     | this change  | 2026-11-24 |
 | C11 | Registration state (B5.10): plan only                                                     | not started              |              |            |
 | O1  | Owner: manual testing and the owner-only items                                            | owner                    |              |            |
 | C12 | Fixes from manual testing                                                                 | gated on O1              |              |            |

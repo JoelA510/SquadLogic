@@ -1,9 +1,11 @@
 ---
 name: plan-change
-description: "Use when someone asks to plan a feature, a fix, or a refactor before it's built, or a change is too large to start on directly. Runs prompts/plan-change.md — sizes the change and stops for a small one; otherwise writes docs/changes/<date>-<slug>.md against docs/product.md, AGENTS.md, and the ADRs, with behavior, design, risks, and tasks that each name their test."
+description: "Use when someone asks to plan a feature, a fix, or a refactor before it's built, or a change is too large to start on directly. Runs prompts/plan-change.md — sizes the change and stops for a small one; otherwise writes a dated plan in docs/changes/ against docs/product.md, AGENTS.md, and the ADRs, with behavior, design, risks, and tasks that each name their test."
 metadata:
-  argument-hint: "<the change in user terms, and whether it's a feature, bugfix, or refactor>"
+  argument-hint: "the change in user terms, and whether it's a feature, bugfix, or refactor"
 ---
+
+# Plan a change
 
 Plan the change exactly as written in `prompts/plan-change.md`. Read that file in full first; it
 is the authoritative instruction set, and this skill only wires it up.

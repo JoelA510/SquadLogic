@@ -2,8 +2,10 @@
 name: review-change
 description: Use when someone asks for a review, a critical or hard look, or a second opinion on a change before it merges, whether a PR, a branch, a diff range, or a pasted diff. Runs prompts/review.md — an adversarial, evidence-cited review, including the "passes its own tests" failures.
 metadata:
-  argument-hint: "<PR number, branch, diff range, or the diff itself>"
+  argument-hint: "PR number, branch, diff range, or the diff itself"
 ---
+
+# Review a change
 
 Run the adversarial review exactly as written in `prompts/review.md`. Read that file in full
 first; it is the authoritative instruction set, and this skill only wires it up.

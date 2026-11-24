@@ -13,4 +13,10 @@
 
 # Paths where a mistake is costly get a narrower owner, e.g. CI, auth, and the database schema.
 /.github/workflows/ [CI OWNER]
+/.github/CODEOWNERS [CI OWNER]
+/.github/rulesets/ [CI OWNER]
+# Keep these entries when the corresponding agent checks are activated.
+/continuity/gate.* [CI OWNER]
+/scripts/ci/agent-config-canary.mjs [CI OWNER]
+/scripts/ci/skill-tier1.mjs [CI OWNER]
 [SENSITIVE PATH] [SENSITIVE PATH OWNER]

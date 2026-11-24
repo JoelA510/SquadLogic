@@ -1,18 +1,29 @@
 # [ADAPT, THEN DELETE THIS LINE: one `updates` entry per package ecosystem this repository has, each with its cooldown, plus github-actions]
 #
 # Dependency updates arrive on their own (new-project Phase 2.5; existing-project audit §8;
-# standards core.dependency-updates and core.dependency-cooldown): weekly, grouped, so a routine
-# bump is one pull request to review. The github-actions entry moves the commit pins in
+# standards core.dependency-updates and core.dependency-cooldown): monthly, grouped, so a routine
+# bump is one or two pull requests to review. The github-actions entry moves the commit pins in
 # .github/workflows/ with the tags beside them. Dependabot version and security updates work on
 # private repositories too. https://docs.github.com/code-security/dependabot
+#
+# Tuned for free plans (docs/free-tier.md): every push to a pull request's branch re-runs CI and,
+# with a Git-connected host, makes a preview deployment that counts toward a daily limit. Monthly,
+# grouped, and never rebased keeps that to a handful of pushes a month. Security updates aren't on
+# this schedule: they open as soon as an advisory lands.
 version: 2
 updates:
   # For a Node project; another stack names its own ecosystem (pip, cargo, gomod, …).
   - package-ecosystem: npm
     directory: /
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
+      interval: monthly
+    # Two groups below make two pull requests a month; the limit leaves room for one that isn't
+    # grouped, not for a backlog.
+    open-pull-requests-limit: 3
+    # Dependabot rebases an open pull request whenever the base branch moves, and each rebase is a
+    # push. Off, a pull request that conflicts waits for a comment of `@dependabot rebase`. (One
+    # opened before this setting keeps rebasing for 30 days.)
+    rebase-strategy: disabled
     # A release is a week old before an update takes it: long enough for a compromised version to
     # be caught and pulled. Security updates ignore this and arrive at once.
     cooldown:
@@ -23,10 +34,23 @@ updates:
         update-types:
           - minor
           - patch
+      # Majors need reading, but one pull request for all of them is still one. Don't hold majors
+      # back with an `ignore` on semver-major instead: whether that also stops security updates is
+      # unverified (checked 2026-10-14).
+      majors:
+        update-types:
+          - major
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
+    open-pull-requests-limit: 3
+    rebase-strategy: disabled
     cooldown:
       default-days: 7
+    groups:
+      # Every action bump in one pull request.
+      actions:
+        patterns:
+          - "*"

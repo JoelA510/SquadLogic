@@ -1,0 +1,13 @@
+# [ADAPT, THEN DELETE THESE COMMENT LINES: only for a project that wants Codex to reach one remote MCP server; without that need, don't create the file]
+#
+# Instantiated as .codex/config.toml, which Codex reads for a project it trusts. Keep it to what
+# every contributor should get: a project's config outranks each person's own profile, so an
+# approval or sandbox setting here overrides theirs. The token is named, never written: Codex
+# reads it from the environment variable below, and `required = false` lets a session start
+# when the server is unreachable. Codex cloud takes its MCP servers from connectors, not this
+# file. Claude Code doesn't read it: its equivalent is the mcp skeleton beside this one, and the
+# two name the same server and the same variable.
+mcp_servers.memory.url = "[MEMORY MCP URL, HTTPS]"
+mcp_servers.memory.bearer_token_env_var = "MEMORY_MCP_TOKEN"
+mcp_servers.memory.required = false
+mcp_servers.memory.startup_timeout_sec = 20

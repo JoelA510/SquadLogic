@@ -2,6 +2,7 @@
 # updates only files the repository hasn't edited, so `npm run format` must not
 # rewrite them (it would reformat 30 of them). Gaps go to the template instead.
 # Prettier still reads .gitignore as well as this file.
+continuity/
 prompts/
 .agents/skills/
 .claude/skills/

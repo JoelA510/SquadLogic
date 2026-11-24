@@ -14,6 +14,7 @@ export default tseslint.config(
       '**/dist/**',
       '**/build/**',
       '**/coverage/**',
+      'continuity/**',
       '**/playwright-report/**',
       '**/test-results/**',
       '**/.features-gen/**',

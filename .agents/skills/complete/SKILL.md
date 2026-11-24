@@ -3,8 +3,10 @@ name: complete
 description: "Use when someone asks by name to bring existing code to production grade; it audits and then changes the repo, so don't start it unasked. Runs prompts/existing-project.md — baseline, thirteen-area audit, a remediation plan that accounts for every finding, and milestone 1."
 metadata:
   invocation: explicit
-  argument-hint: "<repo, current state, hosting, constraints, what complete means, known issues, repo visibility and GitHub plan>"
+  argument-hint: "repo, current state, hosting, constraints, what complete means, known issues, the coding agents it uses, repo visibility and GitHub plan"
 ---
+
+# Assess an existing project
 
 Run the existing-project audit-and-completion process, exactly as written in
 `prompts/existing-project.md`. Read that file in full first — it is the authoritative
@@ -12,9 +14,13 @@ instruction set; this skill only wires it up. Then:
 
 1. **Assemble the project inputs.** Parse whatever was given with the request, and map what you
    can onto the prompt's input fields (repo path/URL, current state, hosting, hard constraints,
-   what "complete" means in user terms, known issues already reported, and repository
-   visibility and GitHub plan). Visibility and plan never block: read them from the host, and
-   assume private on GitHub Free for whatever can't be read, as the prompt's inputs say.
+   what "complete" means in user terms, known issues already reported, the coding agents it
+   uses, and repository visibility and GitHub plan). Visibility and plan never block: read them
+   from the host, and assume private on GitHub Free for whatever can't be read, as the prompt's
+   inputs say. The coding agents come from `<repo>/.agents/platforms.json` when the repo
+   records them; otherwise ask, before judging the instruction files, and record the answer
+   there as the prompt's inputs say (an agent not in `prompts/agent-platforms.md` is
+   researched, not guessed).
    `[COMPLETE_MEANS]`
    is the highest-leverage field — everything downstream is ordered against it — so if it's
    missing, derive it from the README, product docs, or spec and state it as an assumption.

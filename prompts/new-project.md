@@ -33,6 +33,17 @@ can't see.
 - Platform targets: [web / mobile / web+native / API-only / desktop]
 - Known constraints (hosting, budget, existing accounts, team size): [CONSTRAINTS]
 - Language/stack preferences, if any: [PREFERENCES]
+- Coding agents the project will use (Claude Code, Codex, Cursor, GitHub
+  Copilot, Gemini CLI, Antigravity, or another): [AGENT PLATFORMS]. They
+  decide which instruction files Phase 2 wires up and how large AGENTS.md
+  may grow. If it isn't given, ask before Phase 2, offering the list in
+  `prompts/agent-platforms.md` plus "other", and record the answer in
+  `.agents/platforms.json` (that page has the format). An agent the list
+  doesn't have is researched from its vendor's documentation as that page
+  describes, with sources and dates; never guessed. Where no answer can be
+  had (an unattended run), wire for every listed agent, keep AGENTS.md
+  under 24,000 bytes (the strictest listed limit), and list the selection
+  as an open item.
 - Repository visibility and GitHub plan (public/private; Free/Pro/Team),
   which decide whether CI can be a required check and whether GitHub's
   private vulnerability reporting exists: [VISIBILITY AND PLAN]. If it isn't
@@ -152,12 +163,20 @@ CONTRIBUTING.md name only paths and deploy targets that exist.
 Create, as actual files in the repo:
 
 1. AGENTS.md - agent operating rules for this repo, from the AGENTS skeleton
-   (`AGENTS.skeleton.md`): the one file every coding agent reads. Plus a
+   (`AGENTS.skeleton.md`): the one file every coding agent reads. Wire it up
+   for the agents `.agents/platforms.json` selects, and only those
+   (`prompts/agent-platforms.md` gives each one's wiring): for Claude Code, a
    CLAUDE.md whose first line imports it (`CLAUDE.skeleton.md`), because
-   Claude Code skips AGENTS.md whenever a CLAUDE.md exists, and a
-   `.gemini/settings.json` of `{"context": {"fileName": ["AGENTS.md", "GEMINI.md"]}}`,
-   which points Gemini CLI at AGENTS.md; Codex, Antigravity, Cursor, and
-   Copilot read AGENTS.md as it is. Keep AGENTS.md under 24,000 bytes, Antigravity's per-file limit. If the repo
+   Claude Code skips AGENTS.md whenever a CLAUDE.md exists; for Gemini CLI, a
+   `.gemini/settings.json` of `{"context": {"fileName": ["AGENTS.md", "GEMINI.md"]}}`;
+   for Codex, Antigravity, Cursor, and Copilot, nothing, since they read
+   AGENTS.md as it is. Size AGENTS.md to the selection: under the strictest
+   hard limit among the selected agents (Antigravity truncates past 24,000
+   bytes; Codex stops at 32 KiB for all its AGENTS.md files combined), and,
+   with Claude Code selected, near its guidance of 200 lines counting what
+   CLAUDE.md imports: the rules in AGENTS.md, reference detail in docs/
+   behind a one-line pointer. The skeleton's opening comment becomes a line
+   naming the selected agents and that budget. If the repo
    already keeps its rules somewhere (`.cursor/rules`, a Copilot instructions
    file), merge them into AGENTS.md rather than keep two sets. Paths, imports,
    and scripts these files name must resolve. Check that once Phase 3 has
@@ -262,7 +281,10 @@ Create, as actual files in the repo:
    advisories, runs weekly as well as per PR, and honors only expiring,
    reasoned waivers (skeleton: docs/dependency-policy.md). Build and deploy
    settings live in the repo (vercel.json, netlify.toml, eas.json, workflow files), not only in a
-   hosting dashboard. The runtime is pinned once (`.nvmrc` or equivalent):
+   hosting dashboard. Where the constraints input puts a repository, host, or
+   backend on a free plan, keep docs/free-tier.md (skeleton: docs/free-tier.md):
+   its deployment and update settings go into those files, and its agent
+   working rules into AGENTS.md. The runtime is pinned once (`.nvmrc` or equivalent):
    CI reads that file instead of naming a version, the host is set to the
    same version (before a host account exists, list that as a milestone 1
    settings item), the package declares the supported range (`engines`), and

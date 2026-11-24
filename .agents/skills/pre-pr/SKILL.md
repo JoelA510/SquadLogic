@@ -2,8 +2,10 @@
 name: pre-pr
 description: Use when a change is ready to leave your hands — before opening or updating a pull request. Runs prompts/pre-pr.md — merge the base, run the full gate, prove new checks can fail, self-review, sweep docs, and draft the description.
 metadata:
-  argument-hint: "<one sentence on the change>"
+  argument-hint: "one sentence on the change"
 ---
+
+# Prepare a pull request
 
 Run the pre-PR checklist exactly as written in `prompts/pre-pr.md`. Read that file in full
 first; it is the authoritative instruction set, and this skill only wires it up.

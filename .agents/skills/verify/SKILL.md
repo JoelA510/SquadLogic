@@ -2,8 +2,10 @@
 name: verify
 description: "Use when a change is about to be committed, or someone asks to verify one. Runs prompts/verify.md — the repo's fast checks (lint, typecheck, the tests the change touches, generated files rebuilt) on the tree being committed, saying what passed, what failed, and what wasn't run."
 metadata:
-  argument-hint: "<nothing for the working tree, or the change to verify>"
+  argument-hint: "nothing for the working tree, or the change to verify"
 ---
+
+# Verify a change before committing
 
 Run the fast checks exactly as written in `prompts/verify.md`. Read that file in full first; it
 is the authoritative instruction set, and this skill only wires it up.

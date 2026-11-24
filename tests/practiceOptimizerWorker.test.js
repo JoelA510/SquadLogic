@@ -149,12 +149,12 @@ describe('the worker runs the Edge solver, with the server cap off', () => {
 
 describe('a job that cannot run says so, and never throws', () => {
   it('an input of another version, an unreadable input, an unknown message, a bad config', async () => {
-    const wrongVersion = await job({ ...runMessage(), input: { ...WIRE(), version: 2 } });
+    const wrongVersion = await job({ ...runMessage(), input: { ...WIRE(), version: 3 } });
     assert.deepEqual(
       wrongVersion.map((m) => m.type),
       ['error']
     );
-    assert.match(wrongVersion[0].message, /version 2/);
+    assert.match(wrongVersion[0].message, /version 3/);
     assert.equal((await job({ type: 'run', input: null, config: LEAGUE_CONFIG }))[0].type, 'error');
     assert.match((await job({ type: 'nope' }))[0].message, /unknown message "nope"/);
     assert.match((await job(null))[0].message, /unknown message null/);

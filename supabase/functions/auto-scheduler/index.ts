@@ -589,8 +589,8 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
     //     saved row may sit on a slot outside this run. Those rows are dated from the store (the
     //     organization's slots the venue read already returned); a hold that cannot be dated
     //     refuses the run, naming the team, rather than running blind to it and having the
-    //     writer's weekday rule refuse the apply. Only teams needing more than one practice are
-    //     examined, so a run at one a week reads and refuses nothing it did not before.
+    //     writer's weekday rule refuse the apply. Teams needing a second practice use the holds for placement.
+    //     All paired teams use them to report saved weekdays outside their configured pairs.
     const outside = outsideHoldsFor(
       lock.rows,
       new Set(anchored.rows.map((s) => s.id)),

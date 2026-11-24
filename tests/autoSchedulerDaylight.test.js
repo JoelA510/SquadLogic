@@ -190,6 +190,28 @@ function storedRow(s) {
 }
 const TABLES = { practice_slots: SLOT_ROWS, fields: FIELD_ROWS };
 
+it('keeps stored microseconds for pairing while rounding occupancy outward', async () => {
+  const rows = anchoredSlots().slice(0, 3);
+  const times = ['16:00:00.000001', '16:00:00.000002', '16:00:00.000001'];
+  const tables = {
+    ...TABLES,
+    practice_slots: rows.map((row, i) => ({
+      ...SLOT_ROWS.find((s) => s.id === row.id),
+      start_time: times[i],
+      end_time: '17:00:00.100',
+    })),
+  };
+  const loaded = await loadDaylight(tables, rows);
+  const dates = rows.map((row) => toDaylightSlot(row, ZONE, loaded.slots.get(row.id)));
+  assert.deepEqual(
+    dates.map((d) => [d.startSeconds, d.endSeconds]),
+    Array(3).fill([57600, 61201])
+  );
+  assert.ok(dates[0].pairWindow);
+  assert.notEqual(dates[0].pairWindow, dates[1].pairWindow);
+  assert.equal(dates[0].pairWindow, dates[2].pairWindow);
+});
+
 // M4.8: six, one per slot the solver may run on. A seventh team used to take
 // `s-g-nodates`, which no run reaches now (`SOLVER_SLOTS` above).
 const PLACEABLE = ['t1', 't2', 't3', 't4', 't5', 't6'];

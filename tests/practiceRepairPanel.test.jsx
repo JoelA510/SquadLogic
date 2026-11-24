@@ -648,3 +648,45 @@ it('judges each enact against the partner that is saved, even when the panel sug
   await openPanel();
   expect(screen.getAllByText(/This move breaks the team’s practice pair/)).toHaveLength(2);
 });
+
+it.each([
+  ['[2026-10-08,2026-10-14]', true],
+  ['[2026-10-15,2026-10-21]', false],
+])('reads the relocated weekday in its actual week for %s', async (window, broken) => {
+  const division = uuid(777);
+  const thirdPitch = uuid(203);
+  h.tables.fields.push({ ...h.tables.fields[1], id: thirdPitch, name: 'Pitch 3' });
+  h.tables.divisions = [
+    { id: division, organization_id: ORG, season_settings_id: SEASON, practices_per_week: 2 },
+  ];
+  h.tables.scoped_settings = [
+    { id: uuid(778), organization_id: ORG, key: 'practice_pairs', value: ['mon-wed'] },
+  ];
+  h.tables.teams[0].division_id = division;
+  h.tables.practice_slots = [
+    slot(SL1, F1, 'mon', '16:00', '17:00'),
+    slot(SL3, F2, 'mon', '16:00', '17:00'),
+    slot(SL2, F2, 'wed', '16:00', '17:00'),
+    slot(SL4, thirdPitch, 'fri', '16:00', '17:00'),
+  ];
+  h.tables.practice_assignments = [assignment(A1, T1, SL1), assignment(A2, T1, SL2)];
+  h.tables.practice_exceptions = [
+    {
+      id: uuid(71),
+      organization_id: ORG,
+      assignment_id: A2,
+      withdrawn_at: null,
+      kind: 'relocated',
+      window,
+      practice_slot_id: SL4,
+      cause_kind: 'blackout',
+      cause_id: uuid(72),
+    },
+  ];
+  await openPanel({
+    ...BLACKOUT_F1,
+    blackout: { ...BLACKOUT_F1.blackout, blackout_until: '2026-10-05' },
+  });
+  expect(screen.getByTestId('practice-repair-to')).toHaveTextContent('Pitch 2');
+  expect(!!screen.queryByText(/This move breaks the team.s practice pair/)).toBe(broken);
+});

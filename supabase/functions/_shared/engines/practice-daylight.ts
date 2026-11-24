@@ -119,6 +119,8 @@ export interface VenueDaylight {
 
 /** What the pass reads of one request slot -- and nothing else. */
 export interface DaylightSlot {
+  /** Exact stored clock window when the occupancy bounds had to round a fraction. */
+  pairWindow?: string;
   id: string;
   fieldId: string | null;
   /** The slot's first occurrence, `YYYY-MM-DD` on the season's clock. */
@@ -215,18 +217,20 @@ function wallReading(
  * (`'floor'` for a start, `'ceil'` for an end), so the window read is never
  * narrower than the one stored.
  */
-export function storedWallSeconds(time: unknown, round: 'floor' | 'ceil'): number | null {
+export function storedWallSeconds(time: unknown, round: 'floor' | 'ceil' | 'exact'): number | null {
   const match = /^(\d{1,2}):([0-5]\d)(?::([0-5]\d)(\.\d+)?)?$/.exec(String(time ?? '').trim());
   if (!match) return null;
   const hours = Number(match[1]);
   if (hours > 23) return null;
   const whole = hours * 3600 + Number(match[2]) * 60 + Number(match[3] ?? 0);
   const fraction = match[4] ? Number(match[4]) : 0;
+  if (round === 'exact') return whole + fraction;
   return round === 'ceil' && fraction > 0 ? whole + 1 : whole;
 }
 
 /** One run slot as `practice_slots` stores it. */
 export interface StoredSlot {
+  pairWindow?: string;
   subunitId?: string | null;
   fieldId: string;
   validUntil: string | null;
@@ -290,6 +294,7 @@ export function toDaylightSlot(
   return {
     id: row.id,
     fieldId: stored?.fieldId ?? null,
+    ...(stored?.pairWindow ? { pairWindow: stored.pairWindow } : {}),
     firstDate: stored?.firstDate ?? (sameDay ? start.date : null),
     effectiveUntil:
       stored?.validUntil ?? (isIsoDate(row.effectiveUntil) ? row.effectiveUntil : null),
@@ -373,14 +378,19 @@ export async function loadVenueDaylight(
   const storedById = new Map<string, StoredSlot>();
   for (const row of slotRead.rows as Array<Record<string, unknown>>) {
     if (row.field_id == null) continue; // NOT NULL in the schema; unjudgeable if not
+    const start = storedWallSeconds(row.start_time, 'exact');
+    const end = storedWallSeconds(row.end_time, 'exact');
     storedById.set(String(row.id), {
       fieldId: String(row.field_id).toLowerCase(),
       ...(row.field_subunit_id ? { subunitId: String(row.field_subunit_id).toLowerCase() } : {}),
       validUntil: isIsoDate(row.valid_until) ? row.valid_until : null,
       firstDate: storedFirstDate(row.valid_from, row.day_of_week),
       endMinutes: startMinutesOf(row.end_time),
-      startSeconds: storedWallSeconds(row.start_time, 'floor'),
-      endSeconds: storedWallSeconds(row.end_time, 'ceil'),
+      startSeconds: start === null ? null : Math.floor(start),
+      endSeconds: end === null ? null : Math.ceil(end),
+      ...(start !== null && end !== null && (!Number.isInteger(start) || !Number.isInteger(end))
+        ? { pairWindow: `${start}/${end}` }
+        : {}),
     });
   }
   const unreadSlots = params.slotIds.filter((id) => !storedById.has(id));

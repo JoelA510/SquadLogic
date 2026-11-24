@@ -36,6 +36,7 @@
  */
 
 import { scopedLevelsFor, resolveScopedSetting } from '@squadlogic/core/scopedSettings.js';
+import { applyPracticeExceptions } from '@squadlogic/core/utils/practiceExceptions.js';
 import { DAYLIGHT_UNKNOWN_CAUSE_TEXT } from './daylightReport.js';
 import {
   PRACTICE_REASON,
@@ -192,7 +193,8 @@ export function openPracticeRepair(rows, loss, { timeZone = null, baseFingerprin
       pairsByDivision.get(team.division_id),
     ])
   );
-  return { adapted, result, state, daylightPlan, teamPairs };
+  const partnerWeeks = savedPartnerWeeks(rows, adapted.context, teamPairs);
+  return { adapted, result, state, daylightPlan, teamPairs, partnerWeeks };
 }
 
 /** @param {ReturnType<typeof createRecommendationState>} state @param {string} assignmentId */
@@ -369,6 +371,43 @@ function occurrenceWeeks(from, until, weekday) {
   return firstDate <= lastDate ? [firstDate - day, lastDate - day] : null;
 }
 
+/** Index the saved dates as the team sees them, including both dates in a week crossed by a relocation. */
+function savedPartnerWeeks(rows, context, teamPairs) {
+  const byTeam = new Map();
+  const rawSlots = new Map((rows.practiceSlots ?? []).map((slot) => [slot.id.toLowerCase(), slot]));
+  const pairedRows = context.snapshot.filter((row) => teamPairs.get(row.teamId) && row.range);
+  if (!pairedRows.length) return byTeam;
+  const teamByRow = new Map(pairedRows.map((row) => [row.id, row.teamId]));
+  const projection = applyPracticeExceptions({
+    rows: pairedRows.map((row) => ({
+      id: row.id,
+      effective_date_range: `[${row.range.from},${row.range.until}]`,
+      slot: rawSlots.get(row.slotId),
+    })),
+    exceptions: rows.practiceExceptions
+      .filter((row) => teamByRow.has(row.assignment_id?.toLowerCase()))
+      .map((row) => ({
+        ...row,
+        assignment_id: row.assignment_id.toLowerCase(),
+        slot: rawSlots.get(row.practice_slot_id?.toLowerCase()),
+      })),
+  });
+  for (const occurrence of projection.occurrences) {
+    const teamId = teamByRow.get(occurrence.assignmentId);
+    const day = Date.parse(occurrence.date) / 86400000;
+    const monday = day - ((day + 3) % 7);
+    const weeks = byTeam.get(teamId) ?? new Map();
+    const partners = weeks.get(monday) ?? [];
+    partners.push({
+      id: occurrence.assignmentId,
+      slot: context.slots.get(occurrence.slot?.id?.toLowerCase()),
+    });
+    weeks.set(monday, partners);
+    byTeam.set(teamId, weeks);
+  }
+  return byTeam;
+}
+
 /** Enact saves one row. Only a saved partner (including a saved relocation) is a commitment. */
 function breaksPair(opened, rec) {
   const allowed = opened.teamPairs?.get(rec.teamId);
@@ -377,36 +416,18 @@ function breaksPair(opened, rec) {
   const until = rec.window?.until ?? rec.effectiveUntil;
   const weeks = occurrenceWeeks(from, until, rec.to.weekday);
   if (!weeks) return false;
-  for (const other of opened.adapted.context.snapshot) {
-    if (other.teamId !== rec.teamId || other.id === rec.assignmentId) continue;
-    const slot = opened.adapted.context.slots.get(other.slotId);
-    if (!slot) continue;
-    const exceptions = opened.adapted.context.liveExceptions.get(other.id) ?? [];
-    for (let monday = weeks[0]; monday <= weeks[1]; monday += 7) {
-      const spansWeek = (shape, lo, hi) => {
-        if (!shape) return false;
-        const range = occurrenceWeeks(lo, hi, shape.weekday);
-        return range && range[0] <= monday && monday <= range[1];
-      };
-      if (!other.range || !spansWeek(slot, other.range.from, other.range.until)) continue;
-      const saved = exceptions.find((window) => spansWeek(slot, window.from, window.until));
-      const twin = saved ? opened.adapted.context.slots.get(saved.slotId) : slot;
+  const partners = opened.partnerWeeks.get(rec.teamId);
+  for (let monday = weeks[0]; monday <= weeks[1]; monday += 7) {
+    for (const { id, slot } of partners?.get(monday) ?? []) {
+      if (id === rec.assignmentId) continue;
       if (
-        !twin ||
-        twin.surfaceId !== rec.to.surfaceId ||
-        twin.startMinutes !== rec.to.startMinutes ||
-        twin.durationMinutes !== rec.to.durationMinutes ||
-        !allowed.some(
-          (pair) =>
-            pair ===
-            [rec.to.weekday, twin.weekday]
-              .sort(
-                (a, b) =>
-                  ['MON', 'TUE', 'WED', 'THU', 'FRI'].indexOf(a) -
-                  ['MON', 'TUE', 'WED', 'THU', 'FRI'].indexOf(b)
-              )
-              .join('-')
-              .toLowerCase()
+        !slot ||
+        slot.surfaceId !== rec.to.surfaceId ||
+        slot.startMinutes !== rec.to.startMinutes ||
+        slot.durationMinutes !== rec.to.durationMinutes ||
+        !(
+          allowed.includes(`${rec.to.weekday}-${slot.weekday}`.toLowerCase()) ||
+          allowed.includes(`${slot.weekday}-${rec.to.weekday}`.toLowerCase())
         )
       )
         return true;

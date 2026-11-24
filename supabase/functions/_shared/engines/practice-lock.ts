@@ -277,8 +277,8 @@ export function planTeamsForRun(
  * must not give a team that already practises on a Tuesday a second Tuesday, or the writer's gate
  * refuses the apply. `unchecked` names the teams whose hold cannot be dated -- a row with no slot,
  * a slot the store did not return, or one without readable dates -- so the run is refused for
- * them rather than run blind. Only teams in `needing` are examined: a team needing one practice
- * has no second to misplace, so a run at one a week reads and refuses nothing it did not before.
+ * them rather than run blind. A fully assigned paired team also needs its saved weekdays for the
+ * warning. Other teams without a further practice to place need no outside-slot read.
  */
 export function outsideHoldsFor(
   rows: readonly LoadedPracticeRow[],
@@ -293,7 +293,7 @@ export function outsideHoldsFor(
   const holds: OutsideHold[] = [];
   const unchecked: Array<{ teamId: string; slotId: string | null }> = [];
   for (const row of rows) {
-    if (!needing.has(row.teamId)) continue;
+    if (!needing.has(row.teamId) && !pairedTeams.has(row.teamId)) continue;
     if (row.slotId !== null && runSlotIds.has(row.slotId)) continue;
     const slot = row.slotId === null ? undefined : stored.get(row.slotId);
     if (!slot || slot.firstDate == null || slot.validUntil == null) {
@@ -314,6 +314,7 @@ export function outsideHoldsFor(
               subunitId: slot.subunitId ?? null,
               startSec: slot.startSeconds!,
               endSec: slot.endSeconds!,
+              ...(slot.pairWindow ? { pairWindow: slot.pairWindow } : {}),
             },
           }
         : {}),

@@ -115,6 +115,7 @@ export interface SchedulerSlot {
  * silent). A `DaylightSlot` is one.
  */
 export interface SlotDatingInput {
+  pairWindow?: string;
   /** The slot's first occurrence, `YYYY-MM-DD` on the season's clock. */
   firstDate: string | null;
   /** The last date the slot runs, inclusive. */
@@ -246,6 +247,7 @@ export function undatableSlotIds(
 
 /** A run slot with its dating read (M4.8). */
 export interface DatedSchedulerSlot extends SchedulerSlot {
+  pairWindow?: string;
   firstDay: number;
   lastDay: number;
   startSec: number;
@@ -294,6 +296,7 @@ export function dateSchedulerSlots(
     return {
       ...slot,
       ...read,
+      ...(raw.pairWindow ? { pairWindow: raw.pairWindow } : {}),
       span: span.status === LIVE_SPAN_STATUS.LIVE ? { first: span.first, last: span.last } : null,
       firstDate: raw.firstDate as string,
       lastDate: raw.effectiveUntil as string,
@@ -510,10 +513,10 @@ function wholeValidity(slot: DatedSchedulerSlot): LiveDays | null {
  */
 type PairSlot = Pick<
   DatedSchedulerSlot,
-  'fieldId' | 'subunitId' | 'startSec' | 'endSec' | 'firstDay' | 'span'
+  'fieldId' | 'subunitId' | 'startSec' | 'endSec' | 'pairWindow' | 'firstDay' | 'span'
 >;
 export interface OutsideHold {
-  surface?: Pick<PairSlot, 'fieldId' | 'subunitId' | 'startSec' | 'endSec'>;
+  surface?: Pick<PairSlot, 'fieldId' | 'subunitId' | 'startSec' | 'endSec' | 'pairWindow'>;
   teamId: string;
   /** The first date on the slot's weekday, and its last date: `YYYY-MM-DD`. */
   firstDate: string;
@@ -616,6 +619,7 @@ export function buildLockedOccupancy(
     if (span.status === LIVE_SPAN_STATUS.UNREADABLE)
       span = assignmentLiveSpan({ firstDay, lastDay });
     if (span.status !== LIVE_SPAN_STATUS.LIVE) continue;
+    if (outside.surface && span.last < today) continue;
     if (outside.surface) holdPair(outside.teamId, { ...outside.surface, firstDay, span });
     const held = teamHolds.get(outside.teamId) ?? [];
     held.push({ first: span.first, last: span.last });
@@ -759,6 +763,8 @@ function scoreSchedule(
 // ---------------------------------------------------------------------------
 
 interface OptimizerState {
+  base: BaseOccupancy;
+  pairedUnits: Map<string, PracticeUnit[]>;
   /** Practice units, keyed by unit id (a team's id when it needs one). A locked row is never a key here. */
   assignmentMap: Map<string, string>;
   autoUnits: string[];
@@ -828,6 +834,13 @@ function buildState(
   gate: PreferenceGate
 ): OptimizerState {
   const unitsById = new Map(units.map((u) => [u.unitId, u]));
+  const pairedUnits = new Map<string, PracticeUnit[]>();
+  for (const unit of units) {
+    if (!configuredPairs(teamsById.get(unit.teamId)).length) continue;
+    const group = pairedUnits.get(unit.teamId) ?? [];
+    group.push(unit);
+    pairedUnits.set(unit.teamId, group);
+  }
   const assignmentMap = new Map<string, string>();
   const autoUnits: string[] = [];
   for (const a of placements) {
@@ -846,6 +859,8 @@ function buildState(
   }
 
   return {
+    base,
+    pairedUnits,
     assignmentMap,
     autoUnits,
     slotsById,
@@ -875,7 +890,8 @@ function tryMutate(
 
   const r = rand();
   let mutationType: string;
-  if (hasUnassigned && r < 0.4) mutationType = 'relocate';
+  if (state.pairedUnits.size && rand() < 0.4) mutationType = 'paired-relocate';
+  else if (hasUnassigned && r < 0.4) mutationType = 'relocate';
   else if (hasMultipleAuto && r < 0.85) mutationType = 'swap';
   else if (hasMultipleAuto && autoUnits.length >= 3) mutationType = 'chain-swap';
   else if (hasMultipleAuto) mutationType = 'swap';
@@ -926,7 +942,48 @@ function tryMutate(
     return true;
   };
 
-  if (mutationType === 'swap') {
+  if (mutationType === 'paired-relocate') {
+    // Remove only generated units from this proposal. A saved partner lives in base and
+    // continues to constrain its one movable unit. A rejected proposal is discarded whole.
+    const paired = [...state.pairedUnits.values()];
+    const groupForSingle = (id: string) => [unitsById.get(id)!];
+    const waiting = [
+      ...paired.filter((group) => !newMap.has(group[0].unitId)),
+      ...unassignedUnitIds.map(groupForSingle),
+    ];
+    const placed = [
+      ...paired.filter((group) => newMap.has(group[0].unitId)),
+      ...autoUnits.map(groupForSingle),
+    ];
+    const sample = <T>(items: T[]) => items[Math.floor(rand() * items.length)];
+    const first = waiting.length ? sample(waiting) : sample(paired);
+    const firstIsPaired = state.pairedUnits.has(first[0].teamId);
+    const partners = placed.filter(
+      (group) => group !== first && (firstIsPaired || state.pairedUnits.has(group[0].teamId))
+    );
+    if (!firstIsPaired && !partners.length) return null;
+    const groups = partners.length ? [first, sample(partners)] : [first];
+    for (const group of groups) for (const unit of group) remove(unit.unitId);
+    const slots = [...slotsById.values()];
+    const start = Math.floor(rand() * slots.length);
+    const ordered = [...slots.slice(start), ...slots.slice(0, start)];
+    for (const group of groups) {
+      const team = teamsById.get(group[0].teamId)!;
+      const available = ordered.filter((slot) =>
+        admissible(gate, team, slot, newCoach, newOcc, state.slotCapacity, newHolds)
+      );
+      const pairs = configuredPairs(team);
+      const candidates = pairs.length
+        ? pairedCandidates(available, group.length, state.base, team.id, pairs)
+        : available.map((slot) => [slot]);
+      const choice = leastBreachedChoice(candidates, gate, team.id);
+      if (
+        choice.length !== group.length ||
+        !group.every((unit, i) => add(unit.unitId, choice[i].id))
+      )
+        return null;
+    }
+  } else if (mutationType === 'swap') {
     const i = Math.floor(rand() * autoUnits.length);
     let j = Math.floor(rand() * (autoUnits.length - 1));
     if (j >= i) j++;
@@ -1023,6 +1080,7 @@ function samePair(a: PairSlot, b: PairSlot, pairs: readonly string[]) {
     (a.subunitId ?? null) !== (b.subunitId ?? null) ||
     a.startSec !== b.startSec ||
     a.endSec !== b.endSec ||
+    a.pairWindow !== b.pairWindow ||
     pairingWeek(a.span.first) > pairingWeek(b.span.last) ||
     pairingWeek(b.span.first) > pairingWeek(a.span.last)
   )
@@ -1060,7 +1118,13 @@ function* pairedCandidates(
   const groups = new Map<string, DatedSchedulerSlot[]>();
   for (const slot of available) {
     if (!slot.fieldId) continue;
-    const key = JSON.stringify([slot.fieldId, slot.subunitId ?? null, slot.startSec, slot.endSec]);
+    const key = JSON.stringify([
+      slot.fieldId,
+      slot.subunitId ?? null,
+      slot.startSec,
+      slot.endSec,
+      slot.pairWindow,
+    ]);
     const group = groups.get(key) ?? [];
     group.push(slot);
     groups.set(key, group);
@@ -1072,6 +1136,27 @@ function* pairedCandidates(
       }
     }
   }
+}
+
+function leastBreachedChoice(
+  candidates: Iterable<DatedSchedulerSlot[]>,
+  gate: PreferenceGate,
+  teamId: string
+) {
+  let choice: DatedSchedulerSlot[] = [];
+  let fewest = Infinity;
+  for (const candidate of candidates) {
+    const breaches = candidate.reduce(
+      (total, slot) => total + breachesOf(gate, teamId, slot.id),
+      0
+    );
+    if (breaches < fewest) {
+      choice = candidate;
+      fewest = breaches;
+    }
+    if (fewest === 0) break;
+  }
+  return choice;
 }
 
 function generateGreedySeed(
@@ -1135,19 +1220,11 @@ function generateGreedySeed(
       const available = slots.filter((slot) =>
         admissible(gate, team, slot, coachAssignments, slotOccupants, base.slotCapacity, teamHolds)
       );
-      let choice: DatedSchedulerSlot[] = [];
-      let fewest = Infinity;
-      for (const candidate of pairedCandidates(available, siblings.length, base, team.id, pairs)) {
-        const breaches = candidate.reduce(
-          (total, slot) => total + breachesOf(gate, team.id, slot.id),
-          0
-        );
-        if (breaches < fewest) {
-          choice = candidate;
-          fewest = breaches;
-        }
-        if (fewest === 0) break;
-      }
+      const choice = leastBreachedChoice(
+        pairedCandidates(available, siblings.length, base, team.id, pairs),
+        gate,
+        team.id
+      );
       for (const [i, slot] of choice.entries()) assign(siblings[i], team, slot.id);
       continue;
     }

@@ -386,7 +386,7 @@ describe('the encoding the browser is handed', () => {
     withNaN.slots[3].capacity = Number.NaN;
     assert.throws(() => encodeSolverInput(withNaN, SCOPE), /input\.slots\[3\]\.capacity/);
     const wire = JSON.parse(JSON.stringify(encodeSolverInput(league(), SCOPE)));
-    assert.throws(() => reviveSolverInput({ ...wire, version: 2 }), /version 2/);
+    assert.throws(() => reviveSolverInput({ ...wire, version: 3 }), /version 3/);
     assert.throws(() => reviveSolverInput({ version: 1, input: { teams: [] } }), /lacks its teams/);
     assert.throws(() => reviveSolverInput(null), /not an object/);
   });

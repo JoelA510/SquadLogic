@@ -223,6 +223,7 @@ describe('every required check reports on every pull request', () => {
     },
     'cleanup-raw-imports.yml': { filters: null, jobs: ['cleanup'] },
     'pgtap.yml': { filters: { branches: '[main]' }, jobs: ['pgtap'] },
+    'skill-eval-ci.yml': { filters: { branches: "['main']" }, jobs: ['scan', 'controls'] },
   };
 
   it('reads every workflow (meta: the parser sees each trigger and every job)', () => {

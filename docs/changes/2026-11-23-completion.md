@@ -79,8 +79,8 @@ numbers are as of `7405db3` and will move: search by name.
 | P   | Prep: this plan, the AGENTS.md pointer, the Codex rules, `codex/**` off Vercel            | done                     | this change  | 2026-11-23 |
 | T0  | Toolchain and baseline on the machine                                                     | done                     | no PR        | 2026-11-23 |
 | T1  | Release agent-ready-template                                                              | done                     | template #63 | 2026-11-23 |
-| C15 | Take that release here                                                                    | done                     | this change  | 2026-11-23 |
-| C17 | Skill scan in CI                                                                          | not started              |              |            |
+| C15 | Take that release here                                                                    | done                     | #742         | 2026-11-23 |
+| C17 | Skill scan in CI                                                                          | done                     | this change  | 2026-11-23 |
 | C1  | Close issue #364                                                                          | not started              |              |            |
 | C2  | The weekly keep-alive fails                                                               | not started              |              |            |
 | C3  | Docs match the system                                                                     | not started              |              |            |
@@ -185,6 +185,8 @@ numbers are as of `7405db3` and will move: search by name.
 - Done: both jobs report on the pull request. They are **not** added to the ruleset: the owner adds a required check,
   so report the two check names. A finding the scan raises against one of the three `squadlogic-*` skills is fixed in
   this pull request (both copies); one against a delivered skill is reported upstream, not edited here.
+- **Executed locally, 2026-11-23.** The live workflow uses SquadLogic's existing setup-node and upload-artifact pins.
+  All 13 canonical skills passed. The clean control passed and the scanner rejected both planted defects.
 
 ## Phase 1: build
 

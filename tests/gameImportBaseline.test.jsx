@@ -172,6 +172,29 @@ function renderExports() {
   );
 }
 
+function seedUndatedPractice() {
+  seedMockDb({
+    practice_slots: [
+      {
+        id: 'undated-slot',
+        organization_id: ORG,
+        day_of_week: 'mon',
+        start_time: '15:00',
+        end_time: '16:00',
+      },
+    ],
+    practice_assignments: [
+      {
+        id: 'undated-practice',
+        organization_id: ORG,
+        team_id: TEAMS.t1,
+        practice_slot_id: 'undated-slot',
+        effective_date_range: null,
+      },
+    ],
+  });
+}
+
 beforeEach(async () => {
   await seedWorld();
 });
@@ -183,26 +206,7 @@ afterEach(() => {
 
 describe('(1) the baseline recorded at import is the Exports page’s baseline for the same schedule, row for row', () => {
   it('reports the undated practice left out of the baseline it records', async () => {
-    seedMockDb({
-      practice_slots: [
-        {
-          id: 'undated-slot',
-          organization_id: ORG,
-          day_of_week: 'mon',
-          start_time: '15:00',
-          end_time: '16:00',
-        },
-      ],
-      practice_assignments: [
-        {
-          id: 'undated-practice',
-          organization_id: ORG,
-          team_id: TEAMS.t1,
-          practice_slot_id: 'undated-slot',
-          effective_date_range: null,
-        },
-      ],
-    });
+    seedUndatedPractice();
     render(<ScheduleImportPanel />);
     await toConfirm();
     await confirm();
@@ -358,6 +362,7 @@ describe('(4) a recording that fails is said, and the import still shows as appl
   });
 
   it('C2: the write committed and its answer was lost: the check finds it, and it is said as recorded', async () => {
+    seedUndatedPractice();
     const real = mockSupabase.rpc.bind(mockSupabase);
     vi.spyOn(mockSupabase, 'rpc').mockImplementation(async (name, params) => {
       if (name !== 'admin_publish_schedule_baseline') return real(name, params);
@@ -369,6 +374,9 @@ describe('(4) a recording that fails is said, and the import still shows as appl
     await confirm();
     const notice = await baselineNotice();
     expect(notice.textContent).toMatch(/as published baseline v1, for "Changes since publication"/);
+    expect(notice).toHaveTextContent(
+      '1 practice assignment was omitted because its date or time was incomplete.'
+    );
     expect(within(notice).queryByRole('button', { name: 'Record the baseline again' })).toBeNull();
     expect(await table('publication_baselines')).toHaveLength(1);
   });

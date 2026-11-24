@@ -177,6 +177,7 @@ export function ImportBaselineRecorder({ jobId, fileName, checkFirst = false, on
       // Given up while the rows were made: nothing is written after the screen said nothing was.
       if (settled.current) return null;
       const rows = made.exports.master.rows;
+      const omitted = omittedPracticeNote(made.payload.untimed.practices);
       writing.current = true;
       try {
         const written = await publishBaseline({
@@ -188,10 +189,7 @@ export function ImportBaselineRecorder({ jobId, fileName, checkFirst = false, on
           publishedBy: user?.id ? String(user.id) : 'unknown-actor',
           rows,
         });
-        return recorded(
-          written.baseline_version,
-          omittedPracticeNote(made.payload.untimed.practices)
-        );
+        return recorded(written.baseline_version, omitted);
       } catch (err) {
         // A refusal and a lost answer look alike here: the write may have been made. The baseline is asked after.
         let there;
@@ -202,7 +200,7 @@ export function ImportBaselineRecorder({ jobId, fileName, checkFirst = false, on
             `the recording got no clear answer (${words(err)}) and the check for its baseline failed (${words(checkErr)})`
           );
         }
-        return there ? recorded(there.baselineVersion) : failed(words(err));
+        return there ? recorded(there.baselineVersion, omitted) : failed(words(err));
       }
     };
     record().then(

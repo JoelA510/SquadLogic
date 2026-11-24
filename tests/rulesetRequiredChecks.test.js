@@ -30,7 +30,9 @@ const RULESET_PATH = path.resolve('.github/rulesets/main.json');
 const WORKFLOWS_DIR = path.resolve('.github/workflows');
 
 /** Job-level `if` expressions known to let a `pull_request` event through. */
-const IFS_ADMITTING_PULL_REQUESTS = new Set(["github.event_name != 'schedule'"]);
+const IFS_ADMITTING_PULL_REQUESTS = new Set([
+  "github.event_name != 'schedule' && !inputs.keepalive_only",
+]);
 
 const indentOf = (/** @type {string} */ line) => line.length - line.trimStart().length;
 const unquote = (/** @type {string} */ value) => value.trim().replace(/^(['"])(.*)\1$/, '$2');
@@ -305,7 +307,7 @@ describe('the detectors catch what they guard against (planted workflows)', () =
   it('a job condition that excludes pull requests', () => {
     const pushOnly = plant(
       'ci.yml',
-      "  deno-mirror-tests:\n    if: github.event_name != 'schedule'\n",
+      "  deno-mirror-tests:\n    if: github.event_name != 'schedule' && !inputs.keepalive_only\n",
       "  deno-mirror-tests:\n    if: github.event_name == 'push'\n"
     );
     expect(reportingProblems(pushOnly, 'Deno Mirror Tests')).toEqual([

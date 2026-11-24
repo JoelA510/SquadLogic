@@ -37,25 +37,13 @@ Roles and their permissions are defined in `frontend/src/constants/permissions.j
 - Supabase dashboard → Reports → API requests. Look for spikes in 4xx/5xx.
 - Supabase dashboard → Database → Connection pooling. Free tier limit is 60 direct connections.
 
-**Free-tier keep-alive:**
-Supabase pauses free-tier projects after 7 days of inactivity. The scheduled
-keep-alive lives in `.github/workflows/ci.yml` and validates required secrets
-before pinging the Supabase REST API. It must fail loudly if the project is
-unreachable or secrets are missing.
-
-```yaml
-jobs:
-  keepalive:
-    if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    steps:
-      - run: curl -sf "$SUPABASE_URL/rest/v1/" \
-               -H "apikey: $SUPABASE_ANON_KEY" \
-               -H "Authorization: Bearer $SUPABASE_ANON_KEY"
-        env:
-          SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-```
+**Free-tier keep-alive.** Every Monday the CI workflow sends a database read to
+`/rest/v1/organizations?select=id&limit=1` with the publishable key in the
+`apikey` header. HTTP 200 confirms the read reached the database, including
+when row-level security returns an empty array. The job discards the response
+body. To verify the same job after cutover, run
+`gh workflow run ci.yml --ref main -f keepalive_only=true` and check that
+**Supabase keep-alive** passed.
 
 See [`ci-cd.md`](./ci-cd.md) for the current workflow policy and artifact
 retention.

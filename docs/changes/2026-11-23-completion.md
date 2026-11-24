@@ -80,9 +80,9 @@ numbers are as of `7405db3` and will move: search by name.
 | T0  | Toolchain and baseline on the machine                                                     | done                     | no PR        | 2026-11-23 |
 | T1  | Release agent-ready-template                                                              | done                     | template #63 | 2026-11-23 |
 | C15 | Take that release here                                                                    | done                     | #742         | 2026-11-23 |
-| C17 | Skill scan in CI                                                                          | done                     | this change  | 2026-11-23 |
-| C1  | Close issue #364                                                                          | not started              |              |            |
-| C2  | The weekly keep-alive fails                                                               | not started              |              |            |
+| C17 | Skill scan in CI                                                                          | done                     | #743         | 2026-11-23 |
+| C1  | Close issue #364                                                                          | done                     | issue #364   | 2026-11-23 |
+| C2  | The weekly keep-alive fails                                                               | awaiting main dispatch   | this change  | 2026-11-23 |
 | C3  | Docs match the system                                                                     | not started              |              |            |
 | C4  | UI follow-ups                                                                             | not started              |              |            |
 | C5  | Games import: cleaned headers, one header helper, mock `program_id`, the discard pre-read | not started              |              |            |

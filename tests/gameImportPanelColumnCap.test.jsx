@@ -50,6 +50,16 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+it('catches a repeated marked-up header that the CSV reader automatically renamed', async () => {
+  render(<ScheduleImportPanel />);
+  const csv = '<b>Date</b>,<b>Date</b>\n2026-09-12,2026-09-13';
+  fireEvent.change(screen.getByTestId('schedule-import-file'), {
+    target: { files: [new File([csv], 'repeated.csv', { type: 'text/csv' })] },
+  });
+  expect(await screen.findByRole('alert')).toHaveTextContent(/column "Date" more than once/);
+  expect(start).not.toHaveBeenCalled();
+});
+
 it('the panel’s own parse refuses 201 headers it would send, in words, on step 1, and never starts the import', async () => {
   render(<ScheduleImportPanel />);
   const headers = Array.from({ length: 201 }, (_, i) => `Date${' '.repeat(i)}`);

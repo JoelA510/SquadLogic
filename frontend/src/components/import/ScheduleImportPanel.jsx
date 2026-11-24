@@ -13,12 +13,10 @@ import {
   describeScheduleImportReason,
   describeScheduleImportSkip,
   parseScheduleRows,
-  splitScheduleImportHeaders,
+  prepareGameImportFile,
   proposeScheduleMapping,
   resolveScheduleRows,
   scheduleImportConfirmCounts,
-  scheduleLabelKey,
-  SCHEDULE_IMPORT_COLUMNS,
   SCHEDULE_IMPORT_LIMITS,
 } from '@squadlogic/core/scheduleImport/index.js';
 import { supabase } from '../../lib/supabaseClient.js';
@@ -150,11 +148,6 @@ const practiceCall =
 const KINDS = Object.freeze({
   games: {
     noun: 'games',
-    /** Whether the import reads a column of this name (a repeat of one it reads refuses the file). */
-    headerReader: async () => (/** @type {string} */ name) =>
-      Object.values(SCHEDULE_IMPORT_COLUMNS).some(
-        (column) => scheduleLabelKey(column) === scheduleLabelKey(name)
-      ),
     title: 'Import a game schedule',
     intro:
       'Bring in a schedule that already exists. Conflicts in the file are imported and flagged, never refused; a game with no time is kept on its date as TIME TBD.',
@@ -162,12 +155,15 @@ const KINDS = Object.freeze({
       'Date, Start Time, End Time (or Length in minutes), Venue, Field, Division, Home Team, Away Team. Optional: Game ID, Week. Any other column is dropped and never stored.',
     // The browser's early reading is of what the client SENDS: the columns the import reads, found by name, so a wide
     // file is read whole and never refused for its width (the parse refuses more headers than a request takes).
-    parseFile: (/** @type {any} */ input) =>
-      parseScheduleRows({
-        headers: splitScheduleImportHeaders(input.headers, sanitizeImportText).read,
+    parseFile: (/** @type {any} */ input) => {
+      const sent = prepareGameImportFile({
+        headers: input.headers,
         rows: input.rows,
-        season: input.season,
-      }),
+        clean: sanitizeImportText,
+      });
+      if (sent.refusal) return { ok: false, refusal: sent.refusal };
+      return parseScheduleRows({ headers: sent.headers, rows: sent.rows, season: input.season });
+    },
     start: startGameImport,
     readStaged: readStagedGameRows,
     readLeague: readGameImportLeague,
@@ -221,13 +217,6 @@ const KINDS = Object.freeze({
     columns:
       'Team, Division, Day, Start, End (or Length in minutes), Location (or Venue), Field. Optional: Subunit (or Half, Side), Valid From, Valid Until, Capacity, Use ("hold" for a cell held for a non-team activity). A row with no Team is an open slot. Any other column is dropped and never stored.',
     // The practice parser is loaded when a practice file is read, not with the panel the Games tab loads.
-    // The header as the stage reads it: cleaned first, so a column the CSV reader renamed for a repeat of
-    // `<b>Team</b>` is caught as a repeat of Team (review of PR 739).
-    headerReader: () =>
-      import('@squadlogic/core/practiceImport/parseRows.js').then(
-        (m) => (/** @type {string} */ name) =>
-          m.practiceImportReadsHeader(sanitizeImportText(name, 500))
-      ),
     // The early reading is of what the client SENDS (`preparePracticeImportFile`: the columns the import reads, found
     // and keyed by their cleaned name), so a wide file is read whole and never refused for its width, and the browser
     // reads `<b>Day</b>` as the stage does. Its refusals (two headers of one column, more read headers than a request
@@ -640,21 +629,11 @@ function ScheduleImportWorkflow({
       error: (err) => fail(err, 'The file could not be read as CSV.'),
       complete: async ({ data, meta }) => {
         try {
-          const headers = meta.fields ?? [];
-          // The CSV reader renames an exact repeat of a header (`Date`, `Date_1`) and goes on, so the parse below would
-          // never see two columns of one name and the first would be used without a word. A repeat of a column the
-          // import READS refuses the file; a repeat of one it drops is dropped twice.
-          const readsHeader = await K.headerReader();
-          const repeated = Object.values(meta.renamedHeaders ?? {}).find((original) =>
-            readsHeader(String(original))
+          // Restore the original names so both imports classify exact repeats and aliases in one place.
+          const renamed = meta.renamedHeaders ?? {};
+          const headers = (meta.fields ?? []).map((name) =>
+            Object.hasOwn(renamed, name) ? renamed[name] : name
           );
-          if (repeated !== undefined) {
-            setError(
-              `The file has the column "${String(repeated).trim()}" more than once. Remove one and import again.`
-            );
-            setBusy(null);
-            return;
-          }
           // The browser's own reading is only the early answer for a file that cannot be imported at all (nothing is
           // created for it). What is imported is what the server reads and stages.
           const local = await K.parseFile({
@@ -934,7 +913,7 @@ function ScheduleImportWorkflow({
     }
   };
 
-  /** What is said when a discard found the job was not one to discard (no call was made for it). */
+  /** Explain the saved status when the job can no longer be discarded. */
   const notDiscarded = (status) =>
     APPLIED_STATUSES.has(String(status))
       ? 'That import was applied in the meantime, so it was not discarded. It is listed as the last import, where it can be rolled back.'

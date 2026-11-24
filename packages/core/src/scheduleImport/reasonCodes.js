@@ -180,7 +180,7 @@ export const SCHEDULE_IMPORT_LIMITS = Object.freeze({
   /**
    * The headers one request may SEND (the Edge request shape refuses more with a 400; the stage and the parse refuse
    * more with `too-many-columns`). The browser sends only the columns the import reads, found by name
-   * (`splitScheduleImportHeaders`), so a wide file is never cut by position and never refused for its width.
+   * (`prepareGameImportFile`), so a wide file is never cut by position and never refused for its width.
    */
   MAX_COLUMNS: 200,
 });
@@ -195,6 +195,11 @@ export const SCHEDULE_IMPORT_LIMITS = Object.freeze({
  */
 export function describeTooManyColumns(count, max) {
   return `The file has ${count} columns; one import reads at most ${max}. Remove the columns it does not need and choose it again.`;
+}
+
+/** @param {number} count */
+export function describeTooManyRows(count) {
+  return `The file has ${count.toLocaleString('en-US')} rows; one import takes at most ${SCHEDULE_IMPORT_LIMITS.MAX_ROWS.toLocaleString('en-US')}. Split it and import the parts one after the other.`;
 }
 
 const DESCRIPTIONS = Object.freeze({

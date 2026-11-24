@@ -109,6 +109,11 @@ function world() {
   const R1 = U(61);
   return {
     season_settings: [{ id: SEASON, organization_id: ORG, status: 'active', name: 'Spring' }],
+    programs: [
+      { id: U(880), organization_id: ORG, season_settings_id: U(881), is_default: true },
+      { id: U(882), organization_id: ORG, season_settings_id: SEASON, is_default: false },
+      { id: U(883), organization_id: ORG, season_settings_id: SEASON, is_default: true },
+    ],
     divisions: [
       { id: D1, organization_id: ORG, season_settings_id: SEASON, name: 'Org A U10' },
       { id: D2, organization_id: ORG, season_settings_id: SEASON, name: 'Org A U12' },
@@ -618,6 +623,12 @@ describe('the mock applies the world as the database does', () => {
   it('the apply equals the dry run in every count, list and warning', () => {
     expect(applied.error).toBeNull();
     expect(strip(applied.data)).toEqual(strip(dry.data));
+  });
+
+  it('assigns the imported division to the default program of its own season', () => {
+    const created = db.divisions.filter((d) => d.id !== D1 && d.id !== D2);
+    expect(created).toHaveLength(1);
+    expect(created[0].program_id).toBe(U(883));
   });
 
   it("its numbers are the pgTAP file's, which the file asserts", () => {

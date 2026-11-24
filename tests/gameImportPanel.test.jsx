@@ -120,6 +120,15 @@ afterEach(() => {
 });
 
 describe('upload: the file is read by the server, and what it kept or refused is said', () => {
+  it('reads the Date cells under a marked-up header and reaches mapping', async () => {
+    render(<ScheduleImportPanel />);
+    upload(fileCsv().replace('Date', '<b>Date</b>'));
+    await waitFor(() => expect(step()).toMatch(/2 of 4/));
+    expect(screen.getByTestId('schedule-import-staged')).toHaveTextContent(
+      '13 rows read. 10 placed games, 2 with no time (TIME TBD), 1 that cannot be imported.'
+    );
+  });
+
   it('stages the file and lists the rows it kept and changed, and the rows it cannot import', async () => {
     const invoke = vi.spyOn(mockSupabase.functions, 'invoke');
     render(<ScheduleImportPanel />);
@@ -744,16 +753,11 @@ describe('the adversarial review of the panel (R1, R2, R3, R4, R8, R10)', () => 
     await toMapping();
     // the notice of the earlier roll back is gone once a new file is in hand
     expect(screen.queryByTestId('schedule-import-rolled-back')).toBeNull();
-    // (the division the first import created was kept by its roll back, so it is matched now, not created)
-    expect(select('U07 Girls').value).toMatch(/^map:/);
-    choose('Visiting Club A (U05 Boys)', 'outside');
-    choose('Field 9 (Venue A)', 'create');
-    choose('U07G Team 01 (U07 Girls)', 'create');
-    choose('U07G Team 02 (U07 Girls)', 'create');
+    // The new division had its default program when written, so rollback removed it with the other created records.
+    expect(select('U07 Girls').value).toBe('undecided');
+    decideEverything();
     await toPreview();
-    fireEvent.click(screen.getByLabelText('Create the 4 records listed above'));
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm and import' }));
-    await waitFor(() => expect(step()).toMatch(/4 of 4/));
+    await confirmWithAck();
     expect(step()).toMatch(/the import is applied/);
     expect(screen.getByTestId('schedule-import-applied')).toBeTruthy();
     expect(screen.queryByTestId('schedule-import-rolled-back')).toBeNull();
@@ -997,10 +1001,7 @@ describe('R5: a staged import that is left does not wait for its confirm forever
   });
 });
 
-describe('G1: a confirm whose answer is lost is resolved from the stored job, and no discard is sent blind', () => {
-  // `cancel_ready_import_job` as deployed marks ANY games job `failed`, an applied one too (the mock does the same):
-  // a discard sent for a job that was applied leaves its games saved, hides the job from the roll back and audits a
-  // false `import.canceled`. So the panel never reaches that call without having read the job as `ready_to_apply`.
+describe('G1: a lost confirm is resolved from the job, and the guarded discard preserves an applied import', () => {
   const jobs = () => table('import_jobs');
   const cancels = (rpc) => rpc.mock.calls.filter(([name]) => name === 'cancel_ready_import_job');
   const toConfirm = async () => {
@@ -1135,7 +1136,7 @@ describe('G1: a confirm whose answer is lost is resolved from the stored job, an
     expect((await jobs())[0].status).toMatch(/^completed/);
   });
 
-  it('Cancel on a job that was applied meanwhile (another tab) sends no discard: the import stays, with its roll back', async () => {
+  it('Cancel on a job that another tab applied reports the guarded refusal and keeps the rollback', async () => {
     render(<ScheduleImportPanel />);
     await toConfirm();
     const [job] = await jobs();
@@ -1148,12 +1149,13 @@ describe('G1: a confirm whose answer is lost is resolved from the stored job, an
     const rpc = vi.spyOn(mockSupabase, 'rpc');
     fireEvent.click(button('Cancel this import'));
     await waitFor(() => expect(step()).toMatch(/1 of 4/));
-    expect(cancels(rpc)).toEqual([]);
+    expect(cancels(rpc)).toHaveLength(1);
+    expect(await screen.findByText(/That import was applied in the meantime/)).toBeVisible();
     expect((await jobs())[0].status).toMatch(/^completed/);
     expect(await screen.findByTestId('schedule-import-last')).toBeInTheDocument();
   });
 
-  it('"Discard it" on an unfinished import that was applied meanwhile sends no discard', async () => {
+  it('"Discard it" reports when another tab has applied the unfinished import', async () => {
     const { startGameImport, saveGameImportMapping, previewGameImport, confirmGameImport } =
       await import('../frontend/src/utils/gameImportClient.js');
     const { scheduleImportConfirmCounts } =
@@ -1180,11 +1182,12 @@ describe('G1: a confirm whose answer is lost is resolved from the stored job, an
     const rpc = vi.spyOn(mockSupabase, 'rpc');
     fireEvent.click(within(notice).getByRole('button', { name: 'Discard it' }));
     await waitFor(() => expect(screen.queryByTestId('schedule-import-unfinished')).toBeNull());
-    expect(cancels(rpc)).toEqual([]);
+    expect(cancels(rpc)).toHaveLength(1);
+    expect(await screen.findByText(/That import was applied in the meantime/)).toBeVisible();
     expect((await jobs())[0].status).toBe(before);
   });
 
-  it('the discard itself: a job that cannot be read is not discarded, and the read’s failure is thrown', async () => {
+  it('discard needs a readable job only to settle a refused cancel, and propagates that read’s failure', async () => {
     const { startGameImport, discardGameImport } =
       await import('../frontend/src/utils/gameImportClient.js');
     const started = await startGameImport(mockSupabase, {
@@ -1196,20 +1199,18 @@ describe('G1: a confirm whose answer is lost is resolved from the stored job, an
     });
     const broken = breakTheJobRead();
     const rpc = vi.spyOn(mockSupabase, 'rpc');
-    await expect(discardGameImport(mockSupabase, started.jobId)).rejects.toThrow(/Failed to fetch/);
-    expect(cancels(rpc)).toEqual([]);
-    broken.on = false;
-    expect((await jobs())[0].status).toBe('ready_to_apply');
-    // CONTROL: read as waiting, it is discarded; asked again, it is not sent a second time
     await expect(discardGameImport(mockSupabase, started.jobId)).resolves.toEqual({
       discarded: true,
       status: 'ready_to_apply',
     });
+    await expect(discardGameImport(mockSupabase, started.jobId)).rejects.toThrow(/Failed to fetch/);
+    broken.on = false;
     await expect(discardGameImport(mockSupabase, started.jobId)).resolves.toEqual({
       discarded: false,
       status: 'failed',
     });
-    expect(cancels(rpc)).toHaveLength(1);
+    expect(cancels(rpc)).toHaveLength(3);
+    expect((await jobs())[0].status).toBe('failed');
   });
 
   it('CONTROL: the mock’s cancel is the SQL’s (20261122010000): called blind on a completed job it is refused, and the job keeps its status', async () => {

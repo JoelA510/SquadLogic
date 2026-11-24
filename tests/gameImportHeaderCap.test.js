@@ -6,8 +6,8 @@
  * a Week, a Home Team) was dropped while its values stayed in the rows. Refusing a wide file would be wrong too: a
  * registration platform's export can be wide, and such a file imported before. So:
  *
- * - **The browser sends only the columns the import reads, found by name** (`splitScheduleImportHeaders`, which cleans
- *   a header as the stage does). A Home Team at column 230 of 250 is read; a file of 201 columns imports.
+ * - **The browser sends only the columns the import reads, found by name** (`prepareGameImportFile` cleans the header
+ *   and keys each row by that name). A Home Team at column 230 of 250 is read; a file of 201 columns imports.
  * - **More than 200 headers SENT** cannot happen through the client today (the import reads eleven names); the client
  *   refuses it in words before a job is made, and every layer behind it refuses it too: the request shape (a 400, which
  *   the mock answers as the Edge does), the stage in core and the Edge mirror, counted as sent with a blank header
@@ -18,6 +18,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { startGameImport } from '../frontend/src/utils/gameImportClient.js';
 import { handleGameImportFunction } from '../frontend/src/lib/mockGameImport.js';
 import {
+  prepareGameImportFile,
   splitScheduleImportHeaders,
   stageScheduleChunk,
 } from '../packages/core/src/scheduleImport/staging.js';
@@ -126,6 +127,31 @@ describe('which headers the browser sends: the ones the import reads, by name', 
 });
 
 describe('the client: a wide file imports, read by name, and never cut', () => {
+  it('sends cleaned header names and reads each cell from the original file key', async () => {
+    const client = recordingClient();
+    const long = ' '.repeat(520) + '<b>Home Team</b>';
+    const headers = HEADERS.map((h) =>
+      h === 'Home Team' ? long : h === 'Date' ? '<i>Date</i>' : h
+    );
+    await start(client, headers, [
+      { ...wideRow(headers), [long]: 'Team A', '<i>Date</i>': row.Date },
+    ]);
+    const body = sentBody(client);
+    expect(body.headers).toEqual(HEADERS);
+    expect(body.rows[0]).toMatchObject({ 'Home Team': 'Team A', Date: row.Date });
+    expect(Object.keys(body.rows[0])).toEqual(HEADERS);
+  });
+
+  it('refuses two headers that clean to the same column before creating a job', async () => {
+    const client = recordingClient();
+    const headers = [...HEADERS, '<i>Date</i>'];
+    await expect(start(client, headers, [wideRow(headers)])).rejects.toMatchObject({
+      code: 'duplicate-column',
+    });
+    expect(client.rpc).not.toHaveBeenCalled();
+    expect(client.functions.invoke).not.toHaveBeenCalled();
+  });
+
   it('a 250-column file with Home Team at column 230 imports and sends the Home Team', async () => {
     const client = recordingClient();
     const headers = wide(250, 'Home Team', 230);
@@ -220,5 +246,20 @@ describe('the mock answers more than 200 headers as the Edge request shape does:
     // CONTROL: the shape takes 200, so the answer is the next check's (no such job)
     const at200 = call(wide(200, 'Game ID', 200));
     expect(at200.error.context.status).toBe(404);
+  });
+});
+
+it('refuses an over-limit file before reading any cell', () => {
+  const readDate = vi.fn(() => '2026-09-12');
+  const source = Object.defineProperty({}, 'Date', { get: readDate, enumerable: true });
+  const prepared = prepareGameImportFile({
+    headers: HEADERS,
+    rows: Array(2401).fill(source),
+    clean: sanitizeImportText,
+  });
+  expect(readDate).not.toHaveBeenCalled();
+  expect(prepared.refusal).toMatchObject({
+    code: 'too-many-rows',
+    message: expect.stringContaining('2,401'),
   });
 });

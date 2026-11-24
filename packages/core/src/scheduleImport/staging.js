@@ -28,12 +28,19 @@ import {
   teamDecisionKey,
   venueDecisionKey,
 } from './mapping.js';
-import { SCHEDULE_IMPORT_COLUMNS, parseScheduleRows } from './parseRows.js';
+import {
+  SCHEDULE_IMPORT_COLUMNS,
+  parseScheduleRows,
+  scheduleImportColumnOf,
+  describeScheduleDuplicateColumn,
+} from './parseRows.js';
+import { classifyImportHeaders, prepareImportFile } from './prepareImportFile.js';
 import {
   SCHEDULE_IMPORT_LIMITS,
   SCHEDULE_IMPORT_REASON,
   SCHEDULE_IMPORT_STAGED_FLAGS,
   describeTooManyColumns,
+  describeTooManyRows,
 } from './reasonCodes.js';
 
 /** The staged flags as plain text, for a membership test of any code. */
@@ -134,26 +141,37 @@ export const SCHEDULE_IMPORT_CHUNK_LIMITS = Object.freeze({
  * @returns {{ read: string[], dropped: string[] }}
  */
 export function splitScheduleImportHeaders(headers, clean) {
-  if (!Array.isArray(headers)) {
-    throw new TypeError('splitScheduleImportHeaders: headers must be an array');
-  }
-  if (typeof clean !== 'function') {
-    throw new TypeError('splitScheduleImportHeaders: clean must be the cell cleaner');
-  }
-  const keys = new Set(
-    Object.values(SCHEDULE_IMPORT_COLUMNS).map((name) => scheduleLabelKey(name))
+  const { read, dropped } = classifyImportHeaders(
+    headers,
+    clean,
+    SCHEDULE_IMPORT_CHUNK_LIMITS.MAX_CELL_LENGTH,
+    scheduleImportColumnOf
   );
-  /** @type {string[]} */
-  const read = [];
-  /** @type {string[]} */
-  const dropped = [];
-  for (const header of headers) {
-    const cleaned = clean(header, SCHEDULE_IMPORT_CHUNK_LIMITS.MAX_CELL_LENGTH);
-    if (cleaned.trim() === '') continue;
-    if (keys.has(scheduleLabelKey(cleaned))) read.push(String(header ?? ''));
-    else dropped.push(cleaned.trim());
+  return { read: read.map((h) => h.raw), dropped };
+}
+
+/** Prepare the games file for the browser's early parse and the Edge request.
+ * @param {Parameters<typeof prepareImportFile>[0]} file
+ */
+export function prepareGameImportFile(file) {
+  if (Array.isArray(file.rows) && file.rows.length > SCHEDULE_IMPORT_LIMITS.MAX_ROWS) {
+    return {
+      refusal: {
+        code: SCHEDULE_IMPORT_REASON.TOO_MANY_ROWS,
+        message: describeTooManyRows(file.rows.length),
+      },
+      headers: [],
+      rows: [],
+      dropped: [],
+    };
   }
-  return { read, dropped };
+  return prepareImportFile(file, {
+    maxLength: SCHEDULE_IMPORT_CHUNK_LIMITS.MAX_CELL_LENGTH,
+    maxColumns: SCHEDULE_IMPORT_LIMITS.MAX_COLUMNS,
+    columnOf: scheduleImportColumnOf,
+    tooMany: describeTooManyColumns,
+    duplicate: describeScheduleDuplicateColumn,
+  });
 }
 
 /**

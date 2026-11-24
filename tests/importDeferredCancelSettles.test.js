@@ -119,11 +119,13 @@ describe('discardGameImport (review of #725, R10)', () => {
     const queue = [...statuses];
     const c = {
       rpcCalls: 0,
+      reads: 0,
       rpc: async () => {
         c.rpcCalls += 1;
         return rpc;
       },
       from: () => {
+        c.reads += 1;
         const b = {
           select: () => b,
           eq: () => b,
@@ -138,26 +140,22 @@ describe('discardGameImport (review of #725, R10)', () => {
     return c;
   }
 
-  it('a job applied between the read and the call: not discarded, and its status is read again, not thrown', async () => {
+  it('a refused discard reads the status once after the RPC answers', async () => {
     const { discardGameImport } = await import('../frontend/src/utils/gameImportClient.js');
-    const c = gameClient(['ready_to_apply', 'completed'], { data: null, error: REFUSAL });
+    const c = gameClient(['completed'], { data: null, error: REFUSAL });
     expect(await discardGameImport(c, 'j1')).toEqual({ discarded: false, status: 'completed' });
     expect(c.rpcCalls).toBe(1);
+    expect(c.reads).toBe(1);
   });
 
-  it('CONTROL: a job read as applied is not sent at all, and one that is waiting is discarded', async () => {
+  it('a successful discard settles without reading the job', async () => {
     const { discardGameImport } = await import('../frontend/src/utils/gameImportClient.js');
-    const applied = gameClient(['completed'], { data: null, error: REFUSAL });
-    expect(await discardGameImport(applied, 'j1')).toEqual({
-      discarded: false,
-      status: 'completed',
-    });
-    expect(applied.rpcCalls).toBe(0);
     const waiting = gameClient(['ready_to_apply'], { data: { status: 'canceled' }, error: null });
     expect(await discardGameImport(waiting, 'j1')).toEqual({
       discarded: true,
       status: 'ready_to_apply',
     });
+    expect(waiting.reads).toBe(0);
   });
 
   it('another refusal of the cancel is thrown in words', async () => {
@@ -167,5 +165,6 @@ describe('discardGameImport (review of #725, R10)', () => {
       error: { code: '42501', message: 'Access denied' },
     });
     await expect(discardGameImport(c, 'j1')).rejects.toThrow('Access denied');
+    expect(c.reads).toBe(0);
   });
 });

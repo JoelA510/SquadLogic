@@ -57,6 +57,7 @@ import {
   SCHEDULE_IMPORT_LIMITS,
   SCHEDULE_IMPORT_REASON as R,
   describeTooManyColumns,
+  describeTooManyRows,
 } from './reasonCodes.js';
 import { SCHEDULE_IMPORT_COLUMNS, SCHEDULE_IMPORT_TEMPLATE_HEADER } from './columns.js';
 
@@ -64,6 +65,12 @@ import { SCHEDULE_IMPORT_COLUMNS, SCHEDULE_IMPORT_TEMPLATE_HEADER } from './colu
 // needs the header row does not load this parser. They are re-exported here: one list, wherever it is read from.
 export { SCHEDULE_IMPORT_COLUMNS, SCHEDULE_IMPORT_TEMPLATE_HEADER };
 const C = SCHEDULE_IMPORT_COLUMNS;
+const COLUMNS_BY_KEY = new Map(Object.values(C).map((name) => [scheduleLabelKey(name), name]));
+/** @param {string} name */
+export const scheduleImportColumnOf = (name) => COLUMNS_BY_KEY.get(scheduleLabelKey(name));
+/** @param {string} column */
+export const describeScheduleDuplicateColumn = (column) =>
+  `The file has the column "${column}" more than once. Remove one and import again.`;
 
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const US_DATE = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
@@ -332,20 +339,15 @@ export function parseScheduleRows({ headers, rows, season, rowOffset = 0 }) {
   const header = new Map();
   /** @type {string[]} */
   const droppedColumns = [];
-  const byKey = new Map(Object.values(C).map((name) => [scheduleLabelKey(name), name]));
   for (const raw of headers) {
     const written = String(raw ?? '');
-    const canonical = byKey.get(scheduleLabelKey(written));
+    const canonical = scheduleImportColumnOf(written);
     if (canonical === undefined) {
       if (written.trim() !== '') droppedColumns.push(written.trim());
       continue;
     }
     if (header.has(canonical)) {
-      return fileRefusal(
-        R.DUPLICATE_COLUMN,
-        `The file has the column "${canonical}" more than once. Remove one and import again.`,
-        canonical
-      );
+      return fileRefusal(R.DUPLICATE_COLUMN, describeScheduleDuplicateColumn(canonical), canonical);
     }
     header.set(canonical, written);
   }
@@ -403,10 +405,7 @@ export function parseScheduleRows({ headers, rows, season, rowOffset = 0 }) {
     );
   }
   if (rowOffset + rows.length > SCHEDULE_IMPORT_LIMITS.MAX_ROWS) {
-    return fileRefusal(
-      R.TOO_MANY_ROWS,
-      `The file has ${(rowOffset + rows.length).toLocaleString('en-US')} rows; one import takes at most ${SCHEDULE_IMPORT_LIMITS.MAX_ROWS.toLocaleString('en-US')}. Split it and import the parts one after the other.`
-    );
+    return fileRefusal(R.TOO_MANY_ROWS, describeTooManyRows(rowOffset + rows.length));
   }
 
   /** @param {Record<string, unknown>} row @param {string} column */

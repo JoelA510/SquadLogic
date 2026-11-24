@@ -29,6 +29,7 @@ import {
   diffScheduleImportConfirmCounts,
   isScheduleImportConfirmCounts,
   parseScheduleRows,
+  prepareGameImportFile,
   scheduleImportConfirmCounts,
   scheduleLabelKey,
   stageScheduleChunk as stageWithCleaner,
@@ -158,6 +159,23 @@ describe('the Edge mirror stages what core stages', () => {
 
   it('every vector, key for key', () => {
     for (const v of TABLE.vectors) expect(run(v), v.name).toEqual(v.expected);
+  });
+
+  it('browser column projection preserves the staged rows and named omissions of every accepted vector', () => {
+    const accepted = TABLE.vectors.filter((v) => !v.expected.refusal);
+    expect(accepted.length).toBeGreaterThan(10);
+    for (const v of accepted) {
+      const sent = prepareGameImportFile({ ...v, clean: sanitizeImportText });
+      expect(sent.refusal, v.name).toBeNull();
+      const input = { ...v, headers: sent.headers, rows: sent.rows };
+      for (const result of [run(input), plain(stageScheduleChunk(input))]) {
+        expect(result.refusal, v.name).toBeNull();
+        expect(result.staged, v.name).toEqual(v.expected.staged);
+        expect([...sent.dropped, ...result.summary.dropped_columns], v.name).toEqual(
+          v.expected.summary.dropped_columns
+        );
+      }
+    }
   });
 
   // One test per host zone, each with its own timeout. Timed (fix round 3 of #726): the three zones as ONE test took

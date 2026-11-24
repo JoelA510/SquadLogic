@@ -169,7 +169,7 @@ These are set in **GitHub → Repository Settings → Secrets and Variables → 
 | Variable | Required | Secret | Purpose |
 |---|---|---|---|
 | `VITE_SUPABASE_URL` | Scheduled keep-alive | No | Supabase URL used by the weekly keep-alive job |
-| `VITE_SUPABASE_ANON_KEY` | Scheduled keep-alive | **Yes** | Anon key used by the weekly keep-alive job |
+| `VITE_SUPABASE_ANON_KEY` | Scheduled keep-alive | **Yes** | Project publishable key sent in the weekly database read's `apikey` header |
 
 The E2E job runs against mock Supabase data and sets its test account values in
 `.github/workflows/ci.yml`; those values are not required as repository secrets

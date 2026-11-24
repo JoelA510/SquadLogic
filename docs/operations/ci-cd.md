@@ -81,10 +81,11 @@ HTML report and trace zip before changing feature files or assertions.
 
 ## Scheduled Jobs
 
-The weekly keep-alive job validates `VITE_SUPABASE_URL` and
-`VITE_SUPABASE_ANON_KEY`, then pings the Supabase REST API. Missing secrets
-or API failures fail the scheduled run; the workflow must not silently hide a
-paused or unreachable project.
+Every Monday at 12:00 UTC, the keep-alive job reads at most one organization ID
+through the Supabase REST API. It requires the repository secrets
+`VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (the publishable key).
+Missing secrets, a transport error or any HTTP status other than 200 fail the
+job. To run just this check, use `gh workflow run ci.yml --ref main -f keepalive_only=true`.
 
 The weekly dependency audit (Mondays 06:00 UTC) is described under
 [Dependency audit](#dependency-audit).
@@ -654,9 +655,9 @@ repository), the Vercel deployment check, and the migration harness
 blocks the pull request forever, so each must report on every pull request to
 `main`, including docs-only ones. `ci.yml`, `pgtap.yml`, `audit.yml`,
 `workflow-audit.yml` and `e2e-real-backend.yml` have no `paths` or
-`paths-ignore` filter on `pull_request`; the two `ci.yml` jobs' only `if` is
-`github.event_name != 'schedule'`, and the pgTAP, audit, zizmor and
-real-backend E2E jobs have none. `Build & Test` runs on a docs-only pull request too: its docs-only path
+`paths-ignore` filter on `pull_request`. The two required `ci.yml` jobs skip
+scheduled runs and explicit keep-alive-only dispatches. The pgTAP, audit, zizmor and
+real-backend E2E jobs have no job condition. `Build & Test` runs on a docs-only pull request too: its docs-only path
 skips the build steps inside the job, and the job itself still reports.
 `tests/rulesetRequiredChecks.test.js` reads every workflow in
 `.github/workflows/` and fails if a required context matches no job's `name`

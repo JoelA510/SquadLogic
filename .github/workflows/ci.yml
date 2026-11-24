@@ -8,7 +8,12 @@ on:
   schedule:
     # Keep the Supabase free-tier project alive (pauses after 7 days idle)
     - cron: '0 12 * * 1' # Every Monday at noon UTC
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      keepalive_only:
+        description: Run only the weekly Supabase keep-alive on main
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -29,13 +34,19 @@ env:
   SUPABASE_CLI_VERSION: 2.118.0
 
 jobs:
-  # ── Supabase keep-alive (scheduled runs only) ────────────────
+  # ── Supabase keep-alive ─────────────────────────────────────
   keepalive:
     name: Supabase keep-alive
-    if: github.event_name == 'schedule'
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.keepalive_only)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Require the default branch
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Run the Supabase keep-alive from main."
+          exit 1
+
       - name: Validate keep-alive secrets
         run: |
           if [ -z "${SUPABASE_URL}" ]; then
@@ -50,18 +61,21 @@ jobs:
           SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
-      - name: Ping Supabase REST API
+      - name: Read one organization ID through the Supabase REST API
         run: |
-          curl -sf "$SUPABASE_URL/rest/v1/" \
-            -H "apikey: $SUPABASE_ANON_KEY" \
-            -H "Authorization: Bearer $SUPABASE_ANON_KEY"
+          status=$(curl --silent --show-error --max-time 30 --output /dev/null --write-out '%{http_code}' \
+            -H "apikey: $SUPABASE_ANON_KEY" "${SUPABASE_URL%/}/rest/v1/organizations?select=id&limit=1")
+          if [ "$status" != 200 ]; then
+            echo "::error::Supabase keep-alive returned HTTP $status."
+            exit 1
+          fi
         env:
           SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
-  # ── Main CI (push and PR only) ──────────────────────────────
+  # ── Main CI ─────────────────────────────────────────────────
   build-and-test:
-    if: github.event_name != 'schedule'
+    if: github.event_name != 'schedule' && !inputs.keepalive_only
     name: Build & Test
     runs-on: ubuntu-latest
     # Coverage, the build and the mock E2E (191 scenarios, --workers=1) took 34-35 min on
@@ -304,7 +318,7 @@ jobs:
   # list in the db harness, and fixed the same way: discovery, a floor, and an
   # exclusion table that is itself checked. See scripts/deno-mirror-tests.sh.
   deno-mirror-tests:
-    if: github.event_name != 'schedule'
+    if: github.event_name != 'schedule' && !inputs.keepalive_only
     name: Deno Mirror Tests
     runs-on: ubuntu-latest
     timeout-minutes: 10

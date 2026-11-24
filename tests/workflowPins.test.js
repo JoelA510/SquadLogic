@@ -97,6 +97,30 @@ function releaseProblems(texts) {
 const workflowFiles = readdirSync(WORKFLOWS_DIR).filter((f) => /\.ya?ml$/.test(f));
 const read = (/** @type {string} */ f) => readFileSync(path.join(WORKFLOWS_DIR, f), 'utf8');
 
+describe('weekly Supabase keep-alive', () => {
+  const ci = read(CI_WORKFLOW).replaceAll('\r\n', '\n');
+  const job = ci.split('\n  keepalive:\n')[1]?.split('\n  build-and-test:\n')[0] ?? '';
+
+  it('runs the same job on the weekly schedule and an explicit main-branch dispatch', () => {
+    expect(ci).toContain("cron: '0 12 * * 1'");
+    expect(ci).toMatch(
+      /workflow_dispatch:\n {4}inputs:\n {6}keepalive_only:[\s\S]*?type: boolean\n {8}default: false/
+    );
+    expect(job).toContain(
+      "if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.keepalive_only)"
+    );
+    expect(job).toContain("if: github.ref != 'refs/heads/main'");
+  });
+
+  it('reads at most one organization ID using the publishable key and discards the body', () => {
+    expect(job).toContain('/rest/v1/organizations?select=id&limit=1');
+    expect(job).toContain('-H "apikey: $SUPABASE_ANON_KEY"');
+    expect(job).not.toContain('Authorization: Bearer');
+    expect(job).toContain('--output /dev/null');
+    expect(job).toMatch(/if \[ "\$status" != 200 \]; then\n[^\n]+\n\s+exit 1/);
+  });
+});
+
 describe('action pins: the scanner can fail', () => {
   const step = (/** @type {string} */ uses) =>
     [

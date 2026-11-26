@@ -32,6 +32,7 @@ import { validateEvaluationRow } from '../utils/importEvaluations.js';
 import { useDemo } from '../hooks/useDemo.js';
 import { importFileSizeProblem } from '../utils/importFileLimits.js';
 import EvaluationImportSummary from './EvaluationImportSummary.jsx';
+import FieldImportRefusals from './FieldImportRefusals.jsx';
 
 // A demo opens this instead of the file picker (D4). Lazy: only a demo visitor ever needs it.
 const DemoImportNotice = lazy(() => import('./DemoImportNotice.jsx'));
@@ -233,6 +234,12 @@ export default function ImportPanel({ onImport }) {
     evaluationSeasonId !== currentSeasonSetting.id;
   const coachRollbackComplete = importedCoaches?.persistence?.rollback?.status === 'rolled_back';
   const fieldRollbackComplete = importedFields?.persistence?.rollback?.status === 'rolled_back';
+  const fieldJobId = activeJob?.id ?? importedFields?.importJobId;
+  const refusedFieldCount =
+    activeJob?.warning_summary?.field_finalize?.invalid_rows ??
+    (importedFields?.importJobId === fieldJobId
+      ? importedFields?.persistence?.result?.invalid_rows
+      : 0);
   const canRollbackImport =
     isComplete &&
     ((workflowImportType === 'coaches' &&
@@ -589,6 +596,19 @@ export default function ImportPanel({ onImport }) {
             </div>
           )}
 
+          {isComplete &&
+            workflowImportType === 'fields' &&
+            !fieldRollbackComplete &&
+            currentOrganization?.id &&
+            fieldJobId &&
+            refusedFieldCount > 0 && (
+              <FieldImportRefusals
+                key={currentOrganization.id + '/' + fieldJobId}
+                organizationId={currentOrganization.id}
+                jobId={fieldJobId}
+                expected={refusedFieldCount}
+              />
+            )}
           {/* E3c: what the evaluations import will change (its dry run), then what it changed. */}
           {workflowImportType === 'evaluations' && (isReadyToApply || isComplete) && (
             <EvaluationImportSummary

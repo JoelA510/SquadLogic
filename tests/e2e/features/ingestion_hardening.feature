@@ -67,3 +67,9 @@ Feature: Ingestion Hardening for CSV Imports
     Then the field slot CSV import should be ready to apply without changing facilities
     When I apply the reviewed field slot CSV import
     Then the field slot CSV import should update the facilities database
+
+  Scenario: Correcting a field import that names a missing division
+    Given I upload a field slot CSV with an unknown division on the second data row
+    When I validate the field slot CSV import for later review
+    And I apply the field import with the unknown division
+    Then I can identify the refused field row and its correction

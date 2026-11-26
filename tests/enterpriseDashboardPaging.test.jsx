@@ -82,8 +82,9 @@ describe('EnterpriseDashboard players read', () => {
     mocks.refuseFrom = 1000;
     render(<EnterpriseDashboard />);
     const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('Players could not be loaded');
+    expect(alert).toHaveTextContent('Report could not be loaded');
     expect(alert).toHaveTextContent('page refused');
-    expect(screen.queryByText('1000')).toBeNull();
+    expect(screen.queryByText('Total Players')).toBeNull();
+    expect(screen.queryByText('Active Teams')).toBeNull();
   });
 });

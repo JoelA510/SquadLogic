@@ -73,6 +73,8 @@ export default function EnterpriseDashboard() {
       if (!seasonId) {
         // No season to describe (20261108010000: players belong to one season).
         setPlayers([]);
+        setMetrics({ teams: 0, users: 0 });
+        setLoadError(null);
         setLoading(false);
         return;
       }
@@ -83,11 +85,11 @@ export default function EnterpriseDashboard() {
         // Players are paged: an unranged select is cut at the server's row cap (1000), and the
         // distributions below would describe the first thousand as the whole league. A page
         // that fails throws, so the charts never draw from part of the players.
-        const [pData, { data: orgData }] = await Promise.all([
+        const [pData, { data: orgData, error: metricsError }] = await Promise.all([
           fetchAllPages(() =>
             supabase
               .from('players')
-              .select('id, custom_attributes, team_id, division')
+              .select('id, custom_attributes')
               .eq('organization_id', orgId)
               .eq('season_settings_id', seasonId)
           ),
@@ -100,15 +102,11 @@ export default function EnterpriseDashboard() {
             .single(),
         ]);
         if (cancelled) return;
+        if (metricsError)
+          throw new Error(`Season totals could not be loaded: ${metricsError.message}`);
         setLoadError(null);
         setPlayers(pData);
-
-        if (orgData) {
-          setMetrics({
-            teams: orgData.total_teams,
-            users: orgData.total_users,
-          });
-        }
+        setMetrics({ teams: orgData?.total_teams ?? 0, users: orgData?.total_users ?? 0 });
       } catch (err) {
         if (cancelled) return;
         logger.error(err);
@@ -162,13 +160,17 @@ export default function EnterpriseDashboard() {
     );
   }
 
+  if (loadError) {
+    return (
+      <div>
+        <h1>Enterprise Dashboard</h1>
+        <DataErrorBanner message={`Report could not be loaded: ${loadError}`} />
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-7xl mx-auto space-y-8 animate-fadeIn">
-      <DataErrorBanner
-        message={
-          loadError && `Players could not be loaded, so nothing below is shown: ${loadError}`
-        }
-      />
       {/* Header */}
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
@@ -196,7 +198,11 @@ export default function EnterpriseDashboard() {
 
       {/* Primary KPI Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-bg-surface border border-border-subtle bg-bg-glass rounded-2xl p-6 shadow-md relative overflow-hidden group">
+        <div
+          role="group"
+          aria-label="Total Players"
+          className="bg-bg-surface border border-border-subtle bg-bg-glass rounded-2xl p-6 shadow-md relative overflow-hidden group"
+        >
           <div className="absolute top-0 right-0 w-32 h-32 bg-brand-glow rounded-full blur-[60px] opacity-30 transition-transform group-hover:scale-150" />
           <div className="flex flex-col relative z-10">
             <span className="text-text-muted text-sm font-bold uppercase tracking-wider mb-2 flex items-center gap-2">

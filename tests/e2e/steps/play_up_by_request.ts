@@ -1,6 +1,7 @@
 import { createBdd } from 'playwright-bdd';
 import { expect, type Page } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
+import { storeFixtureRegistrations } from './storedRegistrationFixture.js';
 import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, When, Then } = createBdd();
@@ -65,6 +66,7 @@ async function writeImport(page: Page, rows: MockRow[]) {
     },
     { rows, createdAt: new Date(Date.now() + 60_000).toISOString(), mockOrgId: MOCK_ORG_ID }
   );
+  await storeFixtureRegistrations(page, 'import-play-up');
 }
 
 const row = (
@@ -203,11 +205,14 @@ Given(
           db.programs.push(program);
         }
         db.divisions = db.divisions ?? [];
+        const previous = db.divisions.find(
+          (row) => row.season_settings_id === season.id && row.name === divisionName
+        );
         db.divisions = db.divisions.filter(
           (row) => !(row.season_settings_id === season.id && row.name === divisionName)
         );
         db.divisions.push({
-          id: `e2e-division-${divisionName.toLowerCase().replace(/\s+/g, '-')}`,
+          id: previous?.id ?? `e2e-division-${divisionName.toLowerCase().replace(/\s+/g, '-')}`,
           organization_id: orgId,
           season_settings_id: season.id,
           program_id: program.id,
@@ -247,6 +252,9 @@ Given(
         );
         if (!season) throw new Error(`no active season for ${orgId}`);
         const stored = rows.map((row) => ({
+          division_id: db.divisions.find(
+            (d) => d.season_settings_id === season.id && d.name === row.division
+          )?.id,
           id: row.id,
           organization_id: orgId,
           season_settings_id: season.id,

@@ -1,6 +1,7 @@
 import { createBdd } from 'playwright-bdd';
 import { expect } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
+import { storeFixtureRegistrations } from './storedRegistrationFixture.js';
 import { MOCK_ORG_ID, MOCK_SEASON_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, When, Then } = createBdd();
@@ -54,6 +55,7 @@ When('I change the {string} input to {string}', async ({ page }, label: string, 
     }
   );
 
+  await storeFixtureRegistrations(page, 'import-constraints');
   await page.goto('/teams');
   await expect(page.getByRole('heading', { name: /Teaming & Analysis/i }).first()).toBeVisible({
     timeout: 15000,

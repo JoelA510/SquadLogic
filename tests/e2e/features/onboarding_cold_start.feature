@@ -16,6 +16,18 @@ Feature: Cold-start organization creation
     Then I should see an inline slug error on onboarding
     And I should remain on the onboarding organization creation route
 
+  Scenario: An existing administrator enters the newly created organization
+    Given I am logged in as an administrator
+    When I complete and submit the onboarding organization form
+    Then I should land on Season Setup
+    And the setup header identifies "Cold Start Club"
+
+  Scenario: An existing administrator enters the organization joined through the form
+    Given I am logged in as an administrator
+    And another onboarded organization has invited me
+    When I join that organization using the onboarding form
+    Then the active organization in the header is "Inviting Club"
+
   Scenario: Logged out user can reach reset password route
     Given I am logged out
     When I visit the reset password route

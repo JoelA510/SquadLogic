@@ -34,6 +34,41 @@ Given('I am logged out', async ({ page }) => {
 });
 
 When('I visit the root path', async ({ page }) => page.goto('/'));
+
+Given('another onboarded organization has invited me', async ({ page }) => {
+  await waitForMockClient(page);
+  await page.evaluate(() => {
+    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+    const organization = {
+      id: 'd1022985-cded-4f21-8bee-47c1baf1d784',
+      name: 'Inviting Club',
+      is_onboarded: true,
+    };
+    db.organizations = [...(db.organizations || []), organization];
+    db.organization_invites = [
+      ...(db.organization_invites || []),
+      { organization_id: organization.id, code: 'TEST-JOIN', role: 'admin' },
+    ];
+    window.__saveMockDB__(db);
+  });
+});
+
+When('I join that organization using the onboarding form', async ({ page }) => {
+  await page.goto('/organizations/new');
+  await page.getByRole('button', { name: 'Join with invite code' }).click();
+  await page.getByLabel('Invite Code', { exact: true }).fill('TEST-JOIN');
+  await page.getByRole('button', { name: 'Join Organization' }).click();
+});
+
+Then('the setup header identifies {string}', async ({ page }, name: string) => {
+  await expect(page.getByRole('banner').getByText(name, { exact: true })).toBeVisible();
+});
+
+Then('the active organization in the header is {string}', async ({ page }, name: string) => {
+  await expect(
+    page.getByRole('button', { name: 'Active Organization: ' + name, exact: true })
+  ).toBeVisible();
+});
 When('I visit the reset password route', async ({ page }) => page.goto('/auth/reset-password'));
 When('I visit invite code route {string}', async ({ page }, code: string) =>
   page.goto(`/invite/${code}`)

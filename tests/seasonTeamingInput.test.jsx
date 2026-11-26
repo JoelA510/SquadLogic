@@ -100,6 +100,29 @@ describe('saved registrations as teaming input', () => {
     });
   });
 
+  it('uses the same registration aliases and first matching data row as the player finalizer', async () => {
+    state.file = {
+      scope: 'club/fall',
+      data: [
+        { player_id: 'reg-a', dob: '2016-01-02' },
+        { registration_id: 'reg-a', dob: '2019-01-02' },
+        { gotsport_id: 'reg-b', dob: '2017-04-03' },
+      ],
+    };
+    state.read.mockResolvedValue({
+      data: [
+        { id: 'a', external_registration_id: 'reg-a' },
+        { id: 'b', external_registration_id: 'reg-b' },
+      ],
+    });
+    const { result } = renderHook(useSeasonTeamingInput);
+    await waitFor(() => expect(result.current.importedData?.totalRows).toBe(2));
+    expect(result.current.importedData.data.map((row) => row.dob)).toEqual([
+      '2016-01-02',
+      '2017-04-03',
+    ]);
+  });
+
   it('ignores an old file and a delayed old-season read on a switch and surfaces a failed new-season read', async () => {
     let release;
     state.read.mockImplementationOnce(

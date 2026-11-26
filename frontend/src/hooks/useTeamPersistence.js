@@ -50,31 +50,28 @@ async function fetchLatestRunsPerDivision(organizationId, seasonSettingsId) {
 
 export function useTeamPersistence() {
   const { currentOrganization, currentSeasonSetting } = useOrganization();
-  const [persistenceSnapshot, setPersistenceSnapshot] = useState(EMPTY_PERSISTENCE_SNAPSHOT);
-  const [loading, setLoading] = useState(true);
+  const organizationId = currentOrganization?.id;
+  const seasonId = currentSeasonSetting?.id;
+  const [result, setResult] = useState(null);
   // Bumping refreshKey re-runs the fetch effect — e.g. after a sync persists a new run, so a
   // same-session re-run sees the just-persisted teams instead of the stale pre-sync snapshot.
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
-    if (!currentOrganization?.id || !currentSeasonSetting?.id) {
-      setPersistenceSnapshot(EMPTY_PERSISTENCE_SNAPSHOT);
-      setLoading(false);
-      return;
-    }
+    if (!organizationId || !seasonId) return;
+    let current = true;
 
     async function fetchPersistenceHistory() {
-      setLoading(true);
       try {
         // Fetch recent team runs scoped to the current organization
         let runQuery = supabase
           .from('scheduler_runs')
           .select('*')
           .eq('run_type', 'team')
-          .eq('organization_id', currentOrganization.id)
+          .eq('organization_id', organizationId)
           .order('created_at', { ascending: false });
 
-        runQuery = scopeSchedulerRunsToActiveSeason(runQuery, currentSeasonSetting.id);
+        runQuery = scopeSchedulerRunsToActiveSeason(runQuery, seasonId);
 
         // Fetch a wider window than we display so payloadByDivision (below) can preserve a
         // re-run of a division whose last run is older than the few most-recent ones. Very
@@ -82,13 +79,11 @@ export function useTeamPersistence() {
         // The windowed history read and the per-division RPC are independent — issue them together.
         const [{ data: runs, error }, latestPerDivision] = await Promise.all([
           runQuery.limit(20),
-          fetchLatestRunsPerDivision(currentOrganization.id, currentSeasonSetting.id),
+          fetchLatestRunsPerDivision(organizationId, seasonId),
         ]);
 
-        if (error) {
-          logger.error('Error fetching persistence history:', error);
-          return;
-        }
+        if (!current) return;
+        if (error) throw error;
 
         // Map the few most-recent runs to the format expected by TeamPersistencePanel.
         const history = runs.slice(0, 5).map((run) => ({
@@ -122,13 +117,13 @@ export function useTeamPersistence() {
               completedAt: lastRun.completed_at,
             }
           : {
-              organizationId: currentOrganization.id,
-              seasonId: currentSeasonSetting.id,
-              seasonSettingsId: currentSeasonSetting.id,
+              organizationId,
+              seasonId,
+              seasonSettingsId: seasonId,
               runType: 'team',
             };
 
-        setPersistenceSnapshot({
+        const snapshot = {
           manualOverrides: [], // No table for overrides yet
           runHistory: history,
           lastRunId: lastRun?.id || null,
@@ -141,18 +136,41 @@ export function useTeamPersistence() {
             teamPlayerRows: lastRun?.results?.team_players || [],
           },
           payloadByDivision: buildPayloadByDivision(runsForDivisionMap),
-        });
+        };
+        setResult({ organizationId, seasonId, refreshKey, snapshot, error: null });
       } catch (err) {
+        if (!current) return;
         logger.error('Failed to init persistence snapshot:', err);
-      } finally {
-        setLoading(false);
+        setResult({
+          organizationId,
+          seasonId,
+          refreshKey,
+          snapshot: EMPTY_PERSISTENCE_SNAPSHOT,
+          error: 'Could not load saved team history. Retry before generating teams.',
+        });
       }
     }
 
     fetchPersistenceHistory();
-  }, [currentOrganization?.id, currentSeasonSetting?.id, refreshKey]);
+    return () => {
+      current = false;
+    };
+  }, [organizationId, seasonId, refreshKey]);
 
   const refresh = useCallback(() => setRefreshKey((key) => key + 1), []);
 
-  return { persistenceSnapshot, loading, refresh };
+  const matches = Boolean(
+    organizationId &&
+    seasonId &&
+    result &&
+    result.organizationId === organizationId &&
+    result.seasonId === seasonId &&
+    result.refreshKey === refreshKey
+  );
+  return {
+    persistenceSnapshot: matches ? result.snapshot : EMPTY_PERSISTENCE_SNAPSHOT,
+    loading: Boolean(organizationId && seasonId) && !matches,
+    error: matches ? result.error : null,
+    refresh,
+  };
 }

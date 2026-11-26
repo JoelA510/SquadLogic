@@ -27,7 +27,7 @@ export default function WorkflowPage() {
   // page has ever had. `error` it DOES return, now that it stops swallowing
   // the three fetch failures underneath it.
   const { team, practice, game, loading, error: dataError, errors } = useDashboardData();
-  const { persistenceSnapshot, loading: _persistenceLoading } = useTeamPersistence();
+  const { persistenceSnapshot, error: persistenceError } = useTeamPersistence();
   const { importedData, rosterError } = useSeasonTeamingInput();
   const { theme: _theme } = useTheme();
   const { currentOrganization } = useOrganization();
@@ -55,7 +55,7 @@ export default function WorkflowPage() {
 
   const location = useLocation();
 
-  const readError = rosterError ?? dataError;
+  const readError = rosterError ?? persistenceError ?? dataError;
   const error = navError ?? (readError === dismissedDataError ? null : readError);
 
   const dismissError = () => {

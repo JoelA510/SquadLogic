@@ -38,6 +38,8 @@ const state = vi.hoisted(() => ({
   divisionRows: [],
   /** @type {string[]} the `select` text of each read of `divisions` */
   divisionSelects: [],
+  divisionWrites: vi.fn(),
+  hasCurrentFile: true,
   seasonStatus: 'active',
 }));
 
@@ -66,16 +68,13 @@ vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   }),
 }));
 vi.mock('../frontend/src/contexts/ImportContext.jsx', () => ({
-  useImport: () => ({ importedData: { data: state.rows } }),
+  useImport: () => ({ importedData: state.hasCurrentFile ? { data: state.rows } : null }),
 }));
 vi.mock('../frontend/src/contexts/AuthContext.jsx', () => ({
   useAuth: () => ({ session: null, user: { id: 'admin-user' } }),
 }));
 vi.mock('../frontend/src/hooks/useTeamPersistence.js', () => ({
   useTeamPersistence: () => ({ persistenceSnapshot: null, loading: false, refresh: () => {} }),
-}));
-vi.mock('../frontend/src/hooks/useAutoRunOnNavigate.js', () => ({
-  useAutoRunOnNavigate: () => {},
 }));
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
@@ -109,6 +108,7 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
       return createChainMock({ data: rows, error: null });
     },
     rpc: async (name, params) => {
+      if (name === 'admin_upsert_division_settings') state.divisionWrites(params);
       if (name === 'admin_bulk_update_players') {
         state.bulkUpdates.push(params);
         return state.bulkError
@@ -188,6 +188,8 @@ function reset() {
   state.bulkError = null;
   state.divisionRows = [];
   state.divisionSelects = [];
+  state.divisionWrites.mockClear();
+  state.hasCurrentFile = true;
   state.seasonStatus = 'active';
 }
 
@@ -220,5 +222,26 @@ describe('the Teams page on a completed season', () => {
     });
     expect(button).toBeDisabled();
     expect(state.bulkUpdates).toHaveLength(0);
+  });
+
+  it('shows the correction for a historical unassigned player reached from Start Teaming before writing rules', async () => {
+    state.hasCurrentFile = false;
+    state.durablePlayers = [
+      {
+        id: 'p-one',
+        external_registration_id: 'one',
+        first_name: 'A',
+        last_name: 'Example',
+        division_id: null,
+      },
+    ];
+    render(
+      <MemoryRouter initialEntries={[{ pathname: '/teams', state: { autoRunTeaming: true } }]}>
+        <TeamAnalysisPage />
+      </MemoryRouter>
+    );
+    expect(await screen.findByText(/These saved players have no division/)).toBeVisible();
+    expect(screen.getByRole('button', { name: /Generate Teams/ })).toBeDisabled();
+    expect(state.divisionWrites).not.toHaveBeenCalled();
   });
 });

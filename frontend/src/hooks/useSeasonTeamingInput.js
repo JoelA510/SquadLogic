@@ -34,7 +34,12 @@ export function useSeasonTeamingInput() {
         );
         // A late or corrected file can contain only one of the season's players. Carry over
         // transient hints for matching registrations while counting everyone on the saved roster.
-        const hints = new Map((live?.data ?? []).map((row) => [getPlayerExternalId(row), row]));
+        const hints = new Map();
+        for (const row of live?.data ?? []) {
+          // The finalizer promotes the first valid row for a registration ID, in file order.
+          const registration = getPlayerExternalId(row);
+          if (registration && !hints.has(registration)) hints.set(registration, row);
+        }
         const idsByRegistration = new Map(
           rows
             .filter((row) => row.external_registration_id)

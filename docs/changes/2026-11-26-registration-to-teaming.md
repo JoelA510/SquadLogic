@@ -12,3 +12,7 @@ Approved scope, November 26, 2026. Restore the path from an empty season to revi
 4. Apply the migration in CI after review. Ship a guarded revert and smoke test. Retest on the hosted UI using a new synthetic season. The migration changes the finalizer prospectively. An administrator can reimport the original file to repair an earlier unassigned registration. No league-wide backfill.
 
 The repair uses existing registration fields and membership checks. It requires no dependency, new user data category, preference change, or league-wide reshuffle. The test-suite audit and desktop build retain their own completion gates.
+
+## Reviewed division and season identity
+
+A reviewed division retains its saved key after a rename. If another division takes that old name, its durable ID distinguishes its roster. Changing clubs or seasons hides the previous history immediately and discards late responses. A failed history read offers a retry before team generation. Dashboard generation checks the same division prerequisites as the Teams button. During the immediate import, transient hints follow the first matching registration in source order, including the supported player ID alias.

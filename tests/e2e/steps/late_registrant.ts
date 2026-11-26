@@ -52,6 +52,35 @@ Given('the saved division is now named {string}', async ({ page }, currentName: 
 });
 
 Given(
+  'the former division name belongs to a new division with a different player',
+  async ({ page }) => {
+    await page.evaluate(
+      ({ name, newDivision, newPlayer }) => {
+        const db = window.__MOCK_DB__ as MockDb;
+        const run = db.scheduler_runs?.find((row) => row.id === 'late-saved-run');
+        if (!run || !db.divisions || !db.players) throw new Error('Missing the reviewed season');
+        const scope = {
+          organization_id: run.organization_id,
+          season_settings_id: run.season_settings_id,
+        };
+        db.divisions.push({ ...scope, id: newDivision, name });
+        db.players.push({
+          ...scope,
+          id: newPlayer,
+          first_name: 'New',
+          last_name: 'Division',
+          status: 'active',
+          division_id: newDivision,
+          external_registration_id: 'new-division-registration',
+        });
+        window.__saveMockDB__(db);
+      },
+      { name: DIVISION, newDivision: uuid(300), newPlayer: uuid(301) }
+    );
+  }
+);
+
+Given(
   'the U12 Boys roster was saved as the teams Falcons and Herons with three players each',
   async ({ page }) => {
     await waitForMockClient(page);

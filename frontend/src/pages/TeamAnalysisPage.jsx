@@ -80,15 +80,22 @@ function getImportedRows(importedData, persistenceSnapshot) {
     // Older reviewed runs used the file's division label as their key. Retain that key
     // (also after a rename) so reloading cannot turn a reviewed rerun into fresh generation.
     const keysById = new Map();
+    const idByReviewedKey = new Map();
     for (const [key, payload] of Object.entries(persistenceSnapshot?.payloadByDivision ?? {})) {
       const id = payload.teamRows?.find((team) => team.division_id)?.division_id;
       // The persistence map visits the newest run first, including when two labels share an ID.
       if (id && !keysById.has(id)) keysById.set(id, key);
+      if (id) idByReviewedKey.set(key, id);
     }
-    return importedData.data.map((row) => ({
-      ...row,
-      teamingDivisionKey: keysById.get(row.division_id) ?? row.division_name ?? row.division_id,
-    }));
+    return importedData.data.map((row) => {
+      const owner = idByReviewedKey.get(row.division_name);
+      // A new division can reuse the former name of a reviewed one. Its roster gets its own key.
+      const fallback = owner && owner !== row.division_id ? row.division_id : row.division_name;
+      return {
+        ...row,
+        teamingDivisionKey: keysById.get(row.division_id) ?? fallback ?? row.division_id,
+      };
+    });
   }
   if (Array.isArray(importedData.data)) return importedData.data;
   if (Array.isArray(importedData.fullData)) return importedData.fullData;
@@ -1020,6 +1027,7 @@ export default function TeamAnalysisPage() {
   const {
     persistenceSnapshot,
     loading: persistenceLoading,
+    error: persistenceError,
     refresh: refreshPersistence,
   } = useTeamPersistence();
   const { importedData, rosterError } = useSeasonTeamingInput();
@@ -1638,6 +1646,9 @@ export default function TeamAnalysisPage() {
     selectedProgram,
   ]);
 
+  const generationBlocked =
+    Boolean(persistenceError) || validationErrors.some((error) => error.type !== 'generation');
+
   const resolveGeneratorPlayers = useCallback(
     async (rowsForProgram, selectedProgramKey, selectedDivisionId) => {
       const { ids, externalIds } = collectPlayerLookupKeys(rowsForProgram);
@@ -1705,6 +1716,8 @@ export default function TeamAnalysisPage() {
   );
 
   const handleGenerateTeams = useCallback(async () => {
+    // The dashboard's Start Teaming intent calls the same handler as the button.
+    if (seasonReadOnly || generationBlocked) return;
     setIsGenerating(true);
     setGenerationError(null);
     setPlacementAnnouncement('');
@@ -2056,6 +2069,8 @@ export default function TeamAnalysisPage() {
     skillTierEnabled,
     playDownEnabled,
     heldSeats,
+    seasonReadOnly,
+    generationBlocked,
     configs,
     canManageTeams,
     features,
@@ -2461,7 +2476,12 @@ export default function TeamAnalysisPage() {
     <div
       className={`animate-fadeIn space-y-8 w-full ${canEditTeams ? '' : 'max-w-[65ch] mx-auto'}`}
     >
-      <DataErrorBanner message={rosterError || dataError} />
+      <DataErrorBanner message={persistenceError || rosterError || dataError} />
+      {persistenceError && (
+        <Button variant="secondary" onClick={refreshPersistence}>
+          Retry team history
+        </Button>
+      )}
       <SeasonReadOnlyNote />
       <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
         {stagedReview ? placementAnnouncement : ''}
@@ -2579,10 +2599,7 @@ export default function TeamAnalysisPage() {
                 }
                 saving={selectedProgram ? savingConfigId === selectedProgram.id : false}
                 saveDisabled={
-                  !canManageTeams ||
-                  !selectedProgram ||
-                  divisionRows === null ||
-                  validationErrors.some((error) => error.type !== 'generation')
+                  !canManageTeams || !selectedProgram || divisionRows === null || generationBlocked
                 }
                 saveMessage={configSaveMessage}
               />
@@ -2599,7 +2616,8 @@ export default function TeamAnalysisPage() {
                 seasonReadOnly ||
                 isActuallyGenerating ||
                 divisionRows === null ||
-                validationErrors.some((error) => error.type !== 'generation')
+                persistenceLoading ||
+                generationBlocked
               }
               className="flex items-center gap-2"
             >

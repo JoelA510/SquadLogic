@@ -52,6 +52,7 @@ Feature: A late registrant and a roster that has already been reviewed
 
   Scenario: A division renamed since the review keeps its saved teams
     Given the saved division is now named "Junior Boys"
+    And the former division name belongs to a new division with a different player
     When I re-run teaming from the dashboard workflow
     Then the page reports 2 saved teams kept and 1 late player seated
     And the saved teams keep their ids and original players

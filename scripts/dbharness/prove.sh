@@ -292,6 +292,7 @@ M80="$REPO/supabase/migrations/20261123010000_practice_import.sql"
 M81="$REPO/supabase/migrations/20261124010000_settings_scope.sql"
 PAIRING="$REPO/supabase/migrations/20261127010000_paired_practice_days.sql"
 GAME_IMPORT_GUARDS="$REPO/supabase/migrations/20261125010000_game_import_guards.sql"
+SCHEDULE_IMPORT_PREVIEWS="$REPO/supabase/migrations/20261129010000_schedule_import_preview_updates.sql"
 LEGACY_GAMES_RETIRE="$REPO/supabase/migrations/20261126010000_retire_legacy_games.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
@@ -5602,7 +5603,7 @@ plant "M69 the season of a named game is not checked" "$M71" \
 #   - the guard's rollback exemption is gone, so the rollback cannot take a Published game back;
 #   - the metrics view counts an outside club as one of the organization's teams (the condition is kept in the text, so the
 #     migration's own end-state check, which wants the view to name the column, does not catch it first).
-plant "M70 a dry run writes" "$GAME_IMPORT_GUARDS" \
+plant "M70 a dry run writes" "$SCHEDULE_IMPORT_PREVIEWS" \
   "    IF v_dry THEN
         RETURN v_result;
     END IF;" \
@@ -5611,14 +5612,14 @@ plant "M70 a dry run writes" "$GAME_IMPORT_GUARDS" \
     END IF;" \
   "smoke 20261121010000"
 
-plant "M70 a Game ID is matched by its tuple, not by (season, Game ID)" "$GAME_IMPORT_GUARDS" \
+plant "M70 a Game ID is matched by its tuple, not by (season, Game ID)" "$SCHEDULE_IMPORT_PREVIEWS" \
   "                                AND CASE WHEN w.game_id IS NOT NULL
                                          THEN ga.season_settings_id = v_season AND ga.external_ref = w.game_id" \
   "                                AND CASE WHEN false
                                          THEN ga.season_settings_id = v_season AND ga.external_ref = w.game_id" \
   "smoke 20261121010000"
 
-plant "M70 a held game is updated, not skipped" "$GAME_IMPORT_GUARDS" \
+plant "M70 a held game is updated, not skipped" "$SCHEDULE_IMPORT_PREVIEWS" \
   "            WHEN g.match_id = ANY (v_held) THEN 'skip-held'" \
   "            WHEN false THEN 'skip-held'" \
   "smoke 20261121010000"
@@ -5633,7 +5634,7 @@ plant "M70 the rollback does not judge a TIME TBD game against what the apply le
   "                        ELSE false END) x;" \
   "smoke 20261121010000"
 
-plant "M70 a re-import is never nothing to apply" "$GAME_IMPORT_GUARDS" \
+plant "M70 a re-import is never nothing to apply" "$SCHEDULE_IMPORT_PREVIEWS" \
   "    v_nothing := (v_work = 0);" \
   "    v_nothing := false;" \
   "smoke 20261121010000"
@@ -5657,7 +5658,7 @@ plant "M70 the stored mapping's audit row cites no job" "$M70" \
   "        PERFORM public.record_audit_event(v_job.organization_id, 'import.mapped', 'import_job', gen_random_uuid()," \
   "smoke 20261121010000"
 
-plant "M70 two labels that create one team are two creations" "$GAME_IMPORT_GUARDS" \
+plant "M70 two labels that create one team are two creations" "$SCHEDULE_IMPORT_PREVIEWS" \
   "               first_value(k3.own_id) OVER (PARTITION BY k3.kind, k3.division_ref, public.normalise_external_label(k3.cname) ORDER BY k3.tkey) AS new_id," \
   "               k3.own_id AS new_id," \
   "smoke 20261121010000"
@@ -5671,36 +5672,44 @@ plant "M70 two labels that create one team are two creations" "$GAME_IMPORT_GUAR
 # The pgTAP files (supabase/tests/game_import_round2.sql and game_import_apply_rollback.sql) hold the full table; the plants
 # the smoke does not catch (a venue, a division, an outside club named with a run of spaces; another Game ID on a held TIME
 # TBD tuple; the conversion warning) were run against the pgTAP stand-in only and are in the pull request.
-plant "M70 the shells' team run carries no teamsByDivision" "$GAME_IMPORT_GUARDS" \
-  "                'teamsByDivision', v_grouped," \
-  "                'teamsByDivisionMissing', v_grouped," \
+plant "M70 the shells' team run carries no teamsByDivision" "$SCHEDULE_IMPORT_PREVIEWS" \
+  "                      FROM _gi_team t
+                     WHERE t.kind = 'shell' AND t.creator AND t.division_ref = v_div.division_ref AND t.new_id = ANY (v_shell_arr)), '[]'::jsonb));
+            END LOOP;
+            v_results := v_base || jsonb_build_object(
+                'teamsByDivision', v_grouped," \
+  "                      FROM _gi_team t
+                     WHERE t.kind = 'shell' AND t.creator AND t.division_ref = v_div.division_ref AND t.new_id = ANY (v_shell_arr)), '[]'::jsonb));
+            END LOOP;
+            v_results := v_base || jsonb_build_object(
+                'teamsByDivisionMissing', v_grouped," \
   "smoke 20261121010000"
 
-plant "M70 a TIME TBD game is not found by its Game ID" "$GAME_IMPORT_GUARDS" \
+plant "M70 a TIME TBD game is not found by its Game ID" "$SCHEDULE_IMPORT_PREVIEWS" \
   "                            AND ((w.game_id IS NOT NULL AND s.external_ref = w.game_id)" \
   "                            AND ((false AND s.external_ref = w.game_id)" \
   "smoke 20261121010000"
 
-plant "M70 a TIME TBD game's date is not stored" "$GAME_IMPORT_GUARDS" \
+plant "M70 a TIME TBD game's date is not stored" "$SCHEDULE_IMPORT_PREVIEWS" \
   "v_run_id, t.game_id, t.gdate
           FROM _gi_t t WHERE t.verdict = 'insert';" \
   "v_run_id, t.game_id, NULL
           FROM _gi_t t WHERE t.verdict = 'insert';" \
   "smoke 20261121010000"
 
-plant "M70 a held game's TIME TBD row converts it" "$GAME_IMPORT_GUARDS" \
+plant "M70 a held game's TIME TBD row converts it" "$SCHEDULE_IMPORT_PREVIEWS" \
   "            WHEN t.ga_id IS NOT NULL AND t.ga_id = ANY (v_held) THEN 'skip-held'" \
   "            WHEN false THEN 'skip-held'" \
   "smoke 20261121010000"
 
-plant "M70 a swap has no step-out" "$GAME_IMPORT_GUARDS" \
+plant "M70 a swap has no step-out" "$SCHEDULE_IMPORT_PREVIEWS" \
   "         WHERE ga.id IN (SELECT g.match_id FROM _gi_g g WHERE g.verdict = 'update' AND g.leaves)
            AND EXISTS (SELECT 1 FROM _gi_g h" \
   "         WHERE false AND ga.id IN (SELECT g.match_id FROM _gi_g g WHERE g.verdict = 'update' AND g.leaves)
            AND EXISTS (SELECT 1 FROM _gi_g h" \
   "smoke 20261121010000"
 
-plant "M70 a swap is a clash (the games the file moves still hold their places)" "$GAME_IMPORT_GUARDS" \
+plant "M70 a swap is a clash (the games the file moves still hold their places)" "$SCHEDULE_IMPORT_PREVIEWS" \
   "                          AND g2.id NOT IN (SELECT x.match_id FROM _gi_g x WHERE x.verdict = 'update' AND x.leaves)
                           AND g2.id NOT IN (SELECT t.ga_id FROM _gi_t t WHERE t.conv));" \
   "                          AND g2.id NOT IN (SELECT x.match_id FROM _gi_g x WHERE false)
@@ -5716,7 +5725,7 @@ plant "M70 the rollback does not step a swapped pair out of the unique place" "$
            IS DISTINCT FROM ((r.previous_payload" \
   "smoke 20261121010000"
 
-plant "M70 a team name with a run of spaces is not the name that exists" "$GAME_IMPORT_GUARDS" \
+plant "M70 a team name with a run of spaces is not the name that exists" "$SCHEDULE_IMPORT_PREVIEWS" \
   "                    WHERE t.division_id = j.division_existing AND public.normalise_external_label(t.name) = public.normalise_external_label(j.cname))) AS name_taken," \
   "                    WHERE t.division_id = j.division_existing AND lower(btrim(t.name)) = lower(btrim(j.cname)))) AS name_taken," \
   "smoke 20261121010000"
@@ -5728,7 +5737,7 @@ plant "M70 the rollback does not stand a converted game up again" "$GAME_IMPORT_
     GET DIAGNOSTICS n_games_reinserted = ROW_COUNT;" \
   "smoke 20261121010000"
 
-plant "M70 a placed game made TIME TBD is not warned" "$GAME_IMPORT_GUARDS" \
+plant "M70 a placed game made TIME TBD is not warned" "$SCHEDULE_IMPORT_PREVIEWS" \
   "              FROM _gi_t t WHERE t.conv) w;" \
   "              FROM _gi_t t WHERE false) w;" \
   "smoke 20261121010000"
@@ -5804,7 +5813,7 @@ plant "R71 the revert does not refuse while a score is recorded" "$R71" \
 #   - the rollback reads no reference, so a field an admin gave a blackout since is deleted with the blackout;
 #   and two the review round asked for: the job's status not judged after the locks (a completed job applied again), and a
 #   slot found by its key not compared with the row (a practice could outlive its slot).
-plant "M80 the dry run's sentinel is removed (a preview writes)" "$PAIRING" \
+plant "M80 the dry run's sentinel is removed (a preview writes)" "$SCHEDULE_IMPORT_PREVIEWS" \
   "        IF v_dry THEN
             RAISE EXCEPTION 'practice import dry run: every write is undone' USING ERRCODE = 'SLD01';
         END IF;" \
@@ -5813,7 +5822,7 @@ plant "M80 the dry run's sentinel is removed (a preview writes)" "$PAIRING" \
         END IF;" \
   "smoke 20261123010000"
 
-plant "M80 ON CONFLICT DO NOTHING is removed (a re-import fails)" "$PAIRING" \
+plant "M80 ON CONFLICT DO NOTHING is removed (a re-import fails)" "$SCHEDULE_IMPORT_PREVIEWS" \
   "            ON CONFLICT (team_id, practice_slot_id, effective_date_range)
                 WHERE practice_slot_id IS NOT NULL AND effective_date_range IS NOT NULL
             DO NOTHING
@@ -5821,7 +5830,7 @@ plant "M80 ON CONFLICT DO NOTHING is removed (a re-import fails)" "$PAIRING" \
   "            RETURNING id, team_id, practice_slot_id, effective_date_range" \
   "smoke 20261123010000"
 
-plant "M80 the flag step hands the gate auto rows only" "$PAIRING" \
+plant "M80 the flag step hands the gate auto rows only" "$SCHEDULE_IMPORT_PREVIEWS" \
   "          FROM _pi_asg a WHERE COALESCE(a.existing_id, a.new_id) IS NOT NULL;" \
   "          FROM _pi_asg a JOIN public.practice_assignments pz ON pz.id = COALESCE(a.existing_id, a.new_id) WHERE pz.source = 'auto';" \
   "smoke 20261123010000"
@@ -5831,12 +5840,12 @@ plant "M80 the rollback no longer refuses after a change" "$M80" \
   "    IF false THEN" \
   "smoke 20261123010000"
 
-plant "M80 a probable move is added without its tick" "$PAIRING" \
+plant "M80 a probable move is added without its tick" "$SCHEDULE_IMPORT_PREVIEWS" \
   "SET probable_move = true, held_back = NOT (a.row_key = ANY (v_add))" \
   "SET probable_move = true, held_back = false" \
   "smoke 20261123010000"
 
-plant "M80 the job's status is not judged after the locks (review round)" "$PAIRING" \
+plant "M80 the job's status is not judged after the locks (review round)" "$SCHEDULE_IMPORT_PREVIEWS" \
   "    -- A finished job answers with the result it stored (a retry after a lost response writes nothing).
     IF v_job.status IN ('completed', 'completed_with_warnings') THEN
         IF v_job.warning_summary ? 'practice_import' THEN
@@ -5856,7 +5865,7 @@ plant "M80 the job's status is not judged after the locks (review round)" "$PAIR
   "" \
   "smoke 20261123010000"
 
-plant "M80 a found slot is not compared with the row (review round)" "$PAIRING" \
+plant "M80 a found slot is not compared with the row (review round)" "$SCHEDULE_IMPORT_PREVIEWS" \
   "         WHERE ps.id = g.slot_id AND NOT g.created" \
   "         WHERE ps.id = g.slot_id AND false" \
   "smoke 20261123010000"

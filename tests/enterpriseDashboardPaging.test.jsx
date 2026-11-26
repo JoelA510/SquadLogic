@@ -8,7 +8,7 @@ import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import EnterpriseDashboard from '../frontend/src/pages/EnterpriseDashboard.jsx';
 
-const mocks = vi.hoisted(() => ({ total: 0, refuseFrom: null, eqs: [] }));
+const mocks = vi.hoisted(() => ({ total: 0, refuseFrom: null, metricsError: null, eqs: [] }));
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
@@ -24,7 +24,7 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
           to = b;
           return chain;
         },
-        single: () => Promise.resolve({ data: null, error: null }),
+        single: () => Promise.resolve({ data: null, error: mocks.metricsError }),
         then: (resolve, reject) => {
           if (table !== 'players')
             return Promise.resolve({ data: null, error: null }).then(resolve, reject);
@@ -58,6 +58,7 @@ describe('EnterpriseDashboard players read', () => {
   beforeEach(() => {
     mocks.total = 1259;
     mocks.refuseFrom = null;
+    mocks.metricsError = null;
     mocks.eqs = [];
   });
 
@@ -82,8 +83,17 @@ describe('EnterpriseDashboard players read', () => {
     mocks.refuseFrom = 1000;
     render(<EnterpriseDashboard />);
     const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('Players could not be loaded');
+    expect(alert).toHaveTextContent('Report could not be loaded');
     expect(alert).toHaveTextContent('page refused');
-    expect(screen.queryByText('1000')).toBeNull();
+    expect(screen.queryByText('Total Players')).toBeNull();
+    expect(screen.queryByText('Active Teams')).toBeNull();
+  });
+
+  it('surfaces a refused season metrics read even when the player count loaded', async () => {
+    mocks.metricsError = new Error('metrics unavailable');
+    render(<EnterpriseDashboard />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('metrics unavailable');
+    expect(screen.queryByText('Total Players')).toBeNull();
+    expect(screen.queryByText('Active Teams')).toBeNull();
   });
 });

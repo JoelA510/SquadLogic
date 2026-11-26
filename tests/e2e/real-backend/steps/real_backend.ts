@@ -26,6 +26,13 @@ import {
 
 const { Given, When, Then, Before, After } = createBdd();
 
+Then('Reports shows the {int} registered players', async ({ page }, count: number) => {
+  await page.getByRole('link', { name: 'Reports', exact: true }).click();
+  const total = page.getByRole('group', { name: 'Total Players' });
+  await expect(total).toContainText(String(count));
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
 /** Long enough for the edge runtime's first, cold, request to a function. */
 const BACKEND_TIMEOUT = 120_000;
 

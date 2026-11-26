@@ -1747,6 +1747,15 @@ const createMockQuery = (table, data = null) => {
             return { ...item, player: player, players: player };
           });
         }
+        if (table === 'players' && queryContent.includes('divisions(name)')) {
+          const byId = new Map(
+            getMockData('divisions').map((division) => [division.id, division.name])
+          );
+          results = results.map((row) => ({
+            ...row,
+            divisions: byId.has(row.division_id) ? { name: byId.get(row.division_id) } : null,
+          }));
+        }
         if (table === 'teams' && queryContent.includes('season:season_settings')) {
           // `division:divisions (..., season:season_settings (...))`, as the
           // team portal reads it: the team's division and that division's
@@ -5388,30 +5397,42 @@ export const mockSupabase = {
           payload.player_id ||
           null;
         const derived = deriveDivision(payload);
+        const explicitName = importPayloadText(payload, [
+          'division_name',
+          'division',
+          'group',
+          'program',
+        ]);
+        const namedDivision = explicitName
+          ? {
+              name: explicitName,
+              gender_policy: /^U[0-9]+B$/i.test(explicitName)
+                ? 'boys'
+                : /^U[0-9]+G$/i.test(explicitName)
+                  ? 'girls'
+                  : 'coed',
+            }
+          : derived;
         // 20261108010000: every division match is in the destination season, an explicit id
         // from another season included (it matches nothing).
-        let division = (db.divisions || []).find(
+        const seasonDivisions = (db.divisions || []).filter(
           (item) =>
             String(item.organization_id) === String(job.organization_id) &&
-            String(item.season_settings_id) === String(seasonRow.id) &&
-            [String(payload.division_name || '').toLowerCase(), derived?.name?.toLowerCase()]
-              .filter(Boolean)
-              .includes(String(item.name).toLowerCase())
+            String(item.season_settings_id) === String(seasonRow.id)
         );
-        if (!division && payload.division_id) {
-          division = (db.divisions || []).find(
-            (item) =>
-              String(item.id) === String(payload.division_id) &&
-              String(item.season_settings_id) === String(seasonRow.id)
-          );
-        }
-        if (!division && derived && seasonRow) {
+        const explicitId = importPayloadText(payload, ['division_id']);
+        const byName = (name) =>
+          name && seasonDivisions.find((item) => item.name?.toLowerCase() === name.toLowerCase());
+        let division =
+          seasonDivisions.find((item) => item.id === explicitId) || byName(namedDivision?.name);
+        if (!division && explicitId) division = byName(derived?.name);
+        if (!division && namedDivision && !explicitId && seasonRow) {
           division = {
             id: mockId(),
             organization_id: job.organization_id,
             season_settings_id: seasonRow.id,
-            name: derived.name,
-            gender_policy: derived.gender_policy,
+            name: namedDivision.name,
+            gender_policy: namedDivision.gender_policy,
             program_id: defaultProgramOf(db, seasonRow.id)?.id ?? null,
             practices_per_week: 1,
             practice_minutes: null,

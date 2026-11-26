@@ -1,6 +1,7 @@
 import { createBdd, type DataTable } from 'playwright-bdd';
 import { expect, type Page } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
+import { storeFixtureRegistrations } from './storedRegistrationFixture.js';
 import { routeAutoSchedulerToEdgeSolver, type EdgeSolverPage } from './edgeAutoSchedulerRoute.js';
 import { MOCK_ORG_ID, MOCK_SEASON_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
@@ -193,6 +194,7 @@ async function importPlayers(
       mockOrgId: MOCK_ORG_ID,
     }
   );
+  await storeFixtureRegistrations(page, 'import-pillar1');
 }
 
 Given(

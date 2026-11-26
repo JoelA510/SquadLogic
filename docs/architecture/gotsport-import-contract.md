@@ -84,6 +84,15 @@ than storing it.
 | `team name`, `team age`, `team gender`                                                                                                                     | `custom_attributes.team_name` / `team_age` / `team_gender` | Phase B (teams formed outside SquadLogic) |
 | a declared player field                                                                                                                                    | `custom_attributes.<declared name>`, typed as declared     | The organization's own use                |
 
+An explicit division name is matched within the destination season. The first import creates
+a missing named division once, including when the file uses different capitalization. With
+age and gender alone, the season's existing division naming rules apply. Reimporting a
+registration can repair a previously blank assignment while keeping the player's identity.
+
+Opening Teams again reads the selected season's saved players. A corrected or late file can
+cover only part of that roster. Its current-session hints apply to matching registrations,
+and the other registered players remain eligible for generation.
+
 A player stores no birth date (R5, `20261026010000`). `import-validation` reads
 the file's birth date only to compute the player's **natural age** with the
 season's cutoff and its divisions' birth-date windows (the season

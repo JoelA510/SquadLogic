@@ -201,6 +201,7 @@ R58="$REPO/docs/sql/20261108010000_revert.sql"
 # windows, drafts that take imports, completed seasons read-only, and the revert. It replaces the two
 # finalizers and create_import_job, so the plants that aimed at those bodies in $M58 are re-aimed here.
 M59="$REPO/supabase/migrations/20261111010000_season_rollover.sql"
+REGISTRATION_FINALIZER="$REPO/supabase/migrations/20261130010000_named_registration_divisions.sql"
 R59="$REPO/docs/sql/20261111010000_revert.sql"
 
 # Phase D, F: the demo league's practices (each division's count and length, the one lit venue, the 304-slot
@@ -3870,7 +3871,7 @@ END;
 # again at 20261022020000, which replaces that one, again at 20261025010000,
 # and again at 20261026010000 ($M43), the live body: the staged payload stored
 # whole as custom_attributes again.
-plant "M30 finalize stores a staged medical key in custom_attributes" "$M59" \
+plant "M30 finalize stores a staged medical key in custom_attributes" "$REGISTRATION_FINALIZER" \
   "            public.import_declared_attributes(v_declared, sp.normalized_payload)
                 AS custom_attributes" \
   "            sp.normalized_payload AS custom_attributes" \
@@ -4561,7 +4562,7 @@ plant "M43 apply_player_patch still writes the birth date" "$M58" \
         updated_at      = now()" \
   "applying 20261026010000_natural_age_replaces_birthdates.sql"
 
-plant "M43 the finalizer promotes only a row with a natural age" "$M59" \
+plant "M43 the finalizer promotes only a row with a natural age" "$REGISTRATION_FINALIZER" \
   "        WHERE p.first_name IS NOT NULL
           AND p.last_name IS NOT NULL
     )," \
@@ -4571,7 +4572,7 @@ plant "M43 the finalizer promotes only a row with a natural age" "$M59" \
     )," \
   "smoke 20261026010000"
 
-plant "M43 the finalizer prefers the age group to the staged natural age" "$M59" \
+plant "M43 the finalizer prefers the age group to the staged natural age" "$REGISTRATION_FINALIZER" \
   "                WHEN p.natural_age_text ~ '^[0-9]{1,2}\$' AND p.natural_age_text::int BETWEEN 1 AND 25
                     THEN p.natural_age_text::smallint
                 WHEN p.age_group_text ~ '^[0-9]{1,2}\$' AND p.age_group_text::int BETWEEN 1 AND 25
@@ -4582,7 +4583,7 @@ plant "M43 the finalizer prefers the age group to the staged natural age" "$M59"
                     THEN p.natural_age_text::smallint" \
   "smoke 20261026010000"
 
-plant "M43 a re-import keeps the old natural age" "$M59" \
+plant "M43 a re-import keeps the old natural age" "$REGISTRATION_FINALIZER" \
   "            natural_age = de.natural_age," \
   "            natural_age = COALESCE(de.natural_age, p.natural_age)," \
   "smoke 20261026010000"
@@ -4863,7 +4864,7 @@ plant "M49 an anonymous user's first password goes unchecked" "$M49" \
 # caller names (a completed season's program edited through the active season's id); and a season
 # made after the migration still gets its default program (the trigger, which no migration-time
 # check can see, since the harness's migration build has no season to give one to).
-plant "M50 the finalizer ignores the job's season" "$M59" \
+plant "M50 the finalizer ignores the job's season" "$REGISTRATION_FINALIZER" \
   "                ELSE s.id = v_job.season_settings_id END);
 
     -- A player belongs to one season" \
@@ -5034,7 +5035,7 @@ plant "M54 the column drop leaves coaches.profile_id" "$M54" \
 # blank play-up cell is a present column that withdraws a request; `import_payload_text` returns
 # NULL for it just as for a missing key, so the finalizer reads presence from the key. Read from
 # the text, a blank cell leaves the stored request in place and the smoke's re-import row sees it.
-plant "M56 a blank play-up cell is read as an absent column" "$M59" \
+plant "M56 a blank play-up cell is read as an absent column" "$REGISTRATION_FINALIZER" \
   "                WHEN NOT p.play_up_present THEN NULL" \
   "                WHEN p.play_up_text IS NULL THEN NULL" \
   "smoke 20261106010000"
@@ -5045,7 +5046,7 @@ plant "M56 a blank play-up cell is read as an absent column" "$M59" \
 # season's player (the case Codex found on #666); the smoke's season-2 import sees the update, and the
 # division trigger refuses the move into the new season's division first. Executed by hand against the
 # smoke and supabase/tests/season_enrollment.sql: both red.
-plant "M58 the finalizer matches a player of any season" "$M59" \
+plant "M58 the finalizer matches a player of any season" "$REGISTRATION_FINALIZER" \
   "              AND players.season_settings_id = v_season_settings_id
               AND players.external_registration_id = de.external_registration_id" \
   "              AND players.external_registration_id = de.external_registration_id" \
@@ -5063,7 +5064,7 @@ plant "M58 the finalizer matches a player of any season" "$M59" \
 # that leaves the age-rule revision where it was (the same, and the A, B, A the smoke does); and a
 # cutoff write taking no season lock (the smoke's pg_locks check); and a division guard that ignores a
 # delete (the smoke's delete of a window-bearing division in a season with players).
-plant "M59 the finalizer refuses a draft season again" "$M59" \
+plant "M59 the finalizer refuses a draft season again" "$REGISTRATION_FINALIZER" \
   "    -- a new row here. So the active season and a draft season both take an import (20261111010000:" \
   "    IF v_season_status IS NOT NULL AND v_season_status <> 'active' THEN
         RAISE EXCEPTION 'Season % is % and takes no import yet', v_season_settings_id, v_season_status
@@ -5095,7 +5096,7 @@ plant "M59 a completed season's schedule is writable for a signed-in caller" "$M
                 -- The cascade of a deleted organization: the season may not have been removed yet (a" \
   "smoke 20261111010000"
 
-plant "M59 the finalizer applies a file whose age-rule stamp is stale" "$M59" \
+plant "M59 the finalizer applies a file whose age-rule stamp is stale" "$REGISTRATION_FINALIZER" \
   "    IF v_job.age_rule_revision IS NOT NULL
        AND (v_job.age_rule_season_id IS DISTINCT FROM" \
   "    IF v_job.age_rule_revision IS NOT NULL AND false

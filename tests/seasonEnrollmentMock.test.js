@@ -155,6 +155,32 @@ describe('the fill (the two triggers)', () => {
 describe('finalize_import_job (mock): matches in the destination season only', () => {
   beforeEach(rollOver);
 
+  it('creates one named division in the destination season for differently cased registration labels', async () => {
+    const id = job('named-division', NEXT);
+    stagePlayers(id, [
+      {
+        external_registration_id: 'QA-1',
+        first_name: 'A',
+        last_name: 'Example',
+        division: 'New Rec',
+      },
+      {
+        external_registration_id: 'QA-2',
+        first_name: 'B',
+        last_name: 'Example',
+        division: 'new rec',
+      },
+    ]);
+    expect((await finalizePlayers(id)).error).toBeNull();
+    const divisions = getMockData('divisions').filter(
+      (row) => row.name?.toLowerCase() === 'new rec'
+    );
+    expect(divisions).toHaveLength(1);
+    expect(divisions[0].season_settings_id).toBe(NEXT);
+    for (const key of ['QA-1', 'QA-2'])
+      expect(playerOf(key, NEXT).division_id).toBe(divisions[0].id);
+  });
+
   it('makes the same registration id a new player in the next season and leaves the old row untouched', async () => {
     const earlier = playerOf('R-1', MOCK_SEASON_ID) ?? {
       id: 'earlier-r1',

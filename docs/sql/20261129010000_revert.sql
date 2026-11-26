@@ -2005,4 +2005,16 @@ BEGIN
         'ids', jsonb_build_object('team_run_id', CASE WHEN v_dry THEN NULL ELSE v_team_run END));
 END;
 $function$;
+DO $restored$
+BEGIN
+    IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
+        WHERE oid = to_regprocedure('public.apply_game_import_job(uuid,boolean,jsonb)')) IS DISTINCT FROM '41aff508b1aad82df785a4f90fa3fcaa' THEN
+        RAISE EXCEPTION 'Revert did not restore apply_game_import_job(uuid,boolean,jsonb)';
+    END IF;
+    IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
+        WHERE oid = to_regprocedure('public.apply_practice_import_job(uuid,boolean)')) IS DISTINCT FROM '53f31b8525cfedfa5de8e7a419a50a68' THEN
+        RAISE EXCEPTION 'Revert did not restore apply_practice_import_job(uuid,boolean)';
+    END IF;
+END
+$restored$;
 COMMIT;

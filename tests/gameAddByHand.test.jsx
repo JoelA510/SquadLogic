@@ -193,7 +193,7 @@ const saved = (id, home, away, slot, published) => {
   };
 };
 
-function seed() {
+function seed(names = {}) {
   sessionStorage.clear();
   delete window.__MOCK_DB__;
   seedMockDb({
@@ -220,7 +220,7 @@ function seed() {
         id: team.id,
         organization_id: ORG,
         division_id: DIVISION,
-        name: team.name,
+        name: names[team.id] ?? team.name,
         is_external: false,
       })),
       {
@@ -354,6 +354,19 @@ async function apply() {
   await waitFor(() => expect(button).toBeEnabled());
   fireEvent.click(button);
 }
+
+describe('current team names in a saved game', () => {
+  it('shows both renamed sides and still labels the other saved game', async () => {
+    seed({ 'team-1': 'North Comets', 'team-2': 'South Rockets', 'team-3': '' });
+    await mount();
+    await waitFor(() =>
+      expect(listRows().some((row) => row.startsWith('North Comets vs South Rockets'))).toBe(true)
+    );
+    expect(listRows().some((row) => row.startsWith('Synthetic Meteors vs Synthetic Planets'))).toBe(
+      true
+    );
+  });
+});
 
 describe('the staged game appears', () => {
   it('in an open slot: listed in the review as a new game, the status line says what was done', async () => {

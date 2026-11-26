@@ -521,6 +521,21 @@ Then('the teams page lists the synced teams after a reload', async ({ page }) =>
   stateOf(page).teamNames = labels.map((label) => label.replace(/^Rename team /, ''));
 });
 
+When('I rename a synced team using the Teams page', async ({ page }) => {
+  const names = stateOf(page).teamNames;
+  if (!names?.length) throw new Error('Expected the synced teams from the previous step');
+  const previous = names[0];
+  const renamed = previous + ' Renamed';
+  await page.getByRole('button', { name: 'Rename team ' + previous, exact: true }).click();
+  const input = page.getByRole('textbox', { name: 'New name for team ' + previous, exact: true });
+  await input.fill(renamed);
+  await input.press('Enter');
+  await expect(
+    page.getByRole('button', { name: 'Rename team ' + renamed, exact: true })
+  ).toBeVisible();
+  stateOf(page).teamNames = [renamed, ...names.slice(1)];
+});
+
 When('I auto-generate the practice schedule and apply it', async ({ page }) => {
   await page.goto('/schedule/practice');
   const run = page.getByRole('button', { name: 'Run auto-scheduler optimization' });

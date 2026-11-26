@@ -15,7 +15,8 @@ Feature: From a registration export to a published practice schedule, on the rea
     And I reload Teams before generating
     And I generate teams from the import and sync them to Supabase
     Then the teams page lists the synced teams after a reload
-    When I auto-generate the practice schedule and apply it
+    When I rename a synced team using the Teams page
+    And I auto-generate the practice schedule and apply it
     Then the master schedule export lists a practice for every synced team
     When an upload to Storage is refused for one team's file
     Then none of those files is left in the exports bucket

@@ -47,6 +47,8 @@ const ALLOWED = new Set([
   'supabase/migrations/20261122010000_game_scores.sql',
   // C8 keeps the two permit-scope checks in rollback when it also protects division settings.
   'supabase/migrations/20261125010000_game_import_guards.sql',
+  // Undoing a carried game preserves those same facility permit references.
+  'supabase/migrations/20261201010000_carried_game_scores.sql',
 ]);
 
 // What reads a permit: the tables, the RPC, the hooks and the core helpers. In JavaScript the tables

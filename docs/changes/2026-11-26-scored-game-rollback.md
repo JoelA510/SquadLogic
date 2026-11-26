@@ -1,0 +1,7 @@
+# Rolling back an import that carried scored games
+
+The owner approved this repair on November 26. Hosted testing added one unscored game to a schedule with two final scores. Rollback refused both earlier games. The import had carried them to its new run without changing their teams, kickoff or scores.
+
+Give each stored score a UUID revision. A real score edit or a clear followed by a new score gets a fresh revision, including when the totals return to the same values. A repeated save of identical totals keeps the revision. Record the existing score revision in the job's application record when a game is carried into a new run. Read it under the game writers' existing organization lock. Rollback may restore the previous run only when the game and its current score still match what the import observed. Keep the refusal for an inserted or moved game with a score and for a score entered or edited after a carry. Clearing a score continues to release the hold. Older applications that did not record a carried score keep their existing protection. Transaction start timestamps alone cannot establish which score an overlapping request saw.
+
+Verify the rollback through the SQL functions and mock, including two unrelated games, a subsequently edited score, a new score and the stored game identity. Keep the hosted database under CI deployment. Confirm the three function bodies before replaying a fresh import in the disposable club.

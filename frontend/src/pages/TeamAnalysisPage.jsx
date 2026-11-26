@@ -4,7 +4,7 @@ import { useDashboardData } from '../hooks/useDashboardData.js';
 import DataErrorBanner from '../components/ui/DataErrorBanner.jsx';
 import { useTeamPersistence } from '../hooks/useTeamPersistence.js';
 import { useAutoRunOnNavigate } from '../hooks/useAutoRunOnNavigate.js';
-import { useImport } from '../contexts/ImportContext.jsx';
+import { useSeasonTeamingInput } from '../hooks/useSeasonTeamingInput.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { useSeasonReadOnly } from '../hooks/useSeasonReadOnly.js';
 import SeasonReadOnlyNote from '../components/chrome/SeasonReadOnlyNote.jsx';
@@ -73,9 +73,23 @@ const {
   targetTeamSize: DEFAULT_TARGET_TEAM_SIZE,
 } = DEFAULT_ROSTER_LIMITS;
 
-function getImportedRows(importedData) {
+function getImportedRows(importedData, persistenceSnapshot) {
   if (!importedData) return [];
   if (Array.isArray(importedData)) return importedData;
+  if (importedData.fromRoster) {
+    // Older reviewed runs used the file's division label as their key. Retain that key
+    // (also after a rename) so reloading cannot turn a reviewed rerun into fresh generation.
+    const keysById = new Map();
+    for (const [key, payload] of Object.entries(persistenceSnapshot?.payloadByDivision ?? {})) {
+      const id = payload.teamRows?.find((team) => team.division_id)?.division_id;
+      // The persistence map visits the newest run first, including when two labels share an ID.
+      if (id && !keysById.has(id)) keysById.set(id, key);
+    }
+    return importedData.data.map((row) => ({
+      ...row,
+      teamingDivisionKey: keysById.get(row.division_id) ?? row.division_name ?? row.division_id,
+    }));
+  }
   if (Array.isArray(importedData.data)) return importedData.data;
   if (Array.isArray(importedData.fullData)) return importedData.fullData;
   if (Array.isArray(importedData.rows)) return importedData.rows;
@@ -121,7 +135,7 @@ function resolveDivisionName(row) {
 }
 
 function resolveDivisionId(row) {
-  const explicitId = firstNonEmpty(row, ['division_id', 'divisionId']);
+  const explicitId = firstNonEmpty(row, ['teamingDivisionKey', 'division_id', 'divisionId']);
   return String(explicitId || resolveDivisionName(row)).trim();
 }
 
@@ -1008,7 +1022,7 @@ export default function TeamAnalysisPage() {
     loading: persistenceLoading,
     refresh: refreshPersistence,
   } = useTeamPersistence();
-  const { importedData } = useImport();
+  const { importedData, rosterError } = useSeasonTeamingInput();
   const { currentOrganization, currentSeasonSetting, permissions = [] } = useOrganization();
   const { session, user: authUser } = useAuth();
   const { features, isEnabled, buddyRule } = useFeatures();
@@ -1062,7 +1076,10 @@ export default function TeamAnalysisPage() {
       permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION));
   const canEditTeams = canManageTeams && isEditMode;
 
-  const importedPlayerRows = useMemo(() => getImportedRows(importedData), [importedData]);
+  const importedPlayerRows = useMemo(
+    () => getImportedRows(importedData, persistenceSnapshot),
+    [importedData, persistenceSnapshot]
+  );
   // The stored players of the file, for the advice (follow-ups F1, item 3; data follow-ups, item 2).
   // The record wins over the file where generation lets it: the status (a buddy taken off the
   // waitlist is active in the record while the file still marks them), and the natural age and the
@@ -1534,6 +1551,18 @@ export default function TeamAnalysisPage() {
       errors.push({ type: 'division', message: 'Select a division before generating teams.' });
     }
     if (
+      importedData?.fromRoster &&
+      importedPlayerRows.some(
+        (row) => !row.division_id && resolveDivisionId(row) === selectedProgram?.id
+      )
+    ) {
+      errors.push({
+        type: 'division',
+        message:
+          'These saved players have no division. Set their division in Players or reimport the registrations with a division name.',
+      });
+    }
+    if (
       selectedConfig?.minRosterSize &&
       selectedConfig?.maxRosterSize &&
       selectedConfig.minRosterSize > selectedConfig.maxRosterSize
@@ -1604,7 +1633,8 @@ export default function TeamAnalysisPage() {
     currentOrganization?.id,
     divisionSettingsError,
     generationError,
-    importedPlayerRows.length,
+    importedPlayerRows,
+    importedData?.fromRoster,
     selectedProgram,
   ]);
 
@@ -2051,6 +2081,7 @@ export default function TeamAnalysisPage() {
   // Fires once a program is selected and players are loaded; if no program can
   // be resolved the user simply lands on the page with the normal control.
   const teamingAutoRunReady =
+    !persistenceLoading &&
     Boolean(selectedProgram) &&
     importedPlayerRows.length > 0 &&
     canManageTeams &&
@@ -2430,7 +2461,7 @@ export default function TeamAnalysisPage() {
     <div
       className={`animate-fadeIn space-y-8 w-full ${canEditTeams ? '' : 'max-w-[65ch] mx-auto'}`}
     >
-      <DataErrorBanner message={dataError} />
+      <DataErrorBanner message={rosterError || dataError} />
       <SeasonReadOnlyNote />
       <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
         {stagedReview ? placementAnnouncement : ''}

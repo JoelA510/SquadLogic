@@ -5,54 +5,35 @@ import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, When, Then } = createBdd();
 
-/**
- * Helper to ensure a player exists in the "imports" table so TeamAnalysisPage can hydrate it.
- */
-async function syncPlayerToImports(page: Page, player: Record<string, unknown>) {
+/** Seed the saved player record read by the roster editor after navigation. */
+async function seedRosterPlayer(page: Page, player: Record<string, unknown>) {
   await waitForMockClient(page);
   await page.evaluate(
-    ({ p, mockOrgId }) => {
+    ({ player, mockOrgId }) => {
       const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-      db.imports = db.imports || [];
-      let playerImport = db.imports.find(
-        (i: Record<string, unknown>) => i.import_type === 'players'
+      const org = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+      const season = db.season_settings?.find(
+        (row: Record<string, unknown>) => row.organization_id === org && row.status === 'active'
       );
-
-      if (!playerImport) {
-        const activeOrg = localStorage.getItem('squadlogic_active_org') || mockOrgId;
-        playerImport = {
-          id: 'import-players-1',
-          import_type: 'players',
-          user_id: 'mock-admin-id',
-          organization_id: activeOrg,
-          data: { data: [] },
-          created_at: new Date().toISOString(),
-        };
-        db.imports.push(playerImport);
-      }
-
-      // Add or update player in the import blob
-      const existingIdx = playerImport.data.data.findIndex(
-        (rp: Record<string, unknown>) => rp.id === p.id
+      if (!season) throw new Error('Missing active fixture season');
+      db.players = (db.players ?? []).filter(
+        (row: Record<string, unknown>) => row.id !== player.id
       );
-      const normalizedPlayer = {
-        id: p.id,
-        first_name: p.first_name,
-        last_name: p.last_name,
-        age: p.age,
-        gender: p.gender,
-        buddy_id: p.buddy_id,
-      };
-
-      if (existingIdx >= 0) {
-        playerImport.data.data[existingIdx] = normalizedPlayer;
-      } else {
-        playerImport.data.data.push(normalizedPlayer);
-      }
-
-      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+      db.players.push({
+        id: player.id,
+        external_registration_id: player.id,
+        organization_id: org,
+        season_settings_id: season.id,
+        first_name: player.first_name,
+        last_name: player.last_name,
+        natural_age: player.age,
+        gender: player.gender,
+        buddy_request: player.buddy_id,
+        status: 'active',
+      });
+      window.__saveMockDB__(db);
     },
-    { p: player, mockOrgId: MOCK_ORG_ID }
+    { player, mockOrgId: MOCK_ORG_ID }
   );
 }
 
@@ -153,7 +134,7 @@ Given(
     );
 
     // Sync to imports for hydration — buddyId must be mutual
-    await syncPlayerToImports(page, {
+    await seedRosterPlayer(page, {
       id: `player-${p1.toLowerCase()}`,
       first_name: p1,
       last_name: '',
@@ -161,7 +142,7 @@ Given(
       gender: 'M',
       buddy_id: `player-${p2.toLowerCase()}`,
     });
-    await syncPlayerToImports(page, {
+    await seedRosterPlayer(page, {
       id: `player-${p2.toLowerCase()}`,
       first_name: p2,
       last_name: '',
@@ -203,9 +184,9 @@ Given(
       { pName: player, tGender: teamGender }
     );
 
-    // Sync to imports — player has opposite gender for the mismatch
+    // The saved player has the opposite gender for the mismatch.
     const playerGender = teamGender === 'Boys' ? 'F' : 'M';
-    await syncPlayerToImports(page, {
+    await seedRosterPlayer(page, {
       id: `player-${player.toLowerCase()}`,
       first_name: player,
       last_name: '',

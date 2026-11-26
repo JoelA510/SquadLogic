@@ -33,6 +33,12 @@ Then('Reports shows the {int} registered players', async ({ page }, count: numbe
   await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
+When('I reload Teams before generating', async ({ page }) => {
+  await page.goto('/teams');
+  await page.reload();
+  await expect(page.getByRole('table', { name: 'Division Overview' })).toContainText('24');
+});
+
 /** Long enough for the edge runtime's first, cold, request to a function. */
 const BACKEND_TIMEOUT = 120_000;
 

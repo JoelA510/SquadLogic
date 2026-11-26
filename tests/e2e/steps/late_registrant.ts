@@ -1,6 +1,7 @@
 import { createBdd } from 'playwright-bdd';
 import { expect, type Page } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
+import { storeFixtureRegistrations } from './storedRegistrationFixture.js';
 import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, When, Then } = createBdd();
@@ -27,6 +28,28 @@ const TEAMS = [
 ];
 const LATE_PLAYER = uuid(7);
 const ORIGINAL_PLAYERS = TEAMS.flatMap((team) => team.players);
+
+Given('the saved division is now named {string}', async ({ page }, currentName: string) => {
+  await page.evaluate(
+    ({ originalName, currentName }) => {
+      const db = window.__MOCK_DB__ as MockDb;
+      const run = db.scheduler_runs?.find((row) => row.id === 'late-saved-run');
+      const division = db.divisions?.find(
+        (row) =>
+          row.organization_id === run?.organization_id &&
+          row.season_settings_id === run?.season_settings_id &&
+          row.name === originalName
+      );
+      const teams = (run?.results as { teams?: MockRow[] } | undefined)?.teams;
+      if (!division || !teams?.length) throw new Error('Missing saved division or teams');
+      // Historical runs can carry both the label at save time and the durable foreign key.
+      for (const team of teams) team.division_id = division.id;
+      division.name = currentName;
+      window.__saveMockDB__(db);
+    },
+    { originalName: DIVISION, currentName }
+  );
+});
 
 Given(
   'the U12 Boys roster was saved as the teams Falcons and Herons with three players each',
@@ -155,6 +178,7 @@ Given('a late registrant appears in the latest import', async ({ page }) => {
       mockOrgId: MOCK_ORG_ID,
     }
   );
+  await storeFixtureRegistrations(page, 'late-import-latest');
 });
 
 Given(
@@ -188,6 +212,7 @@ Given(
         mockOrgId: MOCK_ORG_ID,
       }
     );
+    await storeFixtureRegistrations(page, 'late-import-latest');
   }
 );
 

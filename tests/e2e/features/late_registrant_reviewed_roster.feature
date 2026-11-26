@@ -49,3 +49,10 @@ Feature: A late registrant and a roster that has already been reviewed
     Then axe finds no serious or critical violations on "/teams" in the "dark" theme
     And the saved teams keep their ids and original players
     And the late registrant is on none of them
+
+  Scenario: A division renamed since the review keeps its saved teams
+    Given the saved division is now named "Junior Boys"
+    When I re-run teaming from the dashboard workflow
+    Then the page reports 2 saved teams kept and 1 late player seated
+    And the saved teams keep their ids and original players
+    And the late registrant is on exactly one of them

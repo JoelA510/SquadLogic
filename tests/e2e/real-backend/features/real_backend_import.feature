@@ -20,6 +20,7 @@ Feature: Player import against the real backend
     Then the import log reports 0 players inserted and 24 updated
     And the audit log records the import as the administrator
     And no player row stores a guardian the full export named
+    And Reports shows the 24 registered players
 
   Scenario: Sensitive registration columns are never stored, through the app or around it
     When I import the "sensitive" registration export

@@ -161,7 +161,7 @@ function CreateOrganizationForm() {
     logger.info('Organization initialized successfully', { orgId: data });
 
     setTimeout(() => {
-      if (typeof refetchOrgs === 'function') refetchOrgs();
+      if (typeof refetchOrgs === 'function') refetchOrgs(data);
       navigate('/?new_org=true', { replace: true });
     }, 1500);
   };
@@ -367,7 +367,7 @@ function JoinWithInviteForm({ initialCode }) {
       // SPA-navigate to the dashboard instead of a full-page reload. Prevents
       // the app-state destruction Gemini PR #179 flagged on the /invite
       // deep-link; same pattern applied here for consistency.
-      if (typeof refetchOrgs === 'function') refetchOrgs();
+      if (typeof refetchOrgs === 'function') refetchOrgs(data);
       navigate('/?joined=true', { replace: true });
     } catch (err) {
       logger.error('Failed to redeem invite code', err);

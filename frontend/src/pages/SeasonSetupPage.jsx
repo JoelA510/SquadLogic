@@ -67,7 +67,8 @@ export default function SeasonSetupPage() {
           <div style={{ flex: 1 }}>
             <h1 className="page-title">Season Setup</h1>
             <div className="page-sub">
-              A guided checklist — but every step is also a standalone tool in the navigation.
+              <strong>{currentOrganization?.name}</strong> · Each step is also available in the
+              navigation.
             </div>
           </div>
           {isOnboarded && (

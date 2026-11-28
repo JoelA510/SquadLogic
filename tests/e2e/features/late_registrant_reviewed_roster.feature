@@ -28,6 +28,20 @@ Feature: A late registrant and a roster that has already been reviewed
     And the U12 Boys roster was saved as the teams Falcons and Herons with three players each
     And a late registrant appears in the latest import
 
+  Scenario: Changing the practice frequency after teaming keeps the saved roster
+    When I open the Teams page
+    And I open the saved roster's division rules
+    And I save 2 practices a week for the saved division
+    And I reload the saved roster and reopen its division rules
+    Then the saved division has 2 practices a week
+    And axe finds no serious or critical violations on "/teams" in the "light" theme
+    When I switch to the dark theme on this page
+    Then axe finds no serious or critical violations on "/teams" in the "dark" theme
+    When I return to the saved rosters
+    Then the saved teams keep their ids and original players
+    And the late registrant is on none of them
+    And the rules switch is absent during manual roster editing
+
   Scenario: A late registrant is seated on a saved team and nobody else moves
     When I re-run teaming from the dashboard workflow
     Then the page reports 2 saved teams kept and 1 late player seated

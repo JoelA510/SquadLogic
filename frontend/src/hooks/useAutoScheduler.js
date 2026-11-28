@@ -1,6 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabaseClient.js';
-import { buildEdgeFunctionCacheKey, edgeFunctionCache } from '../lib/cache.js';
 import { API_BASE_URL, SUPABASE_URL } from '../config.js';
 import { isUnknownPersistenceOutcome, postPersistenceRequest } from '../lib/persistenceRequest.js';
 import {
@@ -8,13 +7,6 @@ import {
   runPracticeOptimizerPath,
 } from '../lib/practiceOptimizerClient.js';
 
-// Wave 6b Task 1: 5-minute TTL for auto-scheduler runs. Rationale: an
-// optimization with identical inputs (same teams, slots, config, weights)
-// produces a result whose re-run is expensive compute AND a full Edge Function
-// invocation. Within a 5-minute window a user firing the same run (double-
-// click, immediate retry) cache-hits the prior result. Input changes bust the
-// key automatically. Errors are NOT cached (so retries run fresh).
-const AUTO_SCHEDULER_TTL_MS = 300_000;
 const DEFAULT_LOCAL_FUNCTIONS_URL = 'http://localhost:54321/functions/v1';
 // The request schema's defaults for a run's search settings (`_shared/schemas/auto-scheduler.ts`),
 // for a caller that names none: the browser's worker is given the same numbers the server would use.
@@ -141,35 +133,8 @@ export function useAutoScheduler({ organizationId }) {
         return;
       }
 
-      // Wave 6b Task 1: check TTL cache BEFORE the expensive fetch + Realtime
-      // subscription setup. Identical inputs within 5 minutes return the prior
-      // result and skip the Edge Function invocation entirely (free-tier
-      // invocation reduction on the hot path). Cache key is scoped by
-      // organization_id via buildEdgeFunctionCacheKey — distinct orgs never
-      // share entries.
-      const cacheKey = buildEdgeFunctionCacheKey('auto-scheduler', {
-        organization_id: organizationId,
-        season_settings_id: seasonSettingsId ?? null,
-        teams,
-        slots,
-        divisionPreferences: divisionPreferences ?? {},
-        lockedAssignments: lockedAssignments ?? [],
-        scoringWeights: scoringWeights ?? {},
-        config: config ?? {},
-      });
-      const cached = edgeFunctionCache.get(cacheKey);
-      if (cached) {
-        setError(null);
-        setResult(cached.data);
-        setProgress({
-          iteration: cached.data?.optimization?.iterations ?? 0,
-          bestScore: cached.data?.optimization?.bestScore ?? 0,
-          elapsedMs: cached.data?.optimization?.elapsedMs ?? 0,
-        });
-        setStatus('completed');
-        return;
-      }
-
+      // The server adds the current weekday rules, coach preferences and saved assignments.
+      // Identical teams and slots on a second Run can therefore produce a different proposal.
       const controller = new AbortController();
       abortRef.current = controller;
 
@@ -327,7 +292,7 @@ export function useAutoScheduler({ organizationId }) {
           practices: data.practices ?? null,
           // M4.8 Q7: the date the run judged new placements from (today on the
           // season's clock, server-side). The review writes each placement's
-          // range from it, so a cached run reviewed after midnight still saves
+          // range from it, so a run reviewed after midnight still saves
           // the range the solver checked.
           liveFrom: data.liveFrom ?? null,
           // The lock as the run held it (M4.8): rows that hold nothing from
@@ -340,10 +305,6 @@ export function useAutoScheduler({ organizationId }) {
           ranNote,
           verified: data.verified ?? null,
         };
-        // Wave 6b Task 1: cache the successful run. Errors are intentionally
-        // NOT cached so retries after a failed run go back to the Edge Function.
-        edgeFunctionCache.set(cacheKey, resultPayload, { ttlMs: AUTO_SCHEDULER_TTL_MS });
-
         setResult(resultPayload);
         setProgress({
           iteration: data.optimization?.iterations ?? 0,

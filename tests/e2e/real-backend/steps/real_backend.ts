@@ -536,6 +536,30 @@ When('I rename a synced team using the Teams page', async ({ page }) => {
   stateOf(page).teamNames = [renamed, ...names.slice(1)];
 });
 
+async function expectWeekOneShortage(page: Page) {
+  const card = page.getByRole('article', { name: 'Unscheduled matchups' });
+  await expect(card.getByRole('heading', { name: 'Week 1' })).toBeVisible();
+  const teams = stateOf(page).teamNames ?? [];
+  expect(teams).toHaveLength(2);
+  for (const name of teams) await expect(card).toContainText(name);
+  await expect(card).toContainText('no-slot-available');
+}
+
+When('I generate and apply the game schedule with only a week-two slot', async ({ page }) => {
+  await page.goto('/schedule/game');
+  const run = page.getByRole('button', { name: 'Generate Schedule' });
+  await expect(run).toBeEnabled({ timeout: 30_000 });
+  await run.click();
+  await expectWeekOneShortage(page);
+  await page.getByRole('button', { name: 'Apply Schedule', exact: true }).click();
+  await expect(page.getByText('Game schedule applied', { exact: true })).toBeVisible();
+});
+
+Then('the unscheduled week-one pairing names both teams after a reload', async ({ page }) => {
+  await page.reload();
+  await expectWeekOneShortage(page);
+});
+
 When('I auto-generate the practice schedule and apply it', async ({ page }) => {
   await page.goto('/schedule/practice');
   const run = page.getByRole('button', { name: 'Run auto-scheduler optimization' });

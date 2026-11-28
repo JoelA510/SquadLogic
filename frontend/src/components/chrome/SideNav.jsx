@@ -35,7 +35,7 @@ NavItem.propTypes = {
 
 /**
  * Nested collapsible admin navigation, or Home alone for a role that is not an admin.
- * Desktop: 256px ↔ 60px collapse, persisted. Mobile (<900px): off-canvas
+ * Desktop: 256px ↔ 60px collapse, persisted. Mobile (900px and below): off-canvas
  * drawer opened from the TopBar hamburger.
  */
 export default function SideNav({
@@ -71,7 +71,7 @@ export default function SideNav({
   }
 
   const handleNavigate = () => {
-    if (window.innerWidth < 900) onMobileClose?.();
+    if (mobileOpen) onMobileClose?.();
   };
 
   // Admins (and a role not loaded yet) get the grouped admin nav, filtered by
@@ -87,12 +87,13 @@ export default function SideNav({
     <>
       {mobileOpen && (
         <div
-          className="fixed inset-0 bg-black/50 z-[65] min-[900px]:hidden"
+          className="fixed inset-0 bg-black/50 z-[65] nav-backdrop"
           onClick={onMobileClose}
           aria-hidden="true"
         />
       )}
       <aside
+        id="primary-navigation-drawer"
         className={`nav ${collapsed ? 'collapsed' : ''}`}
         data-mobile-open={mobileOpen ? 'true' : undefined}
       >

@@ -140,6 +140,9 @@ export const OrganizationProvider = ({ children }) => {
 
   useEffect(() => {
     if (!user) {
+      // The next sign-in can publish a session before the user profile arrives.
+      // Its empty list stays pending until we actually read that user's memberships.
+      setLoading(true);
       setOrganizations([]);
       setCurrentOrganization(null);
       setOrgMember(null);

@@ -481,10 +481,6 @@ const GRID_DRAG_INSTRUCTIONS =
   'between fields and time slots, then press space or enter to drop it, or escape to cancel. ' +
   'Each game also has a Move to list.';
 
-function formatUnscheduledMatchup(entry) {
-  return `${entry.matchup?.homeTeamId ?? 'Home'} vs ${entry.matchup?.awayTeamId ?? 'Away'}`;
-}
-
 /** Chronological, then by division, slot and home team: the order the generator returns its games in. */
 function compareGamesByTime(a, b) {
   return (
@@ -1402,10 +1398,7 @@ export default function GameSchedulingPage() {
         ? [...appliedRunWarnings.generator, ...appliedRunWarnings.manual]
         : (source.warnings ?? []),
       generatedAt: schedulerResult.generatedAt,
-      unscheduled: (schedulerResult.unscheduled ?? []).map((entry) => ({
-        ...entry,
-        matchup: formatUnscheduledMatchup(entry),
-      })),
+      unscheduled: schedulerResult.unscheduled ?? [],
     };
   }, [appliedRunWarnings, game?.snapshot, schedulerResult]);
 
@@ -2739,6 +2732,7 @@ export default function GameSchedulingPage() {
             gameReadinessSnapshot={reviewSnapshot ?? {}}
             gameSummary={reviewSummary}
             generatedAt={schedulerResult?.generatedAt ?? game?.generatedAt}
+            teamNames={addTeamNames}
           />
 
           <PracticeOnlyDivisions divisions={divisionPlan.practiceOnlyDivisions} />

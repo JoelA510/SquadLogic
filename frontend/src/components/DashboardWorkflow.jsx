@@ -302,6 +302,9 @@ const DashboardWorkflow = ({
             gameReadinessSnapshot={gameData.snapshot}
             gameSummary={gameData.summary}
             generatedAt={gameData.generatedAt}
+            teamNames={
+              new Map((teamData?.teams ?? []).map((team) => [team.id ?? team.teamId, team.name]))
+            }
           />
           <div className="flex flex-col sm:flex-row gap-3 justify-between pt-4 mt-6 border-t border-border-subtle">
             <StepRunButton

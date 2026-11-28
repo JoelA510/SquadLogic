@@ -28,7 +28,6 @@ import ProgressBar from '../components/ui/ProgressBar.jsx';
 import { Edit2, Save, ArrowRight, Trash2, X } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient.js';
 import { logger } from '../lib/logger.js';
-import { edgeFunctionCache } from '../lib/cache.js';
 import { IS_MOCK_MODE } from '../config.js';
 import { generateTeams, resolveTeamCount } from '@squadlogic/core/teamGeneration.js';
 import { TEAM_GENERATION } from '@squadlogic/core/constants.js';
@@ -1046,6 +1045,7 @@ export default function TeamAnalysisPage() {
     [persistenceSnapshot]
   );
   const [isEditMode, setIsEditMode] = useState(false);
+  const [showDivisionRules, setShowDivisionRules] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [manualTeams, setManualTeams] = useState(null);
   const [manualSaveState, setManualSaveState] = useState('idle');
@@ -1250,6 +1250,7 @@ export default function TeamAnalysisPage() {
     setManualTeams(null);
     setManualSaveMessage('');
     setIsEditMode(false);
+    setShowDivisionRules(false);
   }, [currentOrganization?.id, currentSeasonSetting?.id]);
 
   useEffect(() => {
@@ -1527,9 +1528,6 @@ export default function TeamAnalysisPage() {
           ...prev,
           [program.id]: configFromDivisionRow(savedDivision),
         }));
-        // The auto-scheduler's cached runs were made with the settings as they were: a run for
-        // identical teams and slots must not answer for a division whose count just changed.
-        edgeFunctionCache.invalidateByPrefix(`auto-scheduler:${currentOrganization.id}:`);
         if (!silent) setConfigSaveMessage('Rules saved.');
         return savedDivision;
       } finally {
@@ -2144,6 +2142,11 @@ export default function TeamAnalysisPage() {
     };
   }, [stagedReview?.summary, team]);
 
+  const canOpenSavedRules = Boolean(
+    activeTeamData?.generatedAt && canManageTeams && importedData && !stagedReview && !isEditMode
+  );
+  const viewingSavedRules = canOpenSavedRules && showDivisionRules;
+
   const displayPersistenceSnapshot = stagedReview?.snapshot || persistenceSnapshot;
 
   const refetchTeam = team?.refetch;
@@ -2487,7 +2490,7 @@ export default function TeamAnalysisPage() {
         {stagedReview ? placementAnnouncement : ''}
       </p>
 
-      <div className="flex justify-between items-start mb-8">
+      <div className="flex flex-wrap justify-between items-start gap-3 mb-8">
         <div>
           <h1 className="text-3xl font-display font-bold text-text-primary mb-2">
             Teaming & Analysis
@@ -2497,19 +2500,32 @@ export default function TeamAnalysisPage() {
           </p>
         </div>
         {activeTeamData?.generatedAt && canManageTeams && (
-          <Button
-            variant={isEditMode ? 'primary' : 'secondary'}
-            onClick={handleEditButtonClick}
-            disabled={manualSaveState === 'saving'}
-            className="flex items-center gap-2"
-          >
-            {isEditMode ? <Save size={18} /> : <Edit2 size={18} />}
-            {isEditMode
-              ? manualSaveState === 'saving'
-                ? 'Saving...'
-                : 'Save Changes'
-              : 'Edit Mode'}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {canOpenSavedRules && (
+              <Button
+                variant="secondary"
+                aria-expanded={viewingSavedRules}
+                onClick={() => setShowDivisionRules((open) => !open)}
+              >
+                {viewingSavedRules ? 'Back to rosters' : 'Division rules'}
+              </Button>
+            )}
+            {!viewingSavedRules && (
+              <Button
+                variant={isEditMode ? 'primary' : 'secondary'}
+                onClick={handleEditButtonClick}
+                disabled={manualSaveState === 'saving'}
+                className="flex items-center gap-2"
+              >
+                {isEditMode ? <Save size={18} /> : <Edit2 size={18} />}
+                {isEditMode
+                  ? manualSaveState === 'saving'
+                    ? 'Saving...'
+                    : 'Save Changes'
+                  : 'Edit Mode'}
+              </Button>
+            )}
+          </div>
         )}
       </div>
 
@@ -2554,8 +2570,7 @@ export default function TeamAnalysisPage() {
             />
           </div>
         </div>
-      ) : !activeTeamData?.generatedAt && importedData ? (
-        // NEW DASHBOARD VIEW
+      ) : (!activeTeamData?.generatedAt && importedData) || viewingSavedRules ? (
         <div className="space-y-6">
           {/* 1. Validation Panel */}
           <DataValidationPanel errors={validationErrors} />
@@ -2606,24 +2621,25 @@ export default function TeamAnalysisPage() {
             </div>
           </div>
 
-          {/* 4. Action Bar */}
-          <div className="flex justify-end pt-6 border-t border-border-subtle">
-            <Button
-              variant="primary"
-              size="lg"
-              onClick={handleGenerateTeams}
-              disabled={
-                seasonReadOnly ||
-                isActuallyGenerating ||
-                divisionRows === null ||
-                persistenceLoading ||
-                generationBlocked
-              }
-              className="flex items-center gap-2"
-            >
-              Generate Teams <ArrowRight size={18} />
-            </Button>
-          </div>
+          {!activeTeamData?.generatedAt && (
+            <div className="flex justify-end pt-6 border-t border-border-subtle">
+              <Button
+                variant="primary"
+                size="lg"
+                onClick={handleGenerateTeams}
+                disabled={
+                  seasonReadOnly ||
+                  isActuallyGenerating ||
+                  divisionRows === null ||
+                  persistenceLoading ||
+                  generationBlocked
+                }
+                className="flex items-center gap-2"
+              >
+                Generate Teams <ArrowRight size={18} />
+              </Button>
+            </div>
+          )}
         </div>
       ) : canEditTeams ? (
         <section className="card" aria-labelledby="manual-roster-heading">

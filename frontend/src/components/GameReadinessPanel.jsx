@@ -17,7 +17,12 @@ import { formatPercentPrecise, formatDate } from '../utils/formatters.js';
  * as a **real** season zone, which is the one place it was actually rendering
  * a run timestamp on the wrong clock.
  */
-function GameReadinessPanel({ gameReadinessSnapshot, gameSummary, generatedAt }) {
+function GameReadinessPanel({
+  gameReadinessSnapshot,
+  gameSummary,
+  generatedAt,
+  teamNames = undefined,
+}) {
   const hasGameWarnings =
     (gameReadinessSnapshot.warnings?.length ?? 0) > 0 ||
     (gameReadinessSnapshot.unscheduled?.length ?? 0) > 0;
@@ -60,13 +65,27 @@ function GameReadinessPanel({ gameReadinessSnapshot, gameSummary, generatedAt })
           title="Unscheduled matchups"
           items={gameReadinessSnapshot.unscheduled}
           emptyMessage="All matchups assigned."
-          renderItem={(entry) => (
-            <div key={`unscheduled-${entry.weekIndex}-${entry.matchup}`} className="insight-card">
-              <h3>Week {entry.weekIndex}</h3>
-              <p>{entry.matchup}</p>
-              <p className="insight-meta">{entry.reason}</p>
-            </div>
-          )}
+          renderItem={(entry, index) => {
+            // Earlier reports stored a display string. The generator and its saved run carry the pair's IDs.
+            const pairing = entry.matchup;
+            const matchup =
+              typeof pairing === 'string'
+                ? pairing
+                : [
+                    teamNames?.get(pairing?.homeTeamId) || pairing?.homeTeamId || 'Home',
+                    teamNames?.get(pairing?.awayTeamId) || pairing?.awayTeamId || 'Away',
+                  ].join(' vs ');
+            return (
+              <div
+                key={`unscheduled-${entry.weekIndex}-${matchup}-${index}`}
+                className="insight-card"
+              >
+                <h3>Week {entry.weekIndex}</h3>
+                <p>{matchup}</p>
+                <p className="insight-meta">{entry.reason}</p>
+              </div>
+            );
+          }}
         />
 
         <InsightSection

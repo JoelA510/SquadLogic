@@ -96,7 +96,11 @@ Given(
         // The seed's own team run is retired (in place: the mock re-merges its
         // seed rows by id), so the saved run below is the only one.
         for (const run of db.scheduler_runs ?? []) {
-          if (run.run_type === 'team' && run.organization_id === orgId) run.status = 'deleted';
+          if (run.run_type === 'team' && run.organization_id === orgId) {
+            run.status = 'deleted';
+            // A real run has a creation time. An undated seed otherwise sorts ahead of this roster.
+            run.created_at ??= run.started_at;
+          }
         }
         db.imports = [
           ...(db.imports ?? []),
@@ -131,6 +135,7 @@ Given(
             status: 'completed',
             created_at: createdAt,
             completed_at: createdAt,
+            started_at: createdAt,
             parameters: { selectedProgramId: division },
             results: {
               teams: teams.map((team) => ({
@@ -272,6 +277,48 @@ Then(
     ).toBeVisible();
   }
 );
+
+async function openSavedRules(page: Page) {
+  const rules = page.getByRole('button', { name: 'Division rules', exact: true });
+  await expect(rules).toBeVisible();
+  await rules.press('Enter');
+  const division = page.getByRole('table', { name: 'Division Overview' }).getByRole('button', {
+    name: DIVISION,
+    exact: true,
+  });
+  await division.click();
+  await expect(page.getByRole('heading', { name: `${DIVISION} Settings` })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Generate Teams' })).toHaveCount(0);
+}
+
+When("I open the saved roster's division rules", async ({ page }) => {
+  await openSavedRules(page);
+});
+
+When('I save {int} practices a week for the saved division', async ({ page }, count: number) => {
+  await page.getByLabel('Practices per week').fill(String(count));
+  await page.getByRole('button', { name: 'Save Rules' }).click();
+  await expect(page.getByText('Rules saved.')).toBeVisible();
+});
+
+When('I reload the saved roster and reopen its division rules', async ({ page }) => {
+  await page.reload();
+  await openSavedRules(page);
+});
+
+Then('the saved division has {int} practices a week', async ({ page }, count: number) => {
+  await expect(page.getByLabel('Practices per week')).toHaveValue(String(count));
+});
+
+When('I return to the saved rosters', async ({ page }) => {
+  await page.getByRole('button', { name: 'Back to rosters' }).press('Enter');
+  await expect(page.getByRole('button', { name: 'Edit Mode' })).toBeVisible();
+});
+
+Then('the rules switch is absent during manual roster editing', async ({ page }) => {
+  await expect(page.getByRole('button', { name: 'Save Changes' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Division rules' })).toHaveCount(0);
+});
 
 /** Open the roster editor (once) and return a team's column. */
 async function teamColumn(page: Page, teamId: string) {

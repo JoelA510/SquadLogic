@@ -19,13 +19,11 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => {
 });
 
 const { useAutoScheduler } = await import('../frontend/src/hooks/useAutoScheduler.js');
-const { edgeFunctionCache } = await import('../frontend/src/lib/cache.js');
 
 const ORG = '11111111-1111-4111-8111-111111111111';
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  edgeFunctionCache.clear();
 });
 
 describe('useAutoScheduler :: the M4.8 fields of a run', () => {

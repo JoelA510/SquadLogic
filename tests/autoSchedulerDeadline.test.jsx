@@ -24,16 +24,12 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => {
 });
 
 const { useAutoScheduler } = await import('../frontend/src/hooks/useAutoScheduler.js');
-const { edgeFunctionCache } = await import('../frontend/src/lib/cache.js');
 
 const ORG = '11111111-1111-4111-8111-111111111111';
 
-/** A distinct input per test, so the hook's TTL cache never answers instead. */
-let runCount = 0;
 function trigger(result) {
-  runCount += 1;
   return result.current.trigger({
-    teams: [{ id: `t-${runCount}`, division: 'U10' }],
+    teams: [{ id: 't-1', division: 'U10' }],
     slots: [{ id: 's-1', start: 'a', end: 'b', capacity: 1 }],
     seasonSettingsId: '22222222-2222-4222-8222-222222222222',
   });
@@ -42,7 +38,6 @@ function trigger(result) {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
-  edgeFunctionCache.clear();
 });
 
 describe('useAutoScheduler :: the persistence deadline', () => {

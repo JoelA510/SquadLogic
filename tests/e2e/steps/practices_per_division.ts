@@ -325,3 +325,19 @@ When(
     await expect(table.getByText(pair + ', set here', { exact: true })).toBeVisible();
   }
 );
+
+When('I follow Settings to the season calendar', async ({ page }) => {
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await page.getByRole('tab', { name: 'Season & Calendar' }).click();
+  await expect(page.getByRole('heading', { name: 'Programs' })).toBeVisible();
+});
+
+When('I follow Practices and run the auto-scheduler again', async ({ page }) => {
+  // These in-app links preserve the same running client across the settings edit.
+  await page.getByRole('link', { name: 'Practices', exact: true }).click();
+  await page.getByRole('button', { name: 'Run auto-scheduler optimization' }).click();
+  await expect(page.getByRole('region', { name: 'Auto-Scheduler' })).toContainText(
+    'Optimization Complete',
+    { timeout: 30000 }
+  );
+});

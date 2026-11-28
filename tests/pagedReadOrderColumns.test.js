@@ -125,6 +125,7 @@ describe('the column lists the checks stand on', () => {
         'organization_id',
         'score_away',
         'score_home',
+        'score_revision',
         'updated_at',
         'updated_by',
       ].sort()

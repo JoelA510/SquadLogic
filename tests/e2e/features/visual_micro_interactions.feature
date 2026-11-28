@@ -3,15 +3,30 @@ Feature: App Shell Visuals and Responsiveness
   I want the application shell to adapt to my screen and preferences
   So that I can navigate easily and recover from errors
 
-  Scenario: Mobile Sidebar Navigation
+  Scenario Outline: Mobile Sidebar Navigation at <width> pixels
     Given I am logged into SquadLogic as "admin"
-    And I am using a "Mobile" viewport
+    And I am using a <width>-pixel-wide viewport
     When I view the Dashboard
     Then the sidebar should be hidden by default
     When I click the "Hamburger Menu" icon
     Then the sidebar overlay should slide into view
     When I click a navigation link like "Teams & Rosters"
     Then the sidebar overlay should automatically close
+    When I switch to the dark theme on this page
+    Then the sidebar should be hidden by default
+    When I click the "Hamburger Menu" icon
+    Then the sidebar overlay should slide into view
+
+    Examples:
+      | width |
+      | 375   |
+      | 900   |
+
+  Scenario: Desktop sidebar remains available for keyboard navigation
+    Given I am logged into SquadLogic as "admin"
+    And I am using a 901-pixel-wide viewport
+    When I view the Dashboard
+    Then the desktop navigation is available from the account menu by keyboard
 
   Scenario: Global Error Boundary Fallback
     Given I am logged into SquadLogic as "admin"

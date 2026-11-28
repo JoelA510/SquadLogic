@@ -37,7 +37,7 @@ import {
  * minute; whatever has not answered by then is said, and the panel offers to record again. A recording given up before
  * its write never writes afterwards.
  *
- * A lazy chunk of the import panel: nothing here loads until an import records or is rolled back. Each component draws
+ * A lazy chunk of the import panel, loaded before confirming a requested baseline or looking up a rolled-back import. Each component draws
  * nothing and tells the panel what came of it; the panel says it.
  *
  * @module components/import/ImportBaseline

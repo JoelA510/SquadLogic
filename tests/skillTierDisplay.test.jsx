@@ -246,7 +246,7 @@ describe('the player page', () => {
 
   beforeEach(() => {
     // The page reads its player, divisions and teams from tables; one player.
-    mocks.playerRows = [{ ...PLAYERS[0] }];
+    mocks.playerRows = [{ ...PLAYERS[0], season_settings_id: 'season-1' }];
   });
 
   it('has no Skill tier field until the option is on, and shows Years played by default', async () => {
@@ -261,9 +261,9 @@ describe('the player page', () => {
     mocks.stored = { skill_tier: true };
     renderPage();
     await screen.findByRole('heading', { name: 'Alex Smith' });
-    // Named by its content, with no "Edit": the field is shown, not edited here.
-    expect(screen.getByRole('button', { name: 'Skill tier: Advanced' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^Edit Skill tier/ })).not.toBeInTheDocument();
+    expect(screen.getByText('Skill tier')).toBeVisible();
+    expect(screen.getByText('Advanced')).toBeVisible();
+    expect(screen.queryByRole('button', { name: /Skill tier:/ })).not.toBeInTheDocument();
   });
 
   it('leaves Years played out when it is turned off', async () => {

@@ -1,6 +1,6 @@
 import React from 'react';
-import { describe, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
 import InlineField from '../frontend/src/components/ui/InlineField.jsx';
 import AutoSchedulerPanel from '../frontend/src/components/scheduling/AutoSchedulerPanel.jsx';
 import { expectVisibleTextInName } from './helpers/index.js';
@@ -14,7 +14,7 @@ describe('Label in Name (WCAG 2.5.3)', () => {
     expectVisibleTextInName(button);
   });
 
-  it('a read-only InlineField names its button with the rendered value', () => {
+  it('a read-only InlineField displays the rendered value as text', () => {
     render(
       <InlineField
         label="Division"
@@ -23,7 +23,22 @@ describe('Label in Name (WCAG 2.5.3)', () => {
         render={(value) => <span className="badge info">{value}</span>}
       />
     );
-    expectVisibleTextInName(screen.getByRole('button', { name: /^Division: U8 Coed$/ }));
+    expect(screen.getByText('Division')).toBeVisible();
+    expect(screen.getByText('U8 Coed')).toBeVisible();
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('discards an open editor when the field becomes read-only', () => {
+    const props = { label: 'Team', value: 'Thunder', onSave: vi.fn() };
+    const { rerender } = render(<InlineField {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Team: Thunder' }));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Unsaved change' } });
+    rerender(<InlineField {...props} editable={false} />);
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(screen.getByText('Thunder')).toBeVisible();
+    rerender(<InlineField {...props} />);
+    expect(screen.getByRole('button', { name: 'Edit Team: Thunder' })).toBeEnabled();
+    expect(props.onSave).not.toHaveBeenCalled();
   });
 
   it('an empty InlineField still names its button with its label', () => {

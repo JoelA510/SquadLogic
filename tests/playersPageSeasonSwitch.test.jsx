@@ -13,6 +13,7 @@ const SPRING = 'season-spring';
 const mocks = vi.hoisted(() => ({
   tables: /** @type {Record<string, any[]>} */ ({}),
   seasonId: 'season-fall',
+  seasonStatus: 'active',
   rpc: vi.fn(),
 }));
 
@@ -45,7 +46,7 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   useOrganization: () => ({
     currentOrganization: { id: 'org-1' },
-    currentSeasonSetting: { id: mocks.seasonId, status: 'active' },
+    currentSeasonSetting: { id: mocks.seasonId, status: mocks.seasonStatus },
     seasonSettingsLoading: false,
   }),
 }));
@@ -86,6 +87,7 @@ const page = () => (
 describe('PlayersPage across a season switch', () => {
   beforeEach(() => {
     mocks.seasonId = FALL;
+    mocks.seasonStatus = 'active';
     mocks.rpc.mockReset();
     mocks.rpc.mockResolvedValue({ data: 1, error: null });
     mocks.tables = {
@@ -97,6 +99,24 @@ describe('PlayersPage across a season switch', () => {
       ],
       divisions: [],
     };
+  });
+
+  it('closes an open editor and removes bulk actions when this season becomes completed', async () => {
+    const { rerender } = render(page());
+    const name = await screen.findByText('Fran Player');
+    fireEvent.click(screen.getAllByRole('checkbox', { name: 'Select row' })[0]);
+    expect(screen.getByRole('button', { name: 'Waitlist' })).toBeInTheDocument();
+    fireEvent.doubleClick(name);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Player' }), {
+      target: { value: 'Uncommitted change' },
+    });
+    mocks.seasonStatus = 'completed';
+    rerender(page());
+    expect(screen.queryByRole('textbox', { name: 'Player' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Waitlist' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+    expect(screen.getByText('Fran Player')).toBeInTheDocument();
+    expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
   it("sends only the shown season's ids from a bulk action after the header is switched", async () => {

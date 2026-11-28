@@ -563,7 +563,10 @@ export default function DataGrid({
         )}
         <div className="gf-spacer" />
         <span className="muted" style={{ fontSize: 12 }}>
-          Arrow keys move · type or Enter to edit · Enter / Tab to commit · Esc to cancel
+          Arrow keys move
+          {onCellChange &&
+            columns.some((col) => col.editable) &&
+            ' · type or Enter to edit · Enter / Tab to commit · Esc to cancel'}
         </span>
       </div>
     </div>

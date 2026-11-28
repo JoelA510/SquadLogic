@@ -43,7 +43,8 @@ const PLAYER_GAMES_SHOWN = 10;
 export default function PlayerRecordPage() {
   const { playerId } = useParams();
   const navigate = useNavigate();
-  const { currentOrganization } = useOrganization();
+  const { currentOrganization, currentSeasonSetting, availableSeasons, seasonSettingsLoading } =
+    useOrganization();
   const { isEnabled, genderModel } = useFeatures();
   // A demo's people are read-only except where they play and how they are rated (D3 fences, D4
   // hides the controls the server would refuse): names, gender and the buddy request are shown, not
@@ -61,6 +62,15 @@ export default function PlayerRecordPage() {
   const [tab, setTab] = useState('overview');
 
   const orgId = currentOrganization?.id;
+  // A bookmark can open a player whose season differs from the header selection.
+  const playerSeason =
+    currentSeasonSetting?.id === player?.season_settings_id
+      ? currentSeasonSetting
+      : availableSeasons?.find((season) => season.id === player?.season_settings_id);
+  const canEditRecord =
+    !seasonSettingsLoading &&
+    player?.id === playerId &&
+    (playerSeason?.status === 'active' || playerSeason?.status === 'draft');
 
   useEffect(() => {
     let cancelled = false;
@@ -133,6 +143,7 @@ export default function PlayerRecordPage() {
 
   const save = useCallback(
     async (patch) => {
+      if (!canEditRecord) return;
       const previous = player;
       setPlayer((current) => ({ ...current, ...patch }));
       const { error } = await supabase.rpc('admin_update_player', {
@@ -147,7 +158,7 @@ export default function PlayerRecordPage() {
         toast('Saved', 'success');
       }
     },
-    [player, playerId, toast]
+    [canEditRecord, player, playerId, toast]
   );
 
   if (loading) return <LoadingScreen />;
@@ -232,6 +243,16 @@ export default function PlayerRecordPage() {
       }
     >
       <div style={{ maxWidth: 860 }}>
+        {!canEditRecord && (
+          <p
+            role="note"
+            className="mb-4 rounded-lg border border-border-subtle bg-bg-surface px-4 py-2 text-sm text-text-secondary"
+          >
+            {playerSeason?.status === 'completed'
+              ? 'This player’s season is completed. The record is read-only.'
+              : 'This record is read-only until the player’s season is verified.'}
+          </p>
+        )}
         {tab === 'overview' && (
           <div className="card">
             <div className="card-body">
@@ -239,13 +260,13 @@ export default function PlayerRecordPage() {
                 <InlineField
                   label="First name"
                   value={player.first_name}
-                  editable={canEditPlayerField(inDemo, 'first_name')}
+                  editable={canEditRecord && canEditPlayerField(inDemo, 'first_name')}
                   onSave={(v) => save({ first_name: v })}
                 />
                 <InlineField
                   label="Last name"
                   value={player.last_name}
-                  editable={canEditPlayerField(inDemo, 'last_name')}
+                  editable={canEditRecord && canEditPlayerField(inDemo, 'last_name')}
                   onSave={(v) => save({ last_name: v })}
                 />
                 <InlineField
@@ -256,7 +277,7 @@ export default function PlayerRecordPage() {
                     { value: 'm', label: 'Male' },
                     { value: 'f', label: 'Female' },
                   ]}
-                  editable={canEditPlayerField(inDemo, 'gender')}
+                  editable={canEditRecord && canEditPlayerField(inDemo, 'gender')}
                   onSave={(v) => save({ gender: v })}
                   render={(v) => (v === 'm' ? 'Male' : v === 'f' ? 'Female' : null)}
                 />
@@ -275,6 +296,7 @@ export default function PlayerRecordPage() {
                 />
                 <InlineField
                   label="Team"
+                  editable={canEditRecord}
                   value={player.team_id || ''}
                   type="select"
                   options={teamOptions}
@@ -283,12 +305,14 @@ export default function PlayerRecordPage() {
                 />
                 <InlineField
                   label="Jersey #"
+                  editable={canEditRecord}
                   value={player.jersey_number}
                   type="number"
                   onSave={(v) => save({ jersey_number: v })}
                 />
                 <InlineField
                   label="Status"
+                  editable={canEditRecord}
                   value={status}
                   type="select"
                   options={statusOptions}
@@ -302,7 +326,7 @@ export default function PlayerRecordPage() {
                 <InlineField
                   label="Play-up requested"
                   value={player.play_up_requested ? 'true' : 'false'}
-                  editable={canEditPlayerField(inDemo, 'play_up_requested')}
+                  editable={canEditRecord && canEditPlayerField(inDemo, 'play_up_requested')}
                   type="select"
                   options={[
                     { value: 'true', label: 'Yes' },
@@ -318,6 +342,7 @@ export default function PlayerRecordPage() {
                 {isEnabled(FEATURE_FLAGS.YEARS_PLAYED) && (
                   <InlineField
                     label="Years played"
+                    editable={canEditRecord}
                     value={player.years_played}
                     type="number"
                     onSave={(v) => save({ years_played: v })}
@@ -326,6 +351,7 @@ export default function PlayerRecordPage() {
                 {isEnabled(FEATURE_FLAGS.PLAYER_RATING) && (
                   <InlineField
                     label="Rating"
+                    editable={canEditRecord}
                     value={player.rating}
                     type="select"
                     options={[1, 2, 3, 4, 5].map((n) => ({
@@ -350,7 +376,7 @@ export default function PlayerRecordPage() {
                   <InlineField
                     label="Buddy request"
                     value={player.buddy_request}
-                    editable={canEditPlayerField(inDemo, 'buddy_request')}
+                    editable={canEditRecord && canEditPlayerField(inDemo, 'buddy_request')}
                     onSave={(v) => save({ buddy_request: v })}
                     placeholder="None"
                   />
@@ -358,6 +384,7 @@ export default function PlayerRecordPage() {
                 {isEnabled(FEATURE_FLAGS.COACHING_INTEREST) && (
                   <InlineField
                     label="Guardian will coach"
+                    editable={canEditRecord}
                     value={player.willing_to_coach ? 'true' : 'false'}
                     type="select"
                     options={[

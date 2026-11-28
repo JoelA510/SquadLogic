@@ -102,6 +102,7 @@ numbers are as of `7405db3` and will move: search by name.
 | C12f | Reopen division rules after saving teams                                                  | done                     | this change  | 2026-11-27 |
 | C12g | Show saved roster capacity on the dashboard and in both teaming overviews | fixed | this change | 2026-11-27 |
 | C12h | Games can reopen a saved schedule with a week that has no available slot                 | fixed in this change     | this change  | 2026-11-27 |
+| C12i | Show archived player and coach records as read-only                                       | done                     | this change  | 2026-11-27 |
 | C13 | Test-suite audit                                                                          | gated on O1; plan first  |              |            |
 | C14 | Cut a release                                                                             | gated on C12             |              |            |
 | C16 | Desktop build                                                                             | gated on C13; plan first |              |            |

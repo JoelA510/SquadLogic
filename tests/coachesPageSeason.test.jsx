@@ -2,14 +2,15 @@
 // row belongs to one season, so last season's coaches, and the teams of last season's divisions,
 // are not on it. The fake answers an equality filter as PostgREST does.
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const FALL = 'season-fall';
 const SPRING = 'season-spring';
 
 const mocks = vi.hoisted(() => ({
+  seasonStatus: 'active',
   tables: /** @type {Record<string, any[]>} */ ({}),
   reads: /** @type {Array<{ table: string, eqs: Array<[string, unknown]> }>} */ ([]),
 }));
@@ -44,7 +45,7 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   useOrganization: () => ({
     currentOrganization: { id: 'org-1' },
-    currentSeasonSetting: { id: FALL, status: 'active' },
+    currentSeasonSetting: { id: FALL, status: mocks.seasonStatus },
     seasonSettingsLoading: false,
   }),
 }));
@@ -62,6 +63,36 @@ vi.mock('../frontend/src/components/ui/ToastHost.jsx', () => ({
 const { default: CoachesPage } = await import('../frontend/src/pages/CoachesPage.jsx');
 
 describe('CoachesPage', () => {
+  beforeEach(() => {
+    mocks.seasonStatus = 'active';
+  });
+
+  it('closes the team assignment dialog when the displayed season is completed', async () => {
+    mocks.tables = {
+      coaches: [
+        { id: 'c1', organization_id: 'org-1', season_settings_id: FALL, full_name: 'Fall Coach' },
+      ],
+      divisions: [],
+      teams: [],
+      team_coach_assignments: [],
+    };
+    const page = () => (
+      <MemoryRouter>
+        <CoachesPage />
+      </MemoryRouter>
+    );
+    const { rerender } = render(page());
+    await screen.findByText('Fall Coach');
+    fireEvent.click(screen.getByRole('button', { name: 'Row actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Manage teams' }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    mocks.seasonStatus = 'completed';
+    rerender(page());
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Row actions' })).not.toBeInTheDocument();
+    expect(screen.getByText('Fall Coach')).toBeInTheDocument();
+  });
+
   it("lists the selected season's coaches and nobody else's", async () => {
     mocks.tables = {
       coaches: [

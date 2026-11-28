@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   reads: /** @type {string[]} */ ([]),
   failing: /** @type {string[]} */ ([]),
   demoExpiresAt: null,
+  seasonSettingsLoading: false,
 }));
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
@@ -52,6 +53,13 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   useOrganization: () => ({
     currentOrganization: { id: MOCK_ORG_ID, demo_expires_at: mocks.demoExpiresAt },
+    availableSeasons: [
+      { id: 'archive', status: 'completed' },
+      { id: 'current', status: 'active' },
+      { id: 'future', status: 'draft' },
+    ],
+    currentSeasonSetting: { id: 'current', status: 'active' },
+    seasonSettingsLoading: mocks.seasonSettingsLoading,
     featureFlags: {},
     loading: false,
   }),
@@ -63,8 +71,8 @@ vi.mock('../frontend/src/components/ui/ToastHost.jsx', () => ({
   useToast: () => vi.fn(),
 }));
 
-function renderPage() {
-  return render(
+function PlayerRoute() {
+  return (
     <MemoryRouter initialEntries={['/players/p1']}>
       <Routes>
         <Route path="/players/:playerId" element={<PlayerRecordPage />} />
@@ -73,10 +81,15 @@ function renderPage() {
   );
 }
 
+function renderPage() {
+  return render(<PlayerRoute />);
+}
+
 describe('PlayerRecordPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.demoExpiresAt = null;
+    mocks.seasonSettingsLoading = false;
     mocks.reads = [];
     mocks.failing = [];
     mocks.rpc.mockResolvedValue({ data: null, error: null });
@@ -85,6 +98,7 @@ describe('PlayerRecordPage', () => {
         {
           id: 'p1',
           organization_id: MOCK_ORG_ID,
+          season_settings_id: 'current',
           first_name: 'Alex',
           last_name: 'Smith',
           gender: 'm',
@@ -131,6 +145,48 @@ describe('PlayerRecordPage', () => {
         p_patch: { first_name: 'Alexander' },
       })
     );
+  });
+
+  it('shows an archived player opened directly from a different season without editing controls', async () => {
+    mocks.tables.players[0].season_settings_id = 'archive';
+    renderPage();
+    await screen.findByRole('heading', { name: 'Alex Smith' });
+    expect(screen.getByRole('note')).toHaveTextContent(/completed.*read-only/i);
+    expect(screen.getByText('Alex')).toBeVisible();
+    expect(screen.getByText('Team')).toBeVisible();
+    expect(screen.queryAllByRole('button', { name: /^Edit / })).toHaveLength(0);
+    expect(screen.getByRole('tab', { name: 'Team & Schedule' })).toBeEnabled();
+  });
+
+  it('keeps the draft player editable when its season is verified', async () => {
+    mocks.tables.players[0].season_settings_id = 'future';
+    renderPage();
+    await screen.findByRole('heading', { name: 'Alex Smith' });
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Edit Team:/ })).toBeEnabled();
+  });
+
+  it.each(['unavailable', undefined])(
+    'keeps the record readable when its own season cannot be verified (%s)',
+    async (seasonId) => {
+      mocks.tables.players[0].season_settings_id = seasonId;
+      renderPage();
+      await screen.findByRole('heading', { name: 'Alex Smith' });
+      expect(screen.getByRole('note')).toHaveTextContent(/season.*verif/i);
+      expect(screen.queryAllByRole('button', { name: /^Edit / })).toHaveLength(0);
+    }
+  );
+
+  it('restores the active player’s editors when season loading finishes', async () => {
+    mocks.seasonSettingsLoading = true;
+    const view = renderPage();
+    await screen.findByRole('heading', { name: 'Alex Smith' });
+    expect(screen.getByRole('note')).toHaveTextContent(/season.*verif/i);
+    expect(screen.queryByRole('button', { name: /^Edit Team:/ })).toBeNull();
+    mocks.seasonSettingsLoading = false;
+    view.rerender(<PlayerRoute />);
+    expect(screen.queryByRole('note')).toBeNull();
+    expect(screen.getByRole('button', { name: /^Edit Team:/ })).toBeEnabled();
   });
 
   // The stored play-up request (docs/changes/2026-10-27-play-up-by-request.md): an admin sets

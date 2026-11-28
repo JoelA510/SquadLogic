@@ -113,7 +113,7 @@ numbers are as of `7405db3` and will move: search by name.
 - **Phase 2 (C12, C13, C14) starts only when the owner writes here that manual testing passed.**
   Manual testing: _not yet recorded._
 - **C13 starts with a plan** (`plan-change`), opened as a pull request. The audit itself starts when the owner
-  approves that plan here. Test-suite audit plan: _not yet approved._
+  approves that plan here. [Test-suite audit plan](2026-11-28-test-suite-audit.md): _proposed, awaiting owner approval._
 - **C16 starts with a plan**, after C13 is complete, and the build starts when the owner approves it here.
   Desktop build plan: _not yet approved._
 

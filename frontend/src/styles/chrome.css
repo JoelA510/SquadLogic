@@ -155,15 +155,6 @@
 .topbar-spacer {
   flex: 1;
 }
-/* Mobile-only nav toggle (unlayered CSS outranks Tailwind's `hidden`). */
-.nav-toggle {
-  display: none;
-}
-@media (max-width: 900px) {
-  .nav-toggle {
-    display: grid;
-  }
-}
 .icon-btn {
   width: 36px;
   height: 36px;
@@ -188,6 +179,20 @@
   border-radius: 50%;
   background: var(--danger);
   border: 2px solid var(--bg-shell);
+}
+
+/* Desktop has persistent navigation. The compact drawer and its toggle share a breakpoint. */
+.nav-backdrop,
+.nav-toggle {
+  display: none;
+}
+@media (max-width: 900px) {
+  .nav-backdrop {
+    display: block;
+  }
+  .nav-toggle {
+    display: grid;
+  }
 }
 
 .avatar {
@@ -716,6 +721,7 @@
     grid-template-columns: 0 1fr;
   }
   .nav {
+    visibility: hidden;
     position: absolute;
     top: var(--topbar-h);
     bottom: 0;
@@ -728,6 +734,7 @@
     transition: transform 0.2s ease;
   }
   .nav[data-mobile-open='true'] {
+    visibility: visible;
     transform: none;
   }
 }

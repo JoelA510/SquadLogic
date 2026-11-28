@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import DashboardWorkflow from '../components/DashboardWorkflow.jsx';
 import { useDashboardData } from '../hooks/useDashboardData.js';
 import { useTeamPersistence } from '../hooks/useTeamPersistence.js';
-import { useImport } from '../contexts/ImportContext.jsx';
+import { useSeasonTeamingInput } from '../hooks/useSeasonTeamingInput.js';
 import { useTheme } from '../contexts/ThemeContext.jsx';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { Building2, Calendar, Users, Trophy, ArrowRight, Sparkles } from 'lucide-react';
@@ -27,8 +27,8 @@ export default function WorkflowPage() {
   // page has ever had. `error` it DOES return, now that it stops swallowing
   // the three fetch failures underneath it.
   const { team, practice, game, loading, error: dataError, errors } = useDashboardData();
-  const { persistenceSnapshot, loading: _persistenceLoading } = useTeamPersistence();
-  const { importedData } = useImport();
+  const { persistenceSnapshot, error: persistenceError } = useTeamPersistence();
+  const { importedData, rosterError } = useSeasonTeamingInput();
   const { theme: _theme } = useTheme();
   const { currentOrganization } = useOrganization();
   // The banner has two sources with different lifetimes, and collapsing them
@@ -55,18 +55,19 @@ export default function WorkflowPage() {
 
   const location = useLocation();
 
-  const error = navError ?? (dataError === dismissedDataError ? null : dataError);
+  const readError = rosterError ?? persistenceError ?? dataError;
+  const error = navError ?? (readError === dismissedDataError ? null : readError);
 
   const dismissError = () => {
     if (navError) setNavError(null);
-    else setDismissedDataError(dataError);
+    else setDismissedDataError(readError);
   };
 
   useEffect(() => {
-    if (!dataError && dismissedDataError !== null) {
+    if (!readError && dismissedDataError !== null) {
       setDismissedDataError(null);
     }
-  }, [dataError, dismissedDataError]);
+  }, [readError, dismissedDataError]);
 
   useEffect(() => {
     if (location.state?.error) {

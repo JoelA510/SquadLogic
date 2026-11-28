@@ -37,3 +37,11 @@ Feature: Importing a game schedule that already exists (schedule expansion, PR 6
     And the roll back says the import's baseline still describes the imported schedule
     When I open the Games page after the import
     Then the Games page has no Published game
+
+  Scenario: Undoing the next import preserves an earlier final score
+    When the admin turns on "Score Entry" and "Standings" in the Settings features
+    And I import only fixture game "G-0001"
+    And I save a two to one score for the first fixture game
+    And I import only fixture game "G-0002"
+    And I roll back this one-game import
+    Then only the first fixture game and its two to one score remain

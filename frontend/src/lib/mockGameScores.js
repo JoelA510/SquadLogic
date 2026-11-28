@@ -102,6 +102,7 @@ export function mockUpdateSavedGameScore(db, params, ctx) {
       Object.assign(stored, {
         score_home: Number(home),
         score_away: Number(away),
+        score_revision: globalThis.crypto.randomUUID(),
         updated_at: now,
         updated_by: ctx.currentUserId,
       });
@@ -116,6 +117,7 @@ export function mockUpdateSavedGameScore(db, params, ctx) {
           away_team_id: game.away_team_id,
           score_home: Number(home),
           score_away: Number(away),
+          score_revision: globalThis.crypto.randomUUID(),
           created_at: now,
           updated_at: now,
           updated_by: ctx.currentUserId,

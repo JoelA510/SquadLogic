@@ -139,6 +139,35 @@ afterEach(() => {
 });
 
 describe('an admin of two organizations switches between them', () => {
+  it('waits for memberships when an administrator signs back in on the same page', async () => {
+    const admin = mocks.user;
+    const completedEmptyReads = [];
+    function Probe() {
+      const { loading, organizations } = useOrganization();
+      // The router makes its decision on the first committed render, before the fetch effect.
+      React.useLayoutEffect(() => {
+        if (mocks.user && !loading && organizations.length === 0) {
+          completedEmptyReads.push(mocks.user.id);
+        }
+      });
+      return <span>{organizations.length} memberships</span>;
+    }
+    const tree = () => (
+      <OrganizationProvider>
+        <Probe />
+      </OrganizationProvider>
+    );
+    const view = render(tree());
+    await screen.findByText('2 memberships');
+    mocks.user = null;
+    view.rerender(tree());
+    await screen.findByText('0 memberships');
+    mocks.user = admin;
+    view.rerender(tree());
+    await screen.findByText('2 memberships');
+    expect(completedEmptyReads).toEqual([]);
+  });
+
   it('lists both, starts in the first, and moves the season read, the role and the stored choice on a switch', async () => {
     const seen = await mountProvider();
     expect(seen.current.organizations.map((m) => m.organization_id)).toEqual([ORG_A, ORG_B]);

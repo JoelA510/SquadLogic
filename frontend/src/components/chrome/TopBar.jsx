@@ -77,7 +77,7 @@ CtxSwitcher.propTypes = {
  * Application top bar: brand, org/season switchers, global search,
  * Season Setup shortcut, theme toggle, notifications, account menu.
  */
-export default function TopBar({ onToggleNav = undefined }) {
+export default function TopBar({ onToggleNav = undefined, mobileNavOpen = false }) {
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
   const {
@@ -185,6 +185,8 @@ export default function TopBar({ onToggleNav = undefined }) {
         className="icon-btn nav-toggle"
         onClick={onToggleNav}
         aria-label="Hamburger Menu"
+        aria-expanded={mobileNavOpen}
+        aria-controls="primary-navigation-drawer"
       >
         <Menu size={20} />
       </button>
@@ -288,4 +290,5 @@ export default function TopBar({ onToggleNav = undefined }) {
 
 TopBar.propTypes = {
   onToggleNav: PropTypes.func,
+  mobileNavOpen: PropTypes.bool,
 };

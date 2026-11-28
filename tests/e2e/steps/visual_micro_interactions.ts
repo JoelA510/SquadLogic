@@ -3,23 +3,31 @@ import { expect } from '@playwright/test';
 
 const { Given, When, Then } = createBdd();
 
-Given('I am using a {string} viewport', async ({ page }, viewport: string) => {
-  if (viewport === 'Mobile') {
-    await page.setViewportSize({ width: 375, height: 667 });
-  } else {
-    await page.setViewportSize({ width: 1280, height: 720 });
-  }
+Given('I am using a {int}-pixel-wide viewport', async ({ page }, width: number) => {
+  await page.setViewportSize({ width, height: 760 });
+});
+
+Then('the desktop navigation is available from the account menu by keyboard', async ({ page }) => {
+  const home = page
+    .getByRole('navigation', { name: 'Primary' })
+    .getByRole('link', { name: 'Home', exact: true });
+  await expect(home).toBeInViewport();
+  await expect(page.getByRole('button', { name: 'Hamburger Menu' })).toHaveCount(0);
+  await page.getByRole('button', { name: /^Account menu for/ }).focus();
+  await page.keyboard.press('Tab');
+  await expect(home).toBeFocused();
 });
 
 Then('the sidebar should be hidden by default', async ({ page }) => {
-  const sidebar = page.locator('aside').first();
-  const isMobile = await page.evaluate(() => window.innerWidth < 768);
-  if (isMobile) {
-    const box = await sidebar.boundingBox();
-    expect(box!.x + box!.width).toBeLessThanOrEqual(5);
-  } else {
-    await expect(sidebar).toBeVisible();
-  }
+  const account = page.getByRole('button', { name: /^Account menu for/ });
+  await account.focus();
+  await page.keyboard.press('Tab');
+  await expect(page.locator('aside.nav :focus')).toHaveCount(0);
+  await expect(page.getByRole('navigation', { name: 'Primary' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Hamburger Menu' })).toHaveAttribute(
+    'aria-expanded',
+    'false'
+  );
 });
 
 When('I reset error flags and click {string}', async ({ page }, buttonName: string) => {
@@ -31,24 +39,33 @@ When('I reset error flags and click {string}', async ({ page }, buttonName: stri
 });
 
 Then('the sidebar overlay should slide into view', async ({ page }) => {
-  const sidebar = page.locator('aside').first();
-  await expect(sidebar).toBeVisible();
-  await page.waitForTimeout(500);
-  const box = await sidebar.boundingBox();
-  expect(box?.x).toBe(0);
+  const navigation = page.getByRole('navigation', { name: 'Primary' });
+  await expect(navigation).toBeInViewport();
+  await expect(page.getByRole('button', { name: 'Hamburger Menu' })).toHaveAttribute(
+    'aria-expanded',
+    'true'
+  );
+  await page.getByRole('button', { name: /^Account menu for/ }).focus();
+  await page.keyboard.press('Tab');
+  const home = navigation.getByRole('link', { name: 'Home', exact: true });
+  await expect(home).toBeFocused();
+  await expect(home).toBeInViewport();
+  await expect(home).toHaveCSS('outline-style', 'solid');
 });
 
 When('I click the "Hamburger Menu" icon', async ({ page }) => {
-  await page.getByRole('button', { name: 'Hamburger Menu' }).first().click({ force: true });
+  await page.getByRole('button', { name: 'Hamburger Menu' }).press('Enter');
 });
 
 When('I click a navigation link like {string}', async ({ page }, linkName: string) => {
-  await page.getByRole('link', { name: linkName }).first().click({ force: true });
+  await page
+    .getByRole('navigation', { name: 'Primary' })
+    .getByRole('link', { name: linkName })
+    .press('Enter');
 });
 
 Then('the sidebar overlay should automatically close', async ({ page }) => {
-  const sidebar = page.locator('aside').first();
-  await expect(sidebar).not.toBeInViewport();
+  await expect(page.getByRole('navigation', { name: 'Primary' })).toHaveCount(0);
 });
 
 When('a React component throws an unexpected rendering error', async ({ page }) => {

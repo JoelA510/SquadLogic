@@ -37,7 +37,7 @@ BEGIN;
 \ir _fixtures.sql
 \ir fixtures/confirm_game_import.psql
 
-SELECT plan(231);
+SELECT plan(234);
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
 CREATE FUNCTION pg_temp.u(n int) RETURNS uuid LANGUAGE sql IMMUTABLE AS $f$
@@ -712,6 +712,38 @@ BEGIN
         v_out := v_out || jsonb_build_object('tbd', (SELECT (t ->> 'external_ref') || ' ' || (t ->> 'game_date')
                                                        FROM jsonb_array_elements(public.get_schedule_tbd('a1111111-1111-1111-1111-111111111aaa')) t
                                                       WHERE t ->> 'external_ref' = 'G-950'));
+        -- A carried game's score is checked against the score seen at apply, under the same writer lock.
+        BEGIN
+            PERFORM public.update_game_score(c_org, v_g, 3::smallint, 1::smallint);
+            BEGIN
+                PERFORM public.rollback_game_import_job(v_job);
+                v_out := v_out || jsonb_build_object('edited_carry', 'accepted');
+            EXCEPTION WHEN SQLSTATE '22023' THEN
+                GET STACKED DIAGNOSTICS d = PG_EXCEPTION_DETAIL;
+                v_out := v_out || jsonb_build_object('edited_carry', replace(d, v_g::text, '<G-101>'));
+            END;
+            PERFORM public.update_game_score(c_org, v_g, 2::smallint, 0::smallint);
+            BEGIN
+                PERFORM public.rollback_game_import_job(v_job);
+                v_out := v_out || jsonb_build_object('edited_back', 'accepted');
+            EXCEPTION WHEN SQLSTATE '22023' THEN
+                GET STACKED DIAGNOSTICS d = PG_EXCEPTION_DETAIL;
+                v_out := v_out || jsonb_build_object('edited_back', replace(d, v_g::text, '<G-101>'));
+            END;
+            RAISE EXCEPTION 'restore the original score' USING ERRCODE = 'P1121';
+        EXCEPTION WHEN SQLSTATE 'P1121' THEN NULL;
+        END;
+        BEGIN
+            PERFORM public.rollback_game_import_job(v_job);
+            v_out := v_out || jsonb_build_object('carried_score_restored',
+                (SELECT gs.score_home = 2 AND gs.score_away = 0 AND ga.run_id = (r.previous_payload ->> 'run_id')::uuid
+                   FROM public.game_scores gs JOIN public.game_assignments ga ON ga.id = gs.game_id
+                   JOIN public.import_application_records r ON r.target_id = ga.id AND r.import_job_id = v_job
+                  WHERE ga.id = v_g AND r.target_table = 'game_assignments')
+                AND NOT EXISTS (SELECT 1 FROM public.game_assignments WHERE external_ref = 'G-951'));
+        EXCEPTION WHEN SQLSTATE '22023' THEN
+            v_out := v_out || jsonb_build_object('carried_score_restored', false);
+        END;
         -- M3 control: a flag the import does not know still refuses the whole apply.
         v_bad := (public.create_import_job(c_org, 'games', 'badflag.csv')).id;
         PERFORM set_config('request.jwt.claims', '{}', true);
@@ -737,6 +769,12 @@ INSERT INTO marks VALUES ('fp_before_scored', pg_temp.fp());
 INSERT INTO marks VALUES ('scored', pg_temp.scored_scenario()::text);
 SELECT is((SELECT v::jsonb ->> 'rollback' FROM marks WHERE name = 'scored'), '22023:game_import_changed count=1 ids=<G-101>',
     'a score entered on a game the import wrote is a change since: the rollback is refused and names the game');
+SELECT is((SELECT v::jsonb ->> 'edited_carry' FROM marks WHERE name = 'scored'), 'game_import_changed count=1 ids=<G-101>',
+    'a later edit to a carried score refuses rollback');
+SELECT is((SELECT v::jsonb ->> 'edited_back' FROM marks WHERE name = 'scored'), 'game_import_changed count=1 ids=<G-101>',
+    'changing the score back to the same totals in the same transaction still refuses rollback');
+SELECT is((SELECT v::jsonb ->> 'carried_score_restored' FROM marks WHERE name = 'scored'), 'true',
+    'rollback removes the newly added game and restores the carried game to its original run with its original score');
 SELECT is((SELECT v::jsonb ->> 'published_and_scored' FROM marks WHERE name = 'scored'), '{"skipped-published": 1}',
     'a Published game that is also scored, with a changed row, is skipped as Published (changes must be allowed first)');
 SELECT is((SELECT v::jsonb ->> 'scored' FROM marks WHERE name = 'scored'), '{"skipped-scored": 1}',

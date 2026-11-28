@@ -30,6 +30,7 @@ export async function storeFixtureRegistrations(page: Page, importId: string) {
             organization_id: org,
             season_settings_id: season.id,
             name: row.division,
+            practices_per_week: 1,
           };
           db.divisions.push(division);
         }

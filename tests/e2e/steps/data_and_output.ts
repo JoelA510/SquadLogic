@@ -348,6 +348,38 @@ When('I apply the field slot CSV import', async ({ page }) => {
   });
 });
 
+Given(
+  'I upload a field slot CSV with an unknown division on the second data row',
+  async ({ page }) => {
+    await page.getByRole('button', { name: 'fields Upload field configurations' }).click();
+    await page.locator('input[type="file"]').setInputFiles({
+      name: 'field-divisions.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from(
+        [
+          'Location,Field,Subunit,Type,Day,Start,End,Capacity,Valid From,Valid Until,Division',
+          'Example Park,North,A,practice,Mon,16:00,17:00,1,2026-03-01,2026-05-31,',
+          'Example Park,North,A,practice,Thu,16:00,17:00,1,2026-03-01,2026-05-31,Unlisted Cup',
+        ].join('\n')
+      ),
+    });
+    await expect(page.getByRole('button', { name: 'Validate Only' })).toBeVisible();
+  }
+);
+
+When('I apply the field import with the unknown division', async ({ page }) => {
+  await page.getByRole('button', { name: 'Apply Field Import' }).click();
+  await expect(page.getByRole('heading', { name: 'Import Applied with Warnings' })).toBeVisible();
+});
+
+Then('I can identify the refused field row and its correction', async ({ page }) => {
+  const refusals = page.getByRole('region', { name: 'Field rows to correct' });
+  await expect(refusals.getByRole('listitem')).toHaveCount(1);
+  await expect(refusals.getByRole('listitem')).toContainText('Data row 2');
+  await expect(refusals.getByRole('listitem')).toContainText('Unlisted Cup');
+  await expect(refusals).toContainText('import the corrected rows');
+});
+
 When('I validate the field slot CSV import for later review', async ({ page }) => {
   await page.getByRole('button', { name: 'Validate Only' }).click();
   await expect(page.getByRole('heading', { name: 'Import Ready to Apply' })).toBeVisible({

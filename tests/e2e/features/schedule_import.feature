@@ -37,3 +37,14 @@ Feature: Importing a game schedule that already exists (schedule expansion, PR 6
     And the roll back says the import's baseline still describes the imported schedule
     When I open the Games page after the import
     Then the Games page has no Published game
+
+  Scenario: A baseline that cannot load leaves the administrator on Preview
+    Given I have navigated to the Data Import page
+    When I choose the games import and upload the fixture's schedule
+    And I mark every undecided team an outside club
+    And I preview the schedule import
+    And I confirm while the publication baseline tool is unavailable
+    Then the preview still has the administrator's choices and explains how to recover
+    When I choose to import without recording a baseline
+    Then the schedule import is applied and its games are Published
+    And the import has no recorded publication baseline

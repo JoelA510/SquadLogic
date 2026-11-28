@@ -317,3 +317,30 @@ Then('the Games page has no Published game', async ({ page }) => {
   );
   await expect(page.getByTestId('game-time-tbd-list')).toHaveCount(0);
 });
+
+When('I confirm while the publication baseline tool is unavailable', async ({ page }) => {
+  await page.route('**/ImportBaseline.jsx*', (route) => route.abort('failed'));
+  await page.getByLabel(`Create the ${OUTSIDE.size} records listed above`).check();
+  await page.getByRole('button', { name: 'Confirm and import' }).click();
+});
+
+Then(
+  "the preview still has the administrator's choices and explains how to recover",
+  async ({ page }) => {
+    await expect(page.getByRole('alert')).toContainText('No games were imported.');
+    await expect(page.getByTestId('schedule-import-step')).toContainText('3 of 4');
+    await expect(page.getByLabel(`Create the ${OUTSIDE.size} records listed above`)).toBeChecked();
+    await expect(page.getByRole('button', { name: 'Confirm and import' })).toBeEnabled();
+  }
+);
+
+When('I choose to import without recording a baseline', async ({ page }) => {
+  await page.getByLabel(/^Record this schedule as the baseline/).uncheck();
+  await page.getByRole('button', { name: 'Confirm and import' }).click();
+  await expect(page.getByTestId('schedule-import-step')).toContainText('4 of 4');
+});
+
+Then('the import has no recorded publication baseline', async ({ page }) => {
+  await expect(page.getByTestId('schedule-import-baseline')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Roll back this import' })).toBeEnabled();
+});

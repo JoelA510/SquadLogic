@@ -21,6 +21,7 @@ import {
 } from '@squadlogic/core/scheduleImport/index.js';
 import { supabase } from '../../lib/supabaseClient.js';
 import { logger } from '../../lib/logger.js';
+import { withTimeout } from '../../lib/withTimeout.js';
 import { useOrganization } from '../../contexts/OrganizationContext.jsx';
 import Button from '../ui/Button.jsx';
 import { NAMED, NamedList, Notice } from './importParts.jsx';
@@ -55,10 +56,11 @@ import {
 } from '../../utils/gameImportMapping.js';
 
 // G5: recording an import as the publication baseline reads the whole saved schedule and makes the master export, so
-// it is its own chunk, loaded only when an import records or is rolled back. A chunk that cannot be loaded (a new
+// it is its own chunk, loaded before a requested recording or when looking up a rolled-back import. A chunk that cannot be loaded (a new
 // deploy, a dropped connection) is said through the same callback as any other failure, never left to throw in render.
 // React.lazy keeps what its loader settled to for good, so a failed load is not kept: the next recording or look-up
 // (`baselinePart(...)()` at its start) makes a new lazy component, which loads the chunk again.
+const loadBaseline = () => import('./ImportBaseline.jsx');
 /** A component that reports `outcome` once, through the prop `report` names. */
 const reportOnce = (report, outcome) =>
   function ChunkFailed(props) {
@@ -74,7 +76,7 @@ const reportOnce = (report, outcome) =>
 function baselinePart(name, onFailure) {
   const make = () =>
     lazy(() =>
-      import('./ImportBaseline.jsx').then(
+      loadBaseline().then(
         (m) => ({ default: m[name] }),
         (error) => {
           logger.error('The baseline module could not be loaded:', error);
@@ -822,10 +824,31 @@ function ScheduleImportWorkflow({
   const handleConfirm = async () => {
     if (!jobId || !counts || !organizationId || unknown) return;
     setError(null);
-    setBusy('Importing');
-    // While the confirm is in flight the job is not one to discard on leaving: the admin confirmed it, and a discard
-    // racing the apply could end the job the apply is about to write.
+    // Confirm belongs to the club and job shown at the click, including while the baseline code loads.
+    // Leaving the page must not discard a job the admin has already confirmed.
     pendingJob.current = null;
+    if (K.recordsBaseline && recordBaseline) {
+      setBusy('Loading the publication baseline tool');
+      try {
+        await withTimeout(loadBaseline(), 30_000, 'Publication baseline tool');
+      } catch (error) {
+        logger.error('The publication baseline tool could not load before import:', error);
+        if (!alive.current) {
+          // No apply was sent. Use the same guarded cleanup as leaving an unconfirmed preview.
+          await K.discard(client, jobId).catch((err) => {
+            logger.warn('The staged import could not be discarded on leaving:', err);
+          });
+          return;
+        }
+        pendingJob.current = jobId;
+        setError(
+          'No games were imported. The publication baseline tool could not load. Your preview and choices are still here. Try Confirm and import again, or uncheck Record this schedule to continue without a baseline. If this page needs an update, reload and choose the file again.'
+        );
+        setBusy(null);
+        return;
+      }
+    }
+    setBusy('Importing');
     try {
       const outcome = await K.confirm(client, {
         organizationId,

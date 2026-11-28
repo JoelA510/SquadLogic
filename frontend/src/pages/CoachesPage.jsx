@@ -10,6 +10,8 @@ import {
 } from 'lucide-react';
 import Page from '../components/chrome/Page.jsx';
 import PageHeader from '../components/chrome/PageHeader.jsx';
+import SeasonReadOnlyNote from '../components/chrome/SeasonReadOnlyNote.jsx';
+import { useSeasonReadOnly } from '../hooks/useSeasonReadOnly.js';
 import DataGrid from '../components/grid/DataGrid.jsx';
 import Button from '../components/ui/Button.jsx';
 import Badge from '../components/ui/Badge.jsx';
@@ -241,7 +243,8 @@ export default function CoachesPage() {
   // and only then committed.
   const [assignmentRows, setAssignmentRows] = useState(null);
   const [pendingChange, setPendingChange] = useState(null);
-  const canManageCoaches = can(PERMISSIONS.MANAGE_ORGANIZATION);
+  const seasonReadOnly = useSeasonReadOnly();
+  const canManageCoaches = can(PERMISSIONS.MANAGE_ORGANIZATION) && !seasonReadOnly;
   // A demo's coach records are read-only (the server refuses every write, D3): no status edits and
   // no deletes. Assigning a coach to a team is a team write, and stays.
   const { isDemo } = useDemo();
@@ -646,12 +649,16 @@ export default function CoachesPage() {
         />
       }
     >
+      <SeasonReadOnlyNote>
+        Coaches from this completed season are read-only. You can review their team assignments.
+      </SeasonReadOnlyNote>
       {error && (
         <div className="badge danger" role="alert" style={{ margin: 12 }}>
           {error}
         </div>
       )}
       <DataGrid
+        key={seasonReadOnly ? 'archived' : 'editable'}
         label="Coaches grid"
         columns={columns}
         rows={rows}
@@ -769,7 +776,7 @@ export default function CoachesPage() {
       />
 
       <Modal
-        open={Boolean(manageCoach)}
+        open={canManageCoaches && Boolean(manageCoach)}
         onClose={() => {
           setPendingChange(null);
           setManageCoachId(null);

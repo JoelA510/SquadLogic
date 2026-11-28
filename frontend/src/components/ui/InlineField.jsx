@@ -19,15 +19,16 @@ export default function InlineField({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
+  if (!editable && editing) setEditing(false);
 
   const start = () => {
-    if (!editable) return;
     setDraft(String(value ?? ''));
     setEditing(true);
   };
 
   const commit = () => {
     setEditing(false);
+    if (!editable) return;
     /** @type {any} */
     let next = draft;
     if (type === 'number') next = draft === '' ? null : Number(draft);
@@ -42,10 +43,22 @@ export default function InlineField({
     if (event.key === 'Escape') setEditing(false);
   };
 
+  const displayValue = (
+    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+      {render ? (
+        render(value)
+      ) : value != null && value !== '' ? (
+        value
+      ) : (
+        <span className="muted">{placeholder}</span>
+      )}
+    </span>
+  );
+
   return (
     <div className="rf">
       <div className="rf-label">{label}</div>
-      {editing ? (
+      {editing && editable ? (
         type === 'select' ? (
           <select
             // eslint-disable-next-line jsx-a11y/no-autofocus -- the editor appears because the user just asked to edit; focus moves to it
@@ -76,27 +89,15 @@ export default function InlineField({
             onKeyDown={handleKey}
           />
         )
-      ) : (
-        <button
-          type="button"
-          className="rf-value"
-          onClick={start}
-          style={!editable ? { cursor: 'default' } : undefined}
-        >
+      ) : editable ? (
+        <button type="button" className="rf-value" onClick={start}>
           {/* The name comes from the content so it contains the visible value (WCAG 2.5.3);
               the space is a text node because a trailing one inside .sr-only can collapse. */}
-          <span className="sr-only">{editable ? `Edit ${label}:` : `${label}:`}</span>{' '}
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {render ? (
-              render(value)
-            ) : value != null && value !== '' ? (
-              value
-            ) : (
-              <span className="muted">{placeholder}</span>
-            )}
-          </span>
-          {editable && <Pencil size={13} className="rf-edit" aria-hidden="true" />}
+          <span className="sr-only">{`Edit ${label}:`}</span> {displayValue}
+          <Pencil size={13} className="rf-edit" aria-hidden="true" />
         </button>
+      ) : (
+        <div className="rf-value">{displayValue}</div>
       )}
     </div>
   );

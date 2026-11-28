@@ -17,6 +17,8 @@ import { skillTierLabel, skillTierRank } from '../constants/skillTier.js';
 import LoadingScreen from '../components/LoadingScreen.jsx';
 import { useDemo } from '../hooks/useDemo.js';
 import { canEditPlayerField } from '../lib/demo.js';
+import SeasonReadOnlyNote from '../components/chrome/SeasonReadOnlyNote.jsx';
+import { useSeasonReadOnly } from '../hooks/useSeasonReadOnly.js';
 
 const STATUS_OPTIONS = [
   { value: 'active', label: 'Active' },
@@ -58,6 +60,8 @@ export default function PlayersPage() {
   // the server; this hides the controls the server would refuse): no names, gender or buddy
   // request edits, no new players, no deletes.
   const { isDemo } = useDemo();
+  const seasonReadOnly = useSeasonReadOnly();
+  const canAddOrDelete = !isDemo && !seasonReadOnly;
   const toast = useToast();
   const navigate = useNavigate();
 
@@ -300,7 +304,7 @@ export default function PlayersPage() {
             </span>
           }
           actions={
-            isDemo ? undefined : (
+            canAddOrDelete && (
               <Button
                 variant="primary"
                 size="sm"
@@ -317,23 +321,29 @@ export default function PlayersPage() {
         />
       }
     >
+      <SeasonReadOnlyNote>
+        Players from this completed season are read-only. You can search and open their records.
+      </SeasonReadOnlyNote>
       {error && (
         <div className="badge danger" role="alert" style={{ margin: 12 }}>
           {error}
         </div>
       )}
       <DataGrid
+        key={seasonReadOnly ? 'archived' : 'editable'}
         label="Players grid"
         columns={columns}
         rows={rows}
+        selectable={!seasonReadOnly}
+        isRowReadOnly={seasonReadOnly ? () => true : undefined}
         selected={selected}
         setSelected={setSelected}
         search={search}
         setSearch={setSearch}
         searchKeys={['_name', '_division', 'buddy_request', 'status']}
-        onCellChange={handleCellChange}
+        onCellChange={seasonReadOnly ? undefined : handleCellChange}
         onAddRow={
-          isDemo
+          !canAddOrDelete
             ? undefined
             : async () => {
                 const result = await createPlayer({ status: 'pending' });
@@ -343,7 +353,9 @@ export default function PlayersPage() {
         addLabel="Add player"
         rowActions={[
           { id: 'open', label: 'Open record', icon: ExternalLink },
-          ...(isDemo ? [] : [{ id: 'delete', label: 'Delete player', icon: Trash2, danger: true }]),
+          ...(canAddOrDelete
+            ? [{ id: 'delete', label: 'Delete player', icon: Trash2, danger: true }]
+            : []),
         ]}
         onRowAction={async (action, row) => {
           if (action === 'open') {
@@ -396,7 +408,7 @@ export default function PlayersPage() {
                 Waitlist
               </Button>
             )}
-            {!isDemo && (
+            {canAddOrDelete && (
               <Button
                 variant="ghost-danger"
                 size="sm"
@@ -415,7 +427,11 @@ export default function PlayersPage() {
             )}
           </>
         }
-        emptyText="No players yet — import registrations or add players manually"
+        emptyText={
+          seasonReadOnly
+            ? 'No players match the current filters'
+            : 'No players yet — import registrations or add players manually'
+        }
       />
     </Page>
   );

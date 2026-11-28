@@ -36,3 +36,9 @@ Feature: Start next season from this one
     And I open the practice scheduling page
     Then the page says the season is read-only
     And the practice page offers no manual override
+    When I open the players page
+    Then the archived players can be searched and opened without editing
+    And the archived coaches can be searched without editing
+    When I switch the season to "Winter 2027"
+    And I open the players page
+    Then the active players directory offers additions and edits

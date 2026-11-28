@@ -137,3 +137,43 @@ Then('the page says the season is read-only', async ({ page }) => {
 Then('the practice page offers no manual override', async ({ page }) => {
   await expect(page.getByRole('button', { name: /manual override/i })).toHaveCount(0);
 });
+
+Then('the archived players can be searched and opened without editing', async ({ page }) => {
+  const grid = page.getByRole('grid', { name: 'Players grid' });
+  const row = grid.getByRole('row').filter({ hasText: 'Alex Smith' });
+  await expect(row).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Add player' })).toHaveCount(0);
+  await expect(page.getByTestId('season-readonly-note')).toContainText(/players/i);
+  await expect(page.getByText(/type or Enter to edit/i)).toHaveCount(0);
+  await expect(grid.getByRole('checkbox')).toHaveCount(0);
+  const search = page.getByRole('textbox', { name: 'Search table' });
+  await search.fill('No matching archived player');
+  await expect(page.getByText('No players match the current filters')).toBeVisible();
+  await search.clear();
+  await expect(row).toBeVisible();
+  await row.getByText('Alex Smith').dblclick();
+  await expect(grid.getByRole('textbox')).toHaveCount(0);
+  await row.getByRole('button', { name: 'Row actions' }).click();
+  await expect(page.getByRole('menuitem', { name: /Delete player/ })).toHaveCount(0);
+  await page.getByRole('menuitem', { name: 'Open record' }).click();
+  await expect(page.getByRole('heading', { name: 'Alex Smith' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Edit First name:/ })).toHaveCount(0);
+});
+
+Then('the archived coaches can be searched without editing', async ({ page }) => {
+  await page.goto('/coaches');
+  const grid = page.getByRole('grid', { name: 'Coaches grid' });
+  await expect(grid.getByText('Casey Rivera')).toBeVisible();
+  await page.getByRole('textbox', { name: 'Search table' }).fill('Casey Rivera');
+  await expect(grid.getByText('Mock Coach')).toHaveCount(0);
+  await expect(page.getByTestId('season-readonly-note')).toContainText(/coaches/i);
+  await expect(page.getByText(/type or Enter to edit/i)).toHaveCount(0);
+  await expect(grid.getByRole('checkbox')).toHaveCount(0);
+  await expect(grid.getByRole('button', { name: 'Row actions' })).toHaveCount(0);
+  await expect(page.getByRole('combobox', { name: 'Filter by status' })).toBeEnabled();
+});
+
+Then('the active players directory offers additions and edits', async ({ page }) => {
+  await expect(page.getByRole('button', { name: 'Add player' })).toHaveCount(2);
+  await expect(page.getByText(/type or Enter to edit/i)).toBeVisible();
+});

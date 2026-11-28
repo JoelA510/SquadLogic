@@ -644,7 +644,7 @@
   text-align: left;
   width: calc(100% + 16px);
 }
-.rf-value:hover {
+button.rf-value:hover {
   background: var(--bg-hover);
   border-color: var(--border-soft);
 }

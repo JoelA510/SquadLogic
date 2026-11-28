@@ -363,3 +363,30 @@ Then('only the first fixture game and its two to one score remain', async ({ pag
   await expect(cards.getByLabel('Home Score')).toHaveValue('2');
   await expect(cards.getByLabel('Away Score')).toHaveValue('1');
 });
+
+When('I confirm while the publication baseline tool is unavailable', async ({ page }) => {
+  await page.route('**/ImportBaseline.jsx*', (route) => route.abort('failed'));
+  await page.getByLabel(`Create the ${OUTSIDE.size} records listed above`).check();
+  await page.getByRole('button', { name: 'Confirm and import' }).click();
+});
+
+Then(
+  "the preview still has the administrator's choices and explains how to recover",
+  async ({ page }) => {
+    await expect(page.getByRole('alert')).toContainText('No games were imported.');
+    await expect(page.getByTestId('schedule-import-step')).toContainText('3 of 4');
+    await expect(page.getByLabel(`Create the ${OUTSIDE.size} records listed above`)).toBeChecked();
+    await expect(page.getByRole('button', { name: 'Confirm and import' })).toBeEnabled();
+  }
+);
+
+When('I choose to import without recording a baseline', async ({ page }) => {
+  await page.getByLabel(/^Record this schedule as the baseline/).uncheck();
+  await page.getByRole('button', { name: 'Confirm and import' }).click();
+  await expect(page.getByTestId('schedule-import-step')).toContainText('4 of 4');
+});
+
+Then('the import has no recorded publication baseline', async ({ page }) => {
+  await expect(page.getByTestId('schedule-import-baseline')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Roll back this import' })).toBeEnabled();
+});

@@ -97,6 +97,7 @@ numbers are as of `7405db3` and will move: search by name.
 | C12a | Compact navigation keyboard access                                                        | done                     | this change  | 2026-11-27 |
 | C12b | Read current practice rules on each explicit scheduling run                               | done                     | this change  | 2026-11-27 |
 | C12c | Show row numbers and reasons for field-import refusals                                    | done                     | this change  | 2026-11-27 |
+| C12d | Load requested publication baseline support before importing games                        | done                     | this change  | 2026-11-27 |
 | C12f | Reopen division rules after saving teams                                                  | done                     | this change  | 2026-11-27 |
 | C12h | Games can reopen a saved schedule with a week that has no available slot                 | fixed in this change     | this change  | 2026-11-27 |
 | C13 | Test-suite audit                                                                          | gated on O1; plan first  |              |            |

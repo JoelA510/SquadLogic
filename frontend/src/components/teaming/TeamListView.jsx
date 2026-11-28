@@ -1,5 +1,5 @@
 import React from 'react';
-import { formatPercent, formatDate } from '../../utils/formatters.js';
+import { formatPercent, formatDate, rosterUtilizationPercent } from '../../utils/formatters.js';
 
 /**
  * TeamListView Component
@@ -79,39 +79,45 @@ const TeamListView = ({ totals, divisions, generatedAt }) => {
             </tr>
           </thead>
           <tbody>
-            {divisions.map((division) => (
-              <tr
-                key={division.divisionId}
-                className="border-b-2 border-text-primary hover:bg-bg-surface-hover transition-colors"
-              >
-                <td className="p-3 font-bold border-r-2 border-text-primary">
-                  {division.divisionId}
-                </td>
-                <td className="p-3 border-r-2 border-text-primary text-center font-mono">
-                  {division.totalTeams}
-                </td>
-                <td className="p-3 border-r-2 border-text-primary text-center font-mono">
-                  {division.playersAssigned}
-                </td>
-                <td className="p-3 border-r-2 border-text-primary text-center font-mono">
-                  {formatPercent(division.averageFillRate)}
-                </td>
-                <td className="p-3 border-r-2 border-text-primary text-center font-mono">
-                  {formatPercent(division.coachCoverage.coverageRate)}
-                </td>
-                <td className="p-3">
-                  {division.needsAdditionalCoaches ? (
-                    <span className="bg-status-error text-white px-2 py-1 font-bold text-xs uppercase rounded">
-                      Attention: Needs Coaches
-                    </span>
-                  ) : (
-                    <span className="bg-status-success text-white px-2 py-1 font-bold text-xs uppercase rounded">
-                      Roster Ready
-                    </span>
-                  )}
-                </td>
-              </tr>
-            ))}
+            {divisions.map((division) => {
+              const utilization = rosterUtilizationPercent(
+                division.playersAssigned,
+                division.totalCapacity
+              );
+              return (
+                <tr
+                  key={division.divisionId}
+                  className="border-b-2 border-text-primary hover:bg-bg-surface-hover transition-colors"
+                >
+                  <td className="p-3 font-bold border-r-2 border-text-primary">
+                    {division.divisionId}
+                  </td>
+                  <td className="p-3 border-r-2 border-text-primary text-center font-mono">
+                    {division.totalTeams}
+                  </td>
+                  <td className="p-3 border-r-2 border-text-primary text-center font-mono">
+                    {division.playersAssigned}
+                  </td>
+                  <td className="p-3 border-r-2 border-text-primary text-center font-mono">
+                    {utilization === null ? 'Capacity unavailable' : `${utilization}%`}
+                  </td>
+                  <td className="p-3 border-r-2 border-text-primary text-center font-mono">
+                    {formatPercent(division.coachCoverage.coverageRate)}
+                  </td>
+                  <td className="p-3">
+                    {division.needsAdditionalCoaches ? (
+                      <span className="bg-status-error text-white px-2 py-1 font-bold text-xs uppercase rounded">
+                        Attention: Needs Coaches
+                      </span>
+                    ) : (
+                      <span className="bg-status-success text-white px-2 py-1 font-bold text-xs uppercase rounded">
+                        Roster Ready
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

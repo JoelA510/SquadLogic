@@ -28,7 +28,6 @@ import ProgressBar from '../components/ui/ProgressBar.jsx';
 import { Edit2, Save, ArrowRight, Trash2, X } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient.js';
 import { logger } from '../lib/logger.js';
-import { edgeFunctionCache } from '../lib/cache.js';
 import { IS_MOCK_MODE } from '../config.js';
 import { generateTeams, resolveTeamCount } from '@squadlogic/core/teamGeneration.js';
 import { TEAM_GENERATION } from '@squadlogic/core/constants.js';
@@ -1529,9 +1528,6 @@ export default function TeamAnalysisPage() {
           ...prev,
           [program.id]: configFromDivisionRow(savedDivision),
         }));
-        // The auto-scheduler's cached runs were made with the settings as they were: a run for
-        // identical teams and slots must not answer for a division whose count just changed.
-        edgeFunctionCache.invalidateByPrefix(`auto-scheduler:${currentOrganization.id}:`);
         if (!silent) setConfigSaveMessage('Rules saved.');
         return savedDivision;
       } finally {

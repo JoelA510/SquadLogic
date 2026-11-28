@@ -28,7 +28,6 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => {
 
 const { PERSISTENCE_TIMEOUT_MS } = await import('../frontend/src/lib/persistenceRequest.js');
 const { useAutoScheduler } = await import('../frontend/src/hooks/useAutoScheduler.js');
-const { edgeFunctionCache } = await import('../frontend/src/lib/cache.js');
 
 const ORG = '11111111-1111-4111-8111-111111111111';
 const SEASON = '22222222-2222-4222-8222-222222222222';
@@ -109,12 +108,9 @@ function stubFetch(answers) {
   return bodies;
 }
 
-let runCount = 0;
-/** A distinct input per call, so the hook's TTL cache never answers instead. */
 function inputs(overrides = {}) {
-  runCount += 1;
   return {
-    teams: [{ id: `t-${runCount}`, division: 'U10' }],
+    teams: [{ id: 't-1', division: 'U10' }],
     slots: [{ id: 's-1', start: 'a', end: 'b', capacity: 1 }],
     lockedAssignments: [{ id: 'row-1', teamId: 'x', slotId: 's-1' }],
     seasonSettingsId: SEASON,
@@ -138,10 +134,27 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllGlobals();
-  edgeFunctionCache.clear();
 });
 
 describe('where the browser cannot run a worker, the server runs the search as it always did', () => {
+  it('reads the current season rules again when an administrator repeats the same run', async () => {
+    const answers = [
+      solved({ runId: 'first', assignments: [{ teamId: 't-1', slotId: 's-1' }] }),
+      solved({ runId: 'second', assignments: [], unassigned: [{ teamId: 't-1' }] }),
+    ];
+    const bodies = stubFetch({ solve: () => answers.shift() });
+    const { result } = renderHook(() => useAutoScheduler({ organizationId: ORG }));
+    const args = inputs();
+    await act(async () => result.current.trigger(args));
+    expect(result.current.result.runId).toBe('first');
+    // The weekday pair is stored on the server. The button sends identical teams and slots.
+    await act(async () => result.current.trigger(args));
+    expect(result.current.result.runId).toBe('second');
+    expect(result.current.result.assignments).toEqual([]);
+    expect(result.current.result.unassigned).toHaveLength(1);
+    expect(bodies).toHaveLength(2);
+  });
+
   it('one request, no mode in it, the progress channel, and the answer says "server"', async () => {
     const bodies = stubFetch({ solve: solved() });
     const { result } = renderHook(() => useAutoScheduler({ organizationId: ORG }));
@@ -383,7 +396,7 @@ describe('where it can, the worker searches and the server verifies', () => {
     expect(result.current.result.assignments).toHaveLength(1);
   });
 
-  it('the same inputs inside five minutes answer from the cache, whichever side ran', async () => {
+  it('prepares and verifies a new browser run even when the teams and slots are unchanged', async () => {
     const bodies = stubFetch({ prepare: prepared, verify: solved() });
     const { result } = renderHook(() => useAutoScheduler({ organizationId: ORG }));
     const args = inputs();
@@ -394,9 +407,13 @@ describe('where it can, the worker searches and the server verifies', () => {
       await first.finished;
     });
     expect(bodies).toHaveLength(2);
-    await run(result, args);
-    expect(bodies).toHaveLength(2);
-    expect(FakeWorker.instances).toHaveLength(1);
+    const second = await run(result, args);
+    await waitFor(() => expect(FakeWorker.instances).toHaveLength(2));
+    await act(async () => {
+      FakeWorker.instances[1].finish();
+      await second.finished;
+    });
+    expect(bodies.map((body) => body.mode)).toEqual(['prepare', 'verify', 'prepare', 'verify']);
     expect(result.current.result.ranIn).toBe('browser');
   });
 });

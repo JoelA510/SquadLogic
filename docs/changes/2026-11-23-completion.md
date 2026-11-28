@@ -95,6 +95,7 @@ numbers are as of `7405db3` and will move: search by name.
 | O1  | Owner: manual testing and the owner-only items                                            | owner                    |              |            |
 | C12 | Fixes from manual testing                                                                 | scoped QA repairs active  | this change  | 2026-11-26 |
 | C12a | Compact navigation keyboard access                                                        | done                     | this change  | 2026-11-27 |
+| C12f | Reopen division rules after saving teams                                                  | done                     | this change  | 2026-11-27 |
 | C13 | Test-suite audit                                                                          | gated on O1; plan first  |              |            |
 | C14 | Cut a release                                                                             | gated on C12             |              |            |
 | C16 | Desktop build                                                                             | gated on C13; plan first |              |            |

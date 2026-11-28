@@ -33,6 +33,12 @@ Then('Reports shows the {int} registered players', async ({ page }, count: numbe
   await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
+When('I reload Teams before generating', async ({ page }) => {
+  await page.goto('/teams');
+  await page.reload();
+  await expect(page.getByRole('table', { name: 'Division Overview' })).toContainText('24');
+});
+
 /** Long enough for the edge runtime's first, cold, request to a function. */
 const BACKEND_TIMEOUT = 120_000;
 
@@ -513,6 +519,21 @@ Then('the teams page lists the synced teams after a reload', async ({ page }) =>
     buttons.map((b) => b.getAttribute('aria-label') ?? '')
   );
   stateOf(page).teamNames = labels.map((label) => label.replace(/^Rename team /, ''));
+});
+
+When('I rename a synced team using the Teams page', async ({ page }) => {
+  const names = stateOf(page).teamNames;
+  if (!names?.length) throw new Error('Expected the synced teams from the previous step');
+  const previous = names[0];
+  const renamed = previous + ' Renamed';
+  await page.getByRole('button', { name: 'Rename team ' + previous, exact: true }).click();
+  const input = page.getByRole('textbox', { name: 'New name for team ' + previous, exact: true });
+  await input.fill(renamed);
+  await input.press('Enter');
+  await expect(
+    page.getByRole('button', { name: 'Rename team ' + renamed, exact: true })
+  ).toBeVisible();
+  stateOf(page).teamNames = [renamed, ...names.slice(1)];
 });
 
 When('I auto-generate the practice schedule and apply it', async ({ page }) => {

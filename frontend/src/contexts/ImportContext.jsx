@@ -106,6 +106,7 @@ const ImportContext = createContext({
   cancelDeferredImport: async (_type) => {},
   resetImport: async (_type) => {},
   importedData: null,
+  playerImportFromHistory: false,
   setImportedData: (_data) => {},
   importedPlayers: null,
   setImportedPlayers: (_data) => {},
@@ -227,6 +228,7 @@ export function ImportProvider({ children }) {
   const [importedFields, setImportedFields] = useState(null);
   const [importedFieldAvailability, setImportedFieldAvailability] = useState(null);
   const [importedData, setImportedData] = useState(null); // Legacy/General
+  const [playerImportFromHistory, setPlayerImportFromHistory] = useState(false);
   const [organizationSchemas, setOrganizationSchemas] = useState({
     player: {},
     coach: {},
@@ -253,7 +255,10 @@ export function ImportProvider({ children }) {
     // `importedData` is the player import, as the reload path below reads it (only from the
     // latest players row) and as every reader takes it: the teams page builds its programs from
     // it. A coach or field import written here used to reach the teams page as player rows.
-    if (type === 'players') setImportedData(data);
+    if (type === 'players') {
+      setImportedData(data);
+      setPlayerImportFromHistory(false);
+    }
   }, []);
 
   const hydrateReadyImportJob = useCallback(
@@ -481,7 +486,12 @@ export function ImportProvider({ children }) {
           if (latestCoaches) setImportedCoaches(latestCoaches.data);
           if (latestFields) setImportedFields(latestFields.data);
           if (latestFieldAvailability) setImportedFieldAvailability(latestFieldAvailability.data);
-          if (latestPlayers) setImportedData(latestPlayers.data);
+          // Keep import history visible to the import screen. Older snapshots have no
+          // season, so Teams reads its selected roster instead of generating from them.
+          if (latestPlayers) {
+            setImportedData(latestPlayers.data);
+            setPlayerImportFromHistory(true);
+          }
         }
       } catch (e) {
         // A load overtaken by a switch of organization is expected and writes nothing; anything else is said.
@@ -1051,6 +1061,9 @@ export function ImportProvider({ children }) {
 
               const importData = {
                 importJobId: job.id,
+                ...(type === 'players' && {
+                  scope: currentOrganization.id + '/' + currentSeasonSetting?.id,
+                }),
                 fileName: file.name,
                 totalRows: data.length,
                 validRows: normalizedData.length,
@@ -1373,7 +1386,10 @@ export function ImportProvider({ children }) {
 
   // Stabilize State Setters
   const stableSetNotifyOnComplete = useCallback((val) => setNotifyOnComplete(val), []);
-  const stableSetImportedData = useCallback((data) => setImportedData(data), []);
+  const stableSetImportedData = useCallback((data) => {
+    setImportedData(data);
+    setPlayerImportFromHistory(false);
+  }, []);
   const stableSetImportedPlayers = useCallback((data) => setImportedPlayers(data), []);
   const stableSetImportedCoaches = useCallback((data) => setImportedCoaches(data), []);
   const stableSetImportedEvaluations = useCallback((data) => setImportedEvaluations(data), []);
@@ -1396,6 +1412,7 @@ export function ImportProvider({ children }) {
       cancelDeferredImport,
       resetImport,
       importedData: maskedImportedData,
+      playerImportFromHistory,
       setImportedData: stableSetImportedData,
       importedPlayers: maskedImportedPlayers,
       setImportedPlayers: stableSetImportedPlayers,
@@ -1425,6 +1442,7 @@ export function ImportProvider({ children }) {
       cancelDeferredImport,
       resetImport,
       maskedImportedData,
+      playerImportFromHistory,
       stableSetImportedData,
       maskedImportedPlayers,
       stableSetImportedPlayers,

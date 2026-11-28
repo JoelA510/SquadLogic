@@ -79,6 +79,20 @@ jobs:
         if: ${{ !cancelled() && steps.start.outcome == 'success' }}
         run: npm run test:db
 
+      - name: Exercise schedule imports with safe updates enabled
+        run: |
+          set -euo pipefail
+          db=supabase_db_squadlogic
+          docker cp supabase/tests "$db:/tmp/schedule-import-tests"
+          for suite in game_import_apply_rollback practice_import_apply_rollback; do
+            # The local stack's administrator loads the same PostgreSQL library as the hosted API.
+            # The suites exercise the import functions as authenticated users.
+            docker exec -e PGOPTIONS='-c session_preload_libraries=safeupdate' "$db" \
+              psql -XqAt -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
+              -f "/tmp/schedule-import-tests/$suite.sql" > "$RUNNER_TEMP/$suite.tap"
+            prove --exec cat "$RUNNER_TEMP/$suite.tap"
+          done
+
       - name: Stop local Supabase
         if: always()
         run: supabase stop

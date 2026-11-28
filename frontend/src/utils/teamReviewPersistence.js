@@ -44,6 +44,7 @@ export function getPlayerExternalId(row) {
     'external_registration_id',
     'gotsport_id',
     'registration_id',
+    'player_id',
     'player_registration_id',
   ]);
 }

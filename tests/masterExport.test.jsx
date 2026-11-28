@@ -130,6 +130,34 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe('generateMasterExport makes the rows the Exports page records as its baseline', () => {
+  it('uses the current club directory name in both team and opponent cells after a rename', async () => {
+    seedLeague();
+    const oldRun = { ...TEAMS[0], name: 'Former Comets', coachName: 'Coach Example' };
+    const made = await generateMasterExport(
+      mockSupabase,
+      params({
+        teams: [oldRun, TEAMS[1]],
+        teamSummary: { teams: [oldRun] },
+      })
+    );
+    expect(made.status).toBe('generated');
+    if (made.status !== 'generated') return;
+    const rows = made.exports.master.rows;
+    expect(rows).toContainEqual(
+      expect.objectContaining({
+        'Team Name': 'Synthetic Comets',
+        Coaches: 'Coach Example',
+      })
+    );
+    expect(rows).toContainEqual(
+      expect.objectContaining({
+        'Team Name': 'Synthetic Rockets',
+        Opponent: 'Synthetic Comets',
+      })
+    );
+    expect(JSON.stringify(rows)).not.toContain('Former Comets');
+  });
+
   it('counts a clock-only practice without a date as untimed and keeps a practice with explicit timestamps', async () => {
     seedLeague();
     const made = await generateMasterExport(

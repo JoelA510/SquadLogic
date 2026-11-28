@@ -375,7 +375,7 @@ const KNOWN_E2E_DEBT = {
   // Two of these came from registration_compliance.ts with its active-season step (R1).
   'tests/e2e/steps/reporting.ts': 3,
   'tests/e2e/steps/scheduling_and_overrides.ts': 4,
-  'tests/e2e/steps/team_and_roster.ts': 7,
+  'tests/e2e/steps/team_and_roster.ts': 6,
   'tests/e2e/steps/team_communication.ts': 1,
   // visual_rbac_enforcement.ts's one went with the coach score-entry steps (R6).
 };

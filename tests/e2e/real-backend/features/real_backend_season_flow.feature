@@ -22,3 +22,5 @@ Feature: From a registration export to a published practice schedule, on the rea
     Then none of those files is left in the exports bucket
     When I upload the exports to Storage
     Then the exports bucket holds the master schedule and a file per synced team, under the organization's folder
+    When I generate and apply the game schedule with only a week-two slot
+    Then the unscheduled week-one pairing names both teams after a reload

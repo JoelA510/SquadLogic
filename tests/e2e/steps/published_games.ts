@@ -835,3 +835,29 @@ Then(
     await expect(select).toBeFocused();
   }
 );
+
+Given("the saved game's two teams now have different directory names", async ({ page }) => {
+  await page.evaluate((club) => {
+    const db = window.__MOCK_DB__ as Record<string, Array<Record<string, unknown>> | undefined>;
+    if (!db) throw new Error('mock store not initialised');
+    const division = {
+      id: 'e2e-renamed-division',
+      name: 'U10 Boys',
+      organization_id: club.orgId,
+      season_settings_id: club.seasonId,
+    };
+    db.divisions = [...(db.divisions ?? []), division];
+    db.teams = [
+      ...(db.teams ?? []),
+      ...[
+        { id: 'lions', name: 'North Lions' },
+        { id: 'wolves', name: 'South Wolves' },
+      ].map((team) => ({
+        ...team,
+        division_id: division.id,
+        organization_id: club.orgId,
+      })),
+    ];
+    window.__saveMockDB__(db);
+  }, CLUB);
+});

@@ -728,8 +728,8 @@ Then(
   async ({ page }, first: string, second: string) => {
     const card = unscheduledCards(page)
       .filter({ hasText: 'coach-coaches-both-teams' })
-      .filter({ hasText: teamIdOf(first) })
-      .filter({ hasText: teamIdOf(second) });
+      .filter({ hasText: first })
+      .filter({ hasText: second });
     await expect(card).toHaveCount(1);
   }
 );
@@ -740,7 +740,7 @@ Then(
     const cards = unscheduledCards(page).filter({ hasText: 'coach-scheduling-conflict' });
     await expect(cards).toHaveCount(1);
     await expect(cards.getByRole('heading')).toHaveText(`Week ${week}`);
-    await expect(cards).toContainText(new RegExp(`${teamIdOf(first)}|${teamIdOf(second)}`));
+    await expect(cards).toContainText(new RegExp(`${first}|${second}`));
   }
 );
 

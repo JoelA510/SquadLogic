@@ -1,14 +1,11 @@
 // @vitest-environment jsdom
 //
-// G5: the recorder of an import's publication baseline is a lazy chunk of the import panel. A chunk that cannot be
-// loaded (a deploy that replaced it, a dropped connection) is said as a failed recording, the import stands and the
-// result's buttons come back: it never throws in render, and never holds the screen. React.lazy keeps a rejected load
-// for good, so the panel takes a new lazy part for the next attempt: "Record the baseline again" loads the chunk and
-// records.
+// A published import can request a baseline. If its code cannot load, the admin can retry with the
+// same preview and mappings before the database applies the games.
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fileCsv, seedGameImportWorld } from './helpers/gameImportWorld.js';
+import { fileCsv, ORG, seedGameImportWorld } from './helpers/gameImportWorld.js';
 
 vi.setConfig({ testTimeout: 30000 });
 
@@ -52,7 +49,7 @@ beforeEach(() => seedGameImportWorld());
 afterEach(() => vi.clearAllMocks());
 
 describe('a baseline chunk that cannot be loaded', () => {
-  it('is said as a failed recording, the import stands, and the next recording loads it and records', async () => {
+  it('keeps the preview on a failed load, then applies once and records after retry', async () => {
     render(<ScheduleImportPanel />);
     fireEvent.change(screen.getByTestId('schedule-import-file'), {
       target: { files: [new File([fileCsv()], 'schedule.csv', { type: 'text/csv' })] },
@@ -66,24 +63,20 @@ describe('a baseline chunk that cannot be loaded', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Preview the import' }));
     await waitFor(() => expect(step()).toMatch(/3 of 4/));
     fireEvent.click(screen.getByLabelText('Create the 5 records listed above'));
+    const readGames = () =>
+      mockSupabase.from('game_assignments').select('id, start, end').eq('organization_id', ORG);
+    const original = await readGames();
+    expect(original.error).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Confirm and import' }));
-    await waitFor(() => expect(step()).toMatch(/4 of 4/));
-
-    const notice = await screen.findByTestId('schedule-import-baseline');
-    expect(notice.getAttribute('role')).toBe('alert');
-    // (the loader's own error is in the brackets; vitest words a failed mock factory its own way)
-    expect(notice.textContent).toMatch(
-      /^The import is applied, but no publication baseline was recorded: this page could not load what records it \(.+\)\. "Record the baseline again" tries once more/
-    );
-    expect(screen.getByTestId('schedule-import-applied').textContent).toMatch(/Imported:/);
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Roll back this import' })).toBeEnabled()
-    );
-
+    await screen.findByText(/No games were imported. The publication baseline tool could not load/);
+    expect(step()).toMatch(/3 of 4/);
+    expect(screen.queryByTestId('schedule-import-applied')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Create the 5 records listed above')).toBeChecked();
     expect(LOADS.n).toBe(1);
+    expect(await readGames()).toEqual(original);
 
-    // the next recording loads the chunk again, and records
-    fireEvent.click(screen.getByRole('button', { name: 'Record the baseline again' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm and import' }));
+    await waitFor(() => expect(step()).toMatch(/4 of 4/), { timeout: 10000 });
     await waitFor(
       () =>
         expect(screen.getByTestId('schedule-import-baseline').textContent).toMatch(

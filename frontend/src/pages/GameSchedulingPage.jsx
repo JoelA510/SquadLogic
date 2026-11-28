@@ -481,10 +481,6 @@ const GRID_DRAG_INSTRUCTIONS =
   'between fields and time slots, then press space or enter to drop it, or escape to cancel. ' +
   'Each game also has a Move to list.';
 
-function formatUnscheduledMatchup(entry) {
-  return `${entry.matchup?.homeTeamId ?? 'Home'} vs ${entry.matchup?.awayTeamId ?? 'Away'}`;
-}
-
 /** Chronological, then by division, slot and home team: the order the generator returns its games in. */
 function compareGamesByTime(a, b) {
   return (
@@ -565,8 +561,10 @@ function buildDisplayAssignment({ assignment, index, runId, teamById, slotById, 
     fieldName: assignment.fieldName ?? field?.name ?? slot?.fieldName ?? null,
     homeTeamId,
     awayTeamId,
-    homeTeamName: assignment.homeTeamName ?? homeTeam?.name ?? homeTeamId,
-    awayTeamName: assignment.awayTeamName ?? awayTeam?.name ?? awayTeamId,
+    homeTeamName:
+      homeTeam?.directoryName ?? assignment.homeTeamName ?? homeTeam?.name ?? homeTeamId,
+    awayTeamName:
+      awayTeam?.directoryName ?? assignment.awayTeamName ?? awayTeam?.name ?? awayTeamId,
     start,
     end,
     kickoff: assignment.kickoff ?? start,
@@ -960,13 +958,16 @@ export default function GameSchedulingPage() {
     return map;
   }, [schedulerTeams]);
 
-  // The names of the teams a saved game names: the season's teams as the tables hold them (an outside club is in no team
-  // run, so the run's teams would show it as its id), with the run's teams, which the solver is handed, taking their entries.
+  // Keep the generation run's team metadata, and label its teams and outside clubs from the season directory.
   const seasonTeams = useSeasonTeamDirectory();
   const displayTeamById = useMemo(() => {
-    const map = new Map();
-    for (const entry of seasonTeams) map.set(entry.id, entry);
-    for (const [id, entry] of teamById) map.set(id, entry);
+    const map = new Map(teamById);
+    for (const entry of seasonTeams) {
+      map.set(entry.id, {
+        ...(map.get(entry.id) ?? entry),
+        directoryName: entry.name?.trim() || undefined,
+      });
+    }
     return map;
   }, [seasonTeams, teamById]);
 
@@ -1402,10 +1403,7 @@ export default function GameSchedulingPage() {
         ? [...appliedRunWarnings.generator, ...appliedRunWarnings.manual]
         : (source.warnings ?? []),
       generatedAt: schedulerResult.generatedAt,
-      unscheduled: (schedulerResult.unscheduled ?? []).map((entry) => ({
-        ...entry,
-        matchup: formatUnscheduledMatchup(entry),
-      })),
+      unscheduled: schedulerResult.unscheduled ?? [],
     };
   }, [appliedRunWarnings, game?.snapshot, schedulerResult]);
 
@@ -2739,6 +2737,7 @@ export default function GameSchedulingPage() {
             gameReadinessSnapshot={reviewSnapshot ?? {}}
             gameSummary={reviewSummary}
             generatedAt={schedulerResult?.generatedAt ?? game?.generatedAt}
+            teamNames={addTeamNames}
           />
 
           <PracticeOnlyDivisions divisions={divisionPlan.practiceOnlyDivisions} />

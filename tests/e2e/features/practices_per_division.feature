@@ -103,11 +103,15 @@ Feature: Practices per division (Phase D PR B)
     And a Tuesday and a Thursday practice slot of 90 minutes with room for 2 teams each
     And I run the auto-scheduler on the Practice Scheduling page
     Then the auto-scheduler places <placed> practices and leaves <unplaced> unplaced
+    When I follow Settings to the season calendar
+    And I set paired practice days for "U10 Girls" to "<changed pair>"
+    And I follow Practices and run the auto-scheduler again
+    Then the auto-scheduler places <unplaced> practices and leaves <placed> unplaced
 
     Examples:
-      | pair    | placed | unplaced |
-      | Tue/Thu | 2      | 0        |
-      | Mon/Wed | 0      | 2        |
+      | pair    | placed | unplaced | changed pair |
+      | Tue/Thu | 2      | 0        | Mon/Wed      |
+      | Mon/Wed | 0      | 2        | Tue/Thu      |
 
   Scenario: The paired weekdays selector remains usable in both themes
     Given 24 players are imported into the "U10 Girls" program

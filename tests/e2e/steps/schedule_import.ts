@@ -317,3 +317,76 @@ Then('the Games page has no Published game', async ({ page }) => {
   );
   await expect(page.getByTestId('game-time-tbd-list')).toHaveCount(0);
 });
+
+When('I import only fixture game {string}', async ({ page }, ref: string) => {
+  const game = SCHEDULE_ROWS.find((row) => row['Game ID'] === ref);
+  if (!game) throw new Error(`Missing fixture game ${ref}`);
+  await page.goto('/import');
+  await page.getByRole('button', { name: /^games\b/i }).click();
+  const panel = page.getByTestId('schedule-import-panel');
+  await panel.locator('input[type="file"]').setInputFiles({
+    name: `${ref}.csv`,
+    mimeType: 'text/csv',
+    buffer: Buffer.from(Papa.unparse([game])),
+  });
+  await panel.getByRole('button', { name: 'Preview the import' }).click();
+  await expect(panel.getByTestId('schedule-import-count-games.inserted')).toHaveText('1');
+  await panel.getByRole('button', { name: 'Confirm and import' }).click();
+  await expect(panel.getByTestId('schedule-import-applied')).toContainText('1 games added');
+});
+
+When('I save a two to one score for the first fixture game', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-09-19T12:00:00Z') });
+  await page.goto('/standings');
+  const card = page.getByTestId('game-score-card').filter({ hasText: 'U05B Team 01' });
+  await expect(card).toBeVisible();
+  await card.getByLabel('Home Score').fill('2');
+  await expect(card.getByTestId('score-needs-both')).toBeVisible();
+  await card.getByLabel('Away Score').fill('1');
+  await expect(card.getByTestId('score-needs-both')).toHaveCount(0);
+  await page.reload();
+  await expect(card.getByLabel('Home Score')).toHaveValue('2');
+  await expect(card.getByLabel('Away Score')).toHaveValue('1');
+});
+
+When('I roll back this one-game import', async ({ page }) => {
+  await page.getByRole('button', { name: 'Roll back this import' }).click();
+  await expect(page.getByTestId('schedule-import-rolled-back')).toContainText('1 games removed');
+});
+
+Then('only the first fixture game and its two to one score remain', async ({ page }) => {
+  await page.goto('/standings');
+  const cards = page.getByTestId('game-score-card');
+  await expect(cards).toHaveCount(1);
+  await expect(cards).toContainText('U05B Team 01');
+  await expect(cards).toContainText('U05B Team 08');
+  await expect(cards.getByLabel('Home Score')).toHaveValue('2');
+  await expect(cards.getByLabel('Away Score')).toHaveValue('1');
+});
+
+When('I confirm while the publication baseline tool is unavailable', async ({ page }) => {
+  await page.route('**/ImportBaseline.jsx*', (route) => route.abort('failed'));
+  await page.getByLabel(`Create the ${OUTSIDE.size} records listed above`).check();
+  await page.getByRole('button', { name: 'Confirm and import' }).click();
+});
+
+Then(
+  "the preview still has the administrator's choices and explains how to recover",
+  async ({ page }) => {
+    await expect(page.getByRole('alert')).toContainText('No games were imported.');
+    await expect(page.getByTestId('schedule-import-step')).toContainText('3 of 4');
+    await expect(page.getByLabel(`Create the ${OUTSIDE.size} records listed above`)).toBeChecked();
+    await expect(page.getByRole('button', { name: 'Confirm and import' })).toBeEnabled();
+  }
+);
+
+When('I choose to import without recording a baseline', async ({ page }) => {
+  await page.getByLabel(/^Record this schedule as the baseline/).uncheck();
+  await page.getByRole('button', { name: 'Confirm and import' }).click();
+  await expect(page.getByTestId('schedule-import-step')).toContainText('4 of 4');
+});
+
+Then('the import has no recorded publication baseline', async ({ page }) => {
+  await expect(page.getByTestId('schedule-import-baseline')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Roll back this import' })).toBeEnabled();
+});

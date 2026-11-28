@@ -987,6 +987,59 @@ describe('a scored game and the import (20261122010000): the mock answers as the
     expect(db.game_scores.filter((row) => !ids.has(row.game_id))).toEqual([]);
   });
 
+  it.each(['original', 'edited', 'edited-back', 'legacy'])(
+    'checks a carried score on rollback (%s)',
+    (kind) => {
+      const db = world();
+      const first = addJob(db, FILE(), MAPPING());
+      expect(confirmGameImport(rpc, db, first).error).toBeNull();
+      const kept = db.game_assignments.find((g) => g.external_ref === 'G-101');
+      const originalRun = kept.run_id;
+      const score = scoring(db);
+      expect(score(kept.id, 2, 0).error).toBeNull();
+      const extra = stage(
+        1,
+        'ok',
+        'G-CARRY',
+        'Org A U10',
+        'Park One',
+        'Field 1',
+        'Bears',
+        'Tigers',
+        '2026-06-13',
+        '09:00',
+        '10:00',
+        7
+      );
+      const job = addJob(db, [extra], MAPPING());
+      expect(confirmGameImport(rpc, db, job).error).toBeNull();
+      expect(kept.run_id).not.toBe(originalRun);
+      if (kind === 'edited' || kind === 'edited-back')
+        expect(score(kept.id, 3, 1).error).toBeNull();
+      if (kind === 'edited-back') expect(score(kept.id, 2, 0).error).toBeNull();
+      if (kind === 'legacy') {
+        const record = db.import_application_records.find(
+          (r) => r.import_job_id === job && r.target_id === kept.id
+        );
+        delete record.applied_payload.carried_score_revision;
+      }
+      const rolled = rpc(db, 'rollback_game_import_job', { p_import_job_id: job });
+      if (kind === 'original') {
+        expect(rolled.error).toBeNull();
+        expect(db.game_assignments.find((g) => g.id === kept.id).run_id).toBe(originalRun);
+      } else {
+        expect(rolled.error?.details).toContain('game_import_changed count=1');
+      }
+      expect(db.game_assignments.some((g) => g.external_ref === 'G-CARRY')).toBe(
+        kind !== 'original'
+      );
+      expect(db.game_scores.find((row) => row.game_id === kept.id)).toMatchObject({
+        score_home: kind === 'edited' ? 3 : 2,
+        score_away: kind === 'edited' ? 1 : 0,
+      });
+    }
+  );
+
   it('a changed row for a scored game is skipped: as Published while it is, as scored once changes are allowed', () => {
     const db = world();
     const id = addJob(db, FILE(), MAPPING());

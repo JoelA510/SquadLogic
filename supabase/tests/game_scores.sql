@@ -313,8 +313,8 @@ SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"
 -- ── 1. The shape ───────────────────────────────────────────────────────────
 SELECT is(pg_temp.val($$SELECT string_agg(column_name || ' ' || data_type || ' ' || is_nullable, '; ' ORDER BY ordinal_position)
     FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'game_scores'$$),
-    'game_id uuid NO; organization_id uuid NO; home_team_id uuid NO; away_team_id uuid NO; score_home smallint NO; score_away smallint NO; created_at timestamp with time zone NO; updated_at timestamp with time zone NO; updated_by uuid YES',
-    'game_scores: the game, the organization, the two sides as scored, both scores required, when and who');
+    'game_id uuid NO; organization_id uuid NO; home_team_id uuid NO; away_team_id uuid NO; score_home smallint NO; score_away smallint NO; created_at timestamp with time zone NO; updated_at timestamp with time zone NO; updated_by uuid YES; score_revision uuid NO',
+    'game_scores: the game, the organization, the two sides as scored, both scores required, when, who and the score revision');
 SELECT is(pg_temp.val($$SELECT c.confdeltype::text || c.confupdtype::text || ' ' || pg_get_constraintdef(c.oid) FROM pg_constraint c
     WHERE c.conrelid = 'public.game_scores'::regclass AND c.contype = 'f' AND c.confrelid = 'public.game_assignments'::regclass$$),
     'aa FOREIGN KEY (game_id, organization_id, home_team_id, away_team_id) REFERENCES game_assignments(id, organization_id, home_team_id, away_team_id)',

@@ -69,6 +69,11 @@ const byRow = (a, b) => (a.source_row_number ?? Infinity) - (b.source_row_number
 const instantOf = (value) =>
   value === null || value === undefined ? null : new Date(value).toISOString();
 
+function scoreRevision(score) {
+  // Older saved mock profiles get a revision on their first score edit.
+  return score.score_revision ?? score.updated_at ?? score.game_id;
+}
+
 /** The columns that say a game has not been changed since an import wrote it (the SQL's `game_import_image`). */
 function imageOf(row) {
   const iso = (v) => (v === null || v === undefined ? null : new Date(v).toISOString());
@@ -1479,10 +1484,16 @@ function applyJob(db, job, dry, confirmed, ctx, env) {
         db.game_assignments.find((x) => same(x.id, g.id)),
         { run_id: runId, updated_at: stamp }
       );
-    for (const [id, img] of before)
+    const scoresByGame = new Map(
+      (db.game_scores || []).map((score) => [String(score.game_id), score])
+    );
+    for (const [id, img] of before) {
+      const score = scoresByGame.get(String(id));
       record('game_assignments', id, 'updated', img, {
         ...db.game_assignments.find((x) => same(x.id, id)),
+        ...(score && { carried_score_revision: scoreRevision(score) }),
       });
+    }
     // TIME TBD games: a DATE and no time (`game_date`), the Game ID in `external_ref`. A row the file names is changed in
     // place; one the file now places is removed (the placed game stands for it); a new one is inserted. Every one has an
     // application record, with the image it had.
@@ -1612,19 +1623,27 @@ function rollbackJob(db, job, ctx, env) {
       r.parameters?.import_job_id === job.id
   );
   const gameRecords = records.filter((r) => r.target_table === 'game_assignments');
+  const scoresByGame = new Map(
+    (db.game_scores || []).map((score) => [String(score.game_id), score])
+  );
   const changed = gameRecords
     .filter((r) => {
       const now = (db.game_assignments || []).find((g) => same(g.id, r.target_id));
       // A game the apply took out is still out: one that stands again would be put back twice.
       if (r.operation === 'deleted') return Boolean(now);
+      const score = scoresByGame.get(String(r.target_id));
+      const originalScore =
+        score &&
+        r.operation === 'updated' &&
+        r.previous_payload &&
+        imageOf(r.previous_payload) === imageOf(r.applied_payload) &&
+        r.applied_payload?.carried_score_revision === scoreRevision(score);
       return (
         !now ||
         imageOf(now) !== imageOf(r.applied_payload) ||
         !run ||
         !same(now.run_id ?? '', run.id) ||
-        // 20261122010000: a score entered on a game the import wrote is a change since (the SQL's EXISTS over
-        // game_scores). The rollback never deletes a score, and never moves a game under one.
-        (db.game_scores || []).some((score) => same(score.game_id, now.id))
+        (score && !originalScore)
       );
     })
     .map((r) => r.target_id)

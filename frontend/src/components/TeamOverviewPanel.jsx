@@ -1,7 +1,7 @@
 import React from 'react';
 import PropTypes from 'prop-types';
 import { Users, UserCheck, ShieldAlert, Award } from 'lucide-react';
-import { formatDateTime } from '../utils/formatters.js';
+import { formatDateTime, rosterUtilizationPercent } from '../utils/formatters.js';
 
 const COLOR_CLASSES = {
   blue: 'text-text-accent bg-brand-500/10 border-brand-500/30',
@@ -37,7 +37,9 @@ export default function TeamOverviewPanel({ totals, divisions, generatedAt }) {
     },
     {
       label: 'Target Players',
-      value: totals.playersTarget,
+      value: divisions.some((division) => division.totalTeams > 0 && !(division.totalCapacity > 0))
+        ? 'Unavailable'
+        : totals.playersTarget,
       icon: UserCheck,
       color: 'green',
     },
@@ -87,39 +89,47 @@ export default function TeamOverviewPanel({ totals, divisions, generatedAt }) {
       <div>
         <h3 className="text-lg font-semibold text-text-primary mb-4">Division Breakdown</h3>
         <div className="insights-grid">
-          {divisions.map((division) => (
-            <article
-              key={division.divisionId}
-              className="insight-card card-glass hover:bg-bg-surface-hover transition-colors"
-              aria-labelledby={`heading-div-${division.divisionId}`}
-            >
-              <h3
-                className="text-text-accent font-bold mb-1"
-                id={`heading-div-${division.divisionId}`}
+          {divisions.map((division) => {
+            const utilization = rosterUtilizationPercent(
+              division.playersAssigned,
+              division.totalCapacity
+            );
+            return (
+              <article
+                key={division.divisionId}
+                className="insight-card card-glass hover:bg-bg-surface-hover transition-colors"
+                aria-labelledby={`heading-div-${division.divisionId}`}
               >
-                {division.divisionId}
-              </h3>
-              <p className="text-text-secondary mb-3">
-                {division.totalTeams} teams · {division.playersAssigned} players
-              </p>
-              <div className="space-y-1">
-                <div className="flex justify-between text-xs">
-                  <span className="text-text-muted">Roster Utilization</span>
-                  <span className="text-text-primary font-medium">
-                    {Math.round((division.playersAssigned / (division.totalTeams * 12)) * 100)}%
-                  </span>
+                <h3
+                  className="text-text-accent font-bold mb-1"
+                  id={`heading-div-${division.divisionId}`}
+                >
+                  {division.divisionId}
+                </h3>
+                <p className="text-text-secondary mb-3">
+                  {division.totalTeams} teams · {division.playersAssigned} players
+                </p>
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-text-muted">Roster Utilization</span>
+                    <span className="text-text-primary font-medium">
+                      {utilization === null ? 'Capacity unavailable' : `${utilization}%`}
+                    </span>
+                  </div>
+                  {utilization !== null && (
+                    <div className="w-full bg-bg-glass h-1.5 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-brand-500 rounded-full"
+                        style={{
+                          width: `${Math.min(100, utilization)}%`,
+                        }}
+                      />
+                    </div>
+                  )}
                 </div>
-                <div className="w-full bg-bg-glass h-1.5 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-brand-500 rounded-full"
-                    style={{
-                      width: `${Math.min(100, (division.playersAssigned / (division.totalTeams * 12)) * 100)}%`,
-                    }}
-                  />
-                </div>
-              </div>
-            </article>
-          ))}
+              </article>
+            );
+          })}
         </div>
       </div>
     </div>

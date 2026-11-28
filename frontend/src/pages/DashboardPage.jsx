@@ -31,6 +31,7 @@ import { useSetupProgress } from '../hooks/useSetupProgress.js';
 import DataErrorBanner from '../components/ui/DataErrorBanner.jsx';
 import { useFeatures } from '../hooks/useFeatures.js';
 import { divisionDisplayName } from '../utils/divisions.js';
+import { rosterUtilizationPercent } from '../utils/formatters.js';
 import { logger } from '../lib/logger.js';
 import { isAdminRole } from '../constants/permissions.js';
 import { usePermitWarnings } from '../hooks/useFacilityPermits.js';
@@ -181,21 +182,23 @@ function AdminHome() {
 
   const capacityByDivision = useMemo(() => {
     return divisions
-      .map((division) => {
-        const divisionTeams = teams.filter((team) => team.division_id === division.id);
-        const cap = divisionTeams.reduce((total, team) => total + (team.max_roster_size || 10), 0);
-        const filled = players.filter(
-          (player) => player.division_id === division.id && player.team_id
-        ).length;
-        return {
-          id: division.id,
-          label: divisionDisplayName(division.name, genderModel),
-          cap,
-          filled,
-          pct: cap ? Math.min(100, Math.round((filled / cap) * 100)) : 0,
-        };
+      .flatMap((division) => {
+        const teamIds = new Set(
+          teams.filter((team) => team.division_id === division.id).map((team) => team.id)
+        );
+        if (!teamIds.size) return [];
+        const cap = division.max_roster_size * teamIds.size;
+        const filled = players.filter((player) => teamIds.has(player.team_id)).length;
+        return [
+          {
+            id: division.id,
+            label: divisionDisplayName(division.name, genderModel),
+            cap,
+            filled,
+            pct: rosterUtilizationPercent(filled, cap),
+          },
+        ];
       })
-      .filter((entry) => entry.cap > 0)
       .slice(0, 6);
   }, [divisions, teams, players, genderModel]);
 
@@ -499,12 +502,16 @@ function AdminHome() {
                   >
                     <span style={{ fontWeight: 600 }}>{entry.label}</span>
                     <span className="tnum muted">
-                      {entry.filled}/{entry.cap} · {entry.pct}%
+                      {entry.pct === null
+                        ? `${entry.filled} assigned · Capacity unavailable`
+                        : `${entry.filled}/${entry.cap} · ${entry.pct}%`}
                     </span>
                   </div>
-                  <div className="bar">
-                    <i style={{ width: `${entry.pct}%` }} />
-                  </div>
+                  {entry.pct !== null && (
+                    <div className="bar">
+                      <i style={{ width: `${Math.min(100, entry.pct)}%` }} />
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

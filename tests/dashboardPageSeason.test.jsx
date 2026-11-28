@@ -103,6 +103,37 @@ vi.mock('../frontend/src/hooks/useFacilityPermits.js', () => ({
 const { default: DashboardPage } = await import('../frontend/src/pages/DashboardPage.jsx');
 
 describe('DashboardPage (the admin home)', () => {
+  it('uses the selected division roster limit and shows a missing limit explicitly', async () => {
+    const scope = { organization_id: 'org-1', season_settings_id: FALL };
+    mocks.tables = {
+      divisions: [
+        { ...scope, id: 'fall', name: 'U14', max_roster_size: 14 },
+        { ...scope, id: 'missing', name: 'U12', max_roster_size: null },
+        { ...scope, season_settings_id: SPRING, id: 'spring', name: 'U14', max_roster_size: 8 },
+      ],
+      teams: [
+        { organization_id: 'org-1', id: 'first', division_id: 'fall' },
+        { organization_id: 'org-1', id: 'second', division_id: 'fall' },
+        { organization_id: 'org-1', id: 'third', division_id: 'missing' },
+        { organization_id: 'org-1', id: 'other-season', division_id: 'spring' },
+      ],
+      players: Array.from({ length: 24 }, (_, index) => ({
+        ...scope,
+        id: `p${index}`,
+        division_id: 'fall',
+        team_id: index % 2 ? 'first' : 'second',
+      })),
+    };
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>
+    );
+    expect(await screen.findByText('24/28 · 86%')).toBeVisible();
+    expect(screen.getByText('0 assigned · Capacity unavailable')).toBeVisible();
+    expect(screen.getAllByText('U14')).toHaveLength(1);
+  });
+
   it("counts the selected season's players, divisions and teams", async () => {
     const player = (id, season) => ({
       id,

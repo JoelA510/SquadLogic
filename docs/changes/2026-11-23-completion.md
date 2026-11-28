@@ -100,6 +100,7 @@ numbers are as of `7405db3` and will move: search by name.
 | C12d | Load requested publication baseline support before importing games                        | done                     | this change  | 2026-11-27 |
 | C12e | Show current season team names on the Games page                                          | done                     | this change  | 2026-11-27 |
 | C12f | Reopen division rules after saving teams                                                  | done                     | this change  | 2026-11-27 |
+| C12g | Show saved roster capacity on the dashboard and in both teaming overviews | fixed | this change | 2026-11-27 |
 | C12h | Games can reopen a saved schedule with a week that has no available slot                 | fixed in this change     | this change  | 2026-11-27 |
 | C12i | Show archived player and coach records as read-only                                       | done                     | this change  | 2026-11-27 |
 | C13 | Test-suite audit                                                                          | gated on O1; plan first  |              |            |

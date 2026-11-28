@@ -2,6 +2,19 @@ import { anchorToSeasonClock } from '@squadlogic/core/timing/index.js';
 
 export const formatPercent = (value) => `${Math.round((value ?? 0) * 100)}%`;
 
+/** A run without a saved capacity cannot report a fill percentage. */
+export function rosterUtilizationPercent(assigned, capacity) {
+  if (
+    !Number.isSafeInteger(assigned) ||
+    assigned < 0 ||
+    !Number.isSafeInteger(capacity) ||
+    capacity <= 0
+  ) {
+    return null;
+  }
+  return Math.round((assigned / capacity) * 100);
+}
+
 export const formatPercentPrecise = (value) => {
   const numeric = Number(value ?? 0);
   if (!Number.isFinite(numeric) || numeric <= 0) {

@@ -4638,7 +4638,7 @@ plant "M45 a coach scores their own team's game again" "$CARRIED_GAME_SCORES" \
        AND NOT public.is_org_admin(p_organization_id)
        AND NOT public.is_current_team_coach(v_game.home_team_id) THEN
         RAISE EXCEPTION 'Access denied: only an organization admin enters scores'" \
-  "applying 20261028010000_coach_view.sql"
+  "applying 20261201010000_carried_game_scores.sql"
 
 plant "M45 the request RPC is left in place" "$M45" \
   "DROP FUNCTION public.request_practice_lighting_override(uuid, date, date);
@@ -4666,7 +4666,7 @@ plant "M45 a coach-role member scores again" "$CARRIED_GAME_SCORES" \
        AND NOT public.is_org_admin(p_organization_id)
        AND v_member_role <> 'coach' THEN
         RAISE EXCEPTION 'Access denied: only an organization admin enters scores'" \
-  "applying 20261028010000_coach_view.sql"
+  "applying 20261201010000_carried_game_scores.sql"
 
 plant "M45 withdraw admits the requester again" "$M45" \
   "    IF NOT FOUND OR v_uid IS NULL OR NOT public.is_org_admin(v_row.organization_id) THEN" \

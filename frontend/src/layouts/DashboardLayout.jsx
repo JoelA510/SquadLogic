@@ -26,7 +26,7 @@ export default function DashboardLayout() {
 
   return (
     <div className={`app ${collapsed ? 'nav-collapsed' : ''}`}>
-      <TopBar onToggleNav={() => setMobileNavOpen((open) => !open)} />
+      <TopBar mobileNavOpen={mobileNavOpen} onToggleNav={() => setMobileNavOpen((open) => !open)} />
       <SideNav
         collapsed={collapsed}
         onToggleCollapsed={() => setCollapsed((value) => !value)}

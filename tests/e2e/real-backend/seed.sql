@@ -127,6 +127,13 @@ VALUES
      'e2e0e000-0000-4000-8000-000000000001', 'Field 2', 'grass', 'small')
 ON CONFLICT (id) DO NOTHING;
 
+-- These two teams can play each other only in week 1. The sole game slot is in week 2.
+INSERT INTO public.game_slots (id, organization_id, field_id, division_id, slot_date, start_time, end_time, week_index)
+VALUES ('e2e0d300-0000-4000-8000-000000000002', 'e2e0b000-0000-4000-8000-000000000001',
+        'e2e0f000-0000-4000-8000-000000000001', 'e2e0d000-0000-4000-8000-000000000001',
+        current_date + 7, TIME '14:00', TIME '15:00', 2)
+ON CONFLICT (id) DO NOTHING;
+
 INSERT INTO public.practice_slots (
     organization_id, field_id, day_of_week, start_time, end_time, capacity, valid_from, valid_until
 )

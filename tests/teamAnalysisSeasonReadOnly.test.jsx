@@ -38,7 +38,10 @@ const state = vi.hoisted(() => ({
   divisionRows: [],
   /** @type {string[]} the `select` text of each read of `divisions` */
   divisionSelects: [],
+  divisionWrites: vi.fn(),
+  hasCurrentFile: true,
   seasonStatus: 'active',
+  generatedAt: null,
 }));
 
 vi.mock('../frontend/src/hooks/useDashboardData.js', () => ({
@@ -46,7 +49,13 @@ vi.mock('../frontend/src/hooks/useDashboardData.js', () => ({
     loading: { team: false, practice: false, game: false },
     error: null,
     errors: { team: null, practice: null, game: null },
-    team: { summary: null, generatedAt: null, status: 'idle', progress: 0, refetch: () => {} },
+    team: {
+      summary: null,
+      generatedAt: state.generatedAt,
+      status: 'idle',
+      progress: 0,
+      refetch: () => {},
+    },
     practice: {},
     game: {},
   }),
@@ -66,16 +75,13 @@ vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   }),
 }));
 vi.mock('../frontend/src/contexts/ImportContext.jsx', () => ({
-  useImport: () => ({ importedData: { data: state.rows } }),
+  useImport: () => ({ importedData: state.hasCurrentFile ? { data: state.rows } : null }),
 }));
 vi.mock('../frontend/src/contexts/AuthContext.jsx', () => ({
   useAuth: () => ({ session: null, user: { id: 'admin-user' } }),
 }));
 vi.mock('../frontend/src/hooks/useTeamPersistence.js', () => ({
   useTeamPersistence: () => ({ persistenceSnapshot: null, loading: false, refresh: () => {} }),
-}));
-vi.mock('../frontend/src/hooks/useAutoRunOnNavigate.js', () => ({
-  useAutoRunOnNavigate: () => {},
 }));
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
@@ -109,6 +115,7 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
       return createChainMock({ data: rows, error: null });
     },
     rpc: async (name, params) => {
+      if (name === 'admin_upsert_division_settings') state.divisionWrites(params);
       if (name === 'admin_bulk_update_players') {
         state.bulkUpdates.push(params);
         return state.bulkError
@@ -188,7 +195,10 @@ function reset() {
   state.bulkError = null;
   state.divisionRows = [];
   state.divisionSelects = [];
+  state.divisionWrites.mockClear();
+  state.hasCurrentFile = true;
   state.seasonStatus = 'active';
+  state.generatedAt = null;
 }
 
 const renderPage = () =>
@@ -220,5 +230,42 @@ describe('the Teams page on a completed season', () => {
     });
     expect(button).toBeDisabled();
     expect(state.bulkUpdates).toHaveLength(0);
+  });
+
+  it.each(['active', 'completed'])(
+    'shows saved division rules only while editable (%s)',
+    async (status) => {
+      state.seasonStatus = status;
+      state.generatedAt = '2026-11-14T12:00:00Z';
+      renderPage();
+      expect(await screen.findByTestId('stub-team-overview')).toBeVisible();
+      if (status === 'active') {
+        expect(await screen.findByRole('button', { name: 'Division rules' })).toBeEnabled();
+      } else {
+        expect(screen.getByTestId(NOTE)).toBeVisible();
+        expect(screen.queryByRole('button', { name: 'Division rules' })).toBeNull();
+      }
+    }
+  );
+
+  it('shows the correction for a historical unassigned player reached from Start Teaming before writing rules', async () => {
+    state.hasCurrentFile = false;
+    state.durablePlayers = [
+      {
+        id: 'p-one',
+        external_registration_id: 'one',
+        first_name: 'A',
+        last_name: 'Example',
+        division_id: null,
+      },
+    ];
+    render(
+      <MemoryRouter initialEntries={[{ pathname: '/teams', state: { autoRunTeaming: true } }]}>
+        <TeamAnalysisPage />
+      </MemoryRouter>
+    );
+    expect(await screen.findByText(/These saved players have no division/)).toBeVisible();
+    expect(screen.getByRole('button', { name: /Generate Teams/ })).toBeDisabled();
+    expect(state.divisionWrites).not.toHaveBeenCalled();
   });
 });

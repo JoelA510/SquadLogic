@@ -166,11 +166,16 @@ export function buildExportPayload({
     if (normalized) teamDirectory.set(normalized.id, normalized);
   };
 
-  // The season's teams as the tables hold them come first, outside clubs included (an outside club is in no team run, so
-  // the run's teams never name one); the run's own teams, which carry the coaches, replace their entries.
-  (Array.isArray(directory) ? directory : []).forEach(addTeam);
+  // Keep the season's directory order and include outside opponents. A saved run supplies
+  // coach metadata, but its name can predate an administrator's rename.
+  const directoryRows = Array.isArray(directory) ? directory : [];
+  directoryRows.forEach(addTeam);
   (Array.isArray(teams) ? teams : []).forEach(addTeam);
   (Array.isArray(teamSummary?.teams) ? teamSummary.teams : []).forEach(addTeam);
+  for (const row of directoryRows) {
+    const team = teamDirectory.get(row?.id);
+    if (team && row.name) team.name = row.name;
+  }
   (Array.isArray(practiceAssignments) ? practiceAssignments : []).forEach((assignment) => {
     const teamId = getAssignmentTeamId(assignment);
     if (!teamDirectory.has(teamId)) {

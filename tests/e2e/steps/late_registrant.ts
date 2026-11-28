@@ -1,6 +1,7 @@
 import { createBdd } from 'playwright-bdd';
 import { expect, type Page } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
+import { storeFixtureRegistrations } from './storedRegistrationFixture.js';
 import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, When, Then } = createBdd();
@@ -28,6 +29,57 @@ const TEAMS = [
 const LATE_PLAYER = uuid(7);
 const ORIGINAL_PLAYERS = TEAMS.flatMap((team) => team.players);
 
+Given('the saved division is now named {string}', async ({ page }, currentName: string) => {
+  await page.evaluate(
+    ({ originalName, currentName }) => {
+      const db = window.__MOCK_DB__ as MockDb;
+      const run = db.scheduler_runs?.find((row) => row.id === 'late-saved-run');
+      const division = db.divisions?.find(
+        (row) =>
+          row.organization_id === run?.organization_id &&
+          row.season_settings_id === run?.season_settings_id &&
+          row.name === originalName
+      );
+      const teams = (run?.results as { teams?: MockRow[] } | undefined)?.teams;
+      if (!division || !teams?.length) throw new Error('Missing saved division or teams');
+      // Historical runs can carry both the label at save time and the durable foreign key.
+      for (const team of teams) team.division_id = division.id;
+      division.name = currentName;
+      window.__saveMockDB__(db);
+    },
+    { originalName: DIVISION, currentName }
+  );
+});
+
+Given(
+  'the former division name belongs to a new division with a different player',
+  async ({ page }) => {
+    await page.evaluate(
+      ({ name, newDivision, newPlayer }) => {
+        const db = window.__MOCK_DB__ as MockDb;
+        const run = db.scheduler_runs?.find((row) => row.id === 'late-saved-run');
+        if (!run || !db.divisions || !db.players) throw new Error('Missing the reviewed season');
+        const scope = {
+          organization_id: run.organization_id,
+          season_settings_id: run.season_settings_id,
+        };
+        db.divisions.push({ ...scope, id: newDivision, name });
+        db.players.push({
+          ...scope,
+          id: newPlayer,
+          first_name: 'New',
+          last_name: 'Division',
+          status: 'active',
+          division_id: newDivision,
+          external_registration_id: 'new-division-registration',
+        });
+        window.__saveMockDB__(db);
+      },
+      { name: DIVISION, newDivision: uuid(300), newPlayer: uuid(301) }
+    );
+  }
+);
+
 Given(
   'the U12 Boys roster was saved as the teams Falcons and Herons with three players each',
   async ({ page }) => {
@@ -44,7 +96,11 @@ Given(
         // The seed's own team run is retired (in place: the mock re-merges its
         // seed rows by id), so the saved run below is the only one.
         for (const run of db.scheduler_runs ?? []) {
-          if (run.run_type === 'team' && run.organization_id === orgId) run.status = 'deleted';
+          if (run.run_type === 'team' && run.organization_id === orgId) {
+            run.status = 'deleted';
+            // A real run has a creation time. An undated seed otherwise sorts ahead of this roster.
+            run.created_at ??= run.started_at;
+          }
         }
         db.imports = [
           ...(db.imports ?? []),
@@ -79,6 +135,7 @@ Given(
             status: 'completed',
             created_at: createdAt,
             completed_at: createdAt,
+            started_at: createdAt,
             parameters: { selectedProgramId: division },
             results: {
               teams: teams.map((team) => ({
@@ -155,6 +212,7 @@ Given('a late registrant appears in the latest import', async ({ page }) => {
       mockOrgId: MOCK_ORG_ID,
     }
   );
+  await storeFixtureRegistrations(page, 'late-import-latest');
 });
 
 Given(
@@ -188,6 +246,7 @@ Given(
         mockOrgId: MOCK_ORG_ID,
       }
     );
+    await storeFixtureRegistrations(page, 'late-import-latest');
   }
 );
 
@@ -218,6 +277,48 @@ Then(
     ).toBeVisible();
   }
 );
+
+async function openSavedRules(page: Page) {
+  const rules = page.getByRole('button', { name: 'Division rules', exact: true });
+  await expect(rules).toBeVisible();
+  await rules.press('Enter');
+  const division = page.getByRole('table', { name: 'Division Overview' }).getByRole('button', {
+    name: DIVISION,
+    exact: true,
+  });
+  await division.click();
+  await expect(page.getByRole('heading', { name: `${DIVISION} Settings` })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Generate Teams' })).toHaveCount(0);
+}
+
+When("I open the saved roster's division rules", async ({ page }) => {
+  await openSavedRules(page);
+});
+
+When('I save {int} practices a week for the saved division', async ({ page }, count: number) => {
+  await page.getByLabel('Practices per week').fill(String(count));
+  await page.getByRole('button', { name: 'Save Rules' }).click();
+  await expect(page.getByText('Rules saved.')).toBeVisible();
+});
+
+When('I reload the saved roster and reopen its division rules', async ({ page }) => {
+  await page.reload();
+  await openSavedRules(page);
+});
+
+Then('the saved division has {int} practices a week', async ({ page }, count: number) => {
+  await expect(page.getByLabel('Practices per week')).toHaveValue(String(count));
+});
+
+When('I return to the saved rosters', async ({ page }) => {
+  await page.getByRole('button', { name: 'Back to rosters' }).press('Enter');
+  await expect(page.getByRole('button', { name: 'Edit Mode' })).toBeVisible();
+});
+
+Then('the rules switch is absent during manual roster editing', async ({ page }) => {
+  await expect(page.getByRole('button', { name: 'Save Changes' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Division rules' })).toHaveCount(0);
+});
 
 /** Open the roster editor (once) and return a team's column. */
 async function teamColumn(page: Page, teamId: string) {

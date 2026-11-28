@@ -4,7 +4,7 @@ import { useDashboardData } from '../hooks/useDashboardData.js';
 import DataErrorBanner from '../components/ui/DataErrorBanner.jsx';
 import { useTeamPersistence } from '../hooks/useTeamPersistence.js';
 import { useAutoRunOnNavigate } from '../hooks/useAutoRunOnNavigate.js';
-import { useImport } from '../contexts/ImportContext.jsx';
+import { useSeasonTeamingInput } from '../hooks/useSeasonTeamingInput.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { useSeasonReadOnly } from '../hooks/useSeasonReadOnly.js';
 import SeasonReadOnlyNote from '../components/chrome/SeasonReadOnlyNote.jsx';
@@ -28,7 +28,6 @@ import ProgressBar from '../components/ui/ProgressBar.jsx';
 import { Edit2, Save, ArrowRight, Trash2, X } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient.js';
 import { logger } from '../lib/logger.js';
-import { edgeFunctionCache } from '../lib/cache.js';
 import { IS_MOCK_MODE } from '../config.js';
 import { generateTeams, resolveTeamCount } from '@squadlogic/core/teamGeneration.js';
 import { TEAM_GENERATION } from '@squadlogic/core/constants.js';
@@ -73,9 +72,30 @@ const {
   targetTeamSize: DEFAULT_TARGET_TEAM_SIZE,
 } = DEFAULT_ROSTER_LIMITS;
 
-function getImportedRows(importedData) {
+function getImportedRows(importedData, persistenceSnapshot) {
   if (!importedData) return [];
   if (Array.isArray(importedData)) return importedData;
+  if (importedData.fromRoster) {
+    // Older reviewed runs used the file's division label as their key. Retain that key
+    // (also after a rename) so reloading cannot turn a reviewed rerun into fresh generation.
+    const keysById = new Map();
+    const idByReviewedKey = new Map();
+    for (const [key, payload] of Object.entries(persistenceSnapshot?.payloadByDivision ?? {})) {
+      const id = payload.teamRows?.find((team) => team.division_id)?.division_id;
+      // The persistence map visits the newest run first, including when two labels share an ID.
+      if (id && !keysById.has(id)) keysById.set(id, key);
+      if (id) idByReviewedKey.set(key, id);
+    }
+    return importedData.data.map((row) => {
+      const owner = idByReviewedKey.get(row.division_name);
+      // A new division can reuse the former name of a reviewed one. Its roster gets its own key.
+      const fallback = owner && owner !== row.division_id ? row.division_id : row.division_name;
+      return {
+        ...row,
+        teamingDivisionKey: keysById.get(row.division_id) ?? fallback ?? row.division_id,
+      };
+    });
+  }
   if (Array.isArray(importedData.data)) return importedData.data;
   if (Array.isArray(importedData.fullData)) return importedData.fullData;
   if (Array.isArray(importedData.rows)) return importedData.rows;
@@ -121,7 +141,7 @@ function resolveDivisionName(row) {
 }
 
 function resolveDivisionId(row) {
-  const explicitId = firstNonEmpty(row, ['division_id', 'divisionId']);
+  const explicitId = firstNonEmpty(row, ['teamingDivisionKey', 'division_id', 'divisionId']);
   return String(explicitId || resolveDivisionName(row)).trim();
 }
 
@@ -1006,9 +1026,10 @@ export default function TeamAnalysisPage() {
   const {
     persistenceSnapshot,
     loading: persistenceLoading,
+    error: persistenceError,
     refresh: refreshPersistence,
   } = useTeamPersistence();
-  const { importedData } = useImport();
+  const { importedData, rosterError } = useSeasonTeamingInput();
   const { currentOrganization, currentSeasonSetting, permissions = [] } = useOrganization();
   const { session, user: authUser } = useAuth();
   const { features, isEnabled, buddyRule } = useFeatures();
@@ -1024,6 +1045,7 @@ export default function TeamAnalysisPage() {
     [persistenceSnapshot]
   );
   const [isEditMode, setIsEditMode] = useState(false);
+  const [showDivisionRules, setShowDivisionRules] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [manualTeams, setManualTeams] = useState(null);
   const [manualSaveState, setManualSaveState] = useState('idle');
@@ -1062,7 +1084,10 @@ export default function TeamAnalysisPage() {
       permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION));
   const canEditTeams = canManageTeams && isEditMode;
 
-  const importedPlayerRows = useMemo(() => getImportedRows(importedData), [importedData]);
+  const importedPlayerRows = useMemo(
+    () => getImportedRows(importedData, persistenceSnapshot),
+    [importedData, persistenceSnapshot]
+  );
   // The stored players of the file, for the advice (follow-ups F1, item 3; data follow-ups, item 2).
   // The record wins over the file where generation lets it: the status (a buddy taken off the
   // waitlist is active in the record while the file still marks them), and the natural age and the
@@ -1225,6 +1250,7 @@ export default function TeamAnalysisPage() {
     setManualTeams(null);
     setManualSaveMessage('');
     setIsEditMode(false);
+    setShowDivisionRules(false);
   }, [currentOrganization?.id, currentSeasonSetting?.id]);
 
   useEffect(() => {
@@ -1502,9 +1528,6 @@ export default function TeamAnalysisPage() {
           ...prev,
           [program.id]: configFromDivisionRow(savedDivision),
         }));
-        // The auto-scheduler's cached runs were made with the settings as they were: a run for
-        // identical teams and slots must not answer for a division whose count just changed.
-        edgeFunctionCache.invalidateByPrefix(`auto-scheduler:${currentOrganization.id}:`);
         if (!silent) setConfigSaveMessage('Rules saved.');
         return savedDivision;
       } finally {
@@ -1532,6 +1555,18 @@ export default function TeamAnalysisPage() {
     }
     if (!selectedProgram) {
       errors.push({ type: 'division', message: 'Select a division before generating teams.' });
+    }
+    if (
+      importedData?.fromRoster &&
+      importedPlayerRows.some(
+        (row) => !row.division_id && resolveDivisionId(row) === selectedProgram?.id
+      )
+    ) {
+      errors.push({
+        type: 'division',
+        message:
+          'These saved players have no division. Set their division in Players or reimport the registrations with a division name.',
+      });
     }
     if (
       selectedConfig?.minRosterSize &&
@@ -1604,9 +1639,13 @@ export default function TeamAnalysisPage() {
     currentOrganization?.id,
     divisionSettingsError,
     generationError,
-    importedPlayerRows.length,
+    importedPlayerRows,
+    importedData?.fromRoster,
     selectedProgram,
   ]);
+
+  const generationBlocked =
+    Boolean(persistenceError) || validationErrors.some((error) => error.type !== 'generation');
 
   const resolveGeneratorPlayers = useCallback(
     async (rowsForProgram, selectedProgramKey, selectedDivisionId) => {
@@ -1675,6 +1714,8 @@ export default function TeamAnalysisPage() {
   );
 
   const handleGenerateTeams = useCallback(async () => {
+    // The dashboard's Start Teaming intent calls the same handler as the button.
+    if (seasonReadOnly || generationBlocked) return;
     setIsGenerating(true);
     setGenerationError(null);
     setPlacementAnnouncement('');
@@ -2026,6 +2067,8 @@ export default function TeamAnalysisPage() {
     skillTierEnabled,
     playDownEnabled,
     heldSeats,
+    seasonReadOnly,
+    generationBlocked,
     configs,
     canManageTeams,
     features,
@@ -2051,6 +2094,7 @@ export default function TeamAnalysisPage() {
   // Fires once a program is selected and players are loaded; if no program can
   // be resolved the user simply lands on the page with the normal control.
   const teamingAutoRunReady =
+    !persistenceLoading &&
     Boolean(selectedProgram) &&
     importedPlayerRows.length > 0 &&
     canManageTeams &&
@@ -2097,6 +2141,11 @@ export default function TeamAnalysisPage() {
       progress: 100,
     };
   }, [stagedReview?.summary, team]);
+
+  const canOpenSavedRules = Boolean(
+    activeTeamData?.generatedAt && canManageTeams && importedData && !stagedReview && !isEditMode
+  );
+  const viewingSavedRules = canOpenSavedRules && showDivisionRules;
 
   const displayPersistenceSnapshot = stagedReview?.snapshot || persistenceSnapshot;
 
@@ -2430,13 +2479,18 @@ export default function TeamAnalysisPage() {
     <div
       className={`animate-fadeIn space-y-8 w-full ${canEditTeams ? '' : 'max-w-[65ch] mx-auto'}`}
     >
-      <DataErrorBanner message={dataError} />
+      <DataErrorBanner message={persistenceError || rosterError || dataError} />
+      {persistenceError && (
+        <Button variant="secondary" onClick={refreshPersistence}>
+          Retry team history
+        </Button>
+      )}
       <SeasonReadOnlyNote />
       <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
         {stagedReview ? placementAnnouncement : ''}
       </p>
 
-      <div className="flex justify-between items-start mb-8">
+      <div className="flex flex-wrap justify-between items-start gap-3 mb-8">
         <div>
           <h1 className="text-3xl font-display font-bold text-text-primary mb-2">
             Teaming & Analysis
@@ -2446,19 +2500,32 @@ export default function TeamAnalysisPage() {
           </p>
         </div>
         {activeTeamData?.generatedAt && canManageTeams && (
-          <Button
-            variant={isEditMode ? 'primary' : 'secondary'}
-            onClick={handleEditButtonClick}
-            disabled={manualSaveState === 'saving'}
-            className="flex items-center gap-2"
-          >
-            {isEditMode ? <Save size={18} /> : <Edit2 size={18} />}
-            {isEditMode
-              ? manualSaveState === 'saving'
-                ? 'Saving...'
-                : 'Save Changes'
-              : 'Edit Mode'}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {canOpenSavedRules && (
+              <Button
+                variant="secondary"
+                aria-expanded={viewingSavedRules}
+                onClick={() => setShowDivisionRules((open) => !open)}
+              >
+                {viewingSavedRules ? 'Back to rosters' : 'Division rules'}
+              </Button>
+            )}
+            {!viewingSavedRules && (
+              <Button
+                variant={isEditMode ? 'primary' : 'secondary'}
+                onClick={handleEditButtonClick}
+                disabled={manualSaveState === 'saving'}
+                className="flex items-center gap-2"
+              >
+                {isEditMode ? <Save size={18} /> : <Edit2 size={18} />}
+                {isEditMode
+                  ? manualSaveState === 'saving'
+                    ? 'Saving...'
+                    : 'Save Changes'
+                  : 'Edit Mode'}
+              </Button>
+            )}
+          </div>
         )}
       </div>
 
@@ -2503,8 +2570,7 @@ export default function TeamAnalysisPage() {
             />
           </div>
         </div>
-      ) : !activeTeamData?.generatedAt && importedData ? (
-        // NEW DASHBOARD VIEW
+      ) : (!activeTeamData?.generatedAt && importedData) || viewingSavedRules ? (
         <div className="space-y-6">
           {/* 1. Validation Panel */}
           <DataValidationPanel errors={validationErrors} />
@@ -2548,33 +2614,32 @@ export default function TeamAnalysisPage() {
                 }
                 saving={selectedProgram ? savingConfigId === selectedProgram.id : false}
                 saveDisabled={
-                  !canManageTeams ||
-                  !selectedProgram ||
-                  divisionRows === null ||
-                  validationErrors.some((error) => error.type !== 'generation')
+                  !canManageTeams || !selectedProgram || divisionRows === null || generationBlocked
                 }
                 saveMessage={configSaveMessage}
               />
             </div>
           </div>
 
-          {/* 4. Action Bar */}
-          <div className="flex justify-end pt-6 border-t border-border-subtle">
-            <Button
-              variant="primary"
-              size="lg"
-              onClick={handleGenerateTeams}
-              disabled={
-                seasonReadOnly ||
-                isActuallyGenerating ||
-                divisionRows === null ||
-                validationErrors.some((error) => error.type !== 'generation')
-              }
-              className="flex items-center gap-2"
-            >
-              Generate Teams <ArrowRight size={18} />
-            </Button>
-          </div>
+          {!activeTeamData?.generatedAt && (
+            <div className="flex justify-end pt-6 border-t border-border-subtle">
+              <Button
+                variant="primary"
+                size="lg"
+                onClick={handleGenerateTeams}
+                disabled={
+                  seasonReadOnly ||
+                  isActuallyGenerating ||
+                  divisionRows === null ||
+                  persistenceLoading ||
+                  generationBlocked
+                }
+                className="flex items-center gap-2"
+              >
+                Generate Teams <ArrowRight size={18} />
+              </Button>
+            </div>
+          )}
         </div>
       ) : canEditTeams ? (
         <section className="card" aria-labelledby="manual-roster-heading">

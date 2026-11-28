@@ -1,6 +1,7 @@
 import { createBdd, type DataTable } from 'playwright-bdd';
 import { expect, type Page } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
+import { storeFixtureRegistrations } from './storedRegistrationFixture.js';
 import { routeAutoSchedulerToEdgeSolver, type EdgeSolverPage } from './edgeAutoSchedulerRoute.js';
 import { MOCK_ORG_ID, MOCK_SEASON_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
@@ -193,6 +194,7 @@ async function importPlayers(
       mockOrgId: MOCK_ORG_ID,
     }
   );
+  await storeFixtureRegistrations(page, 'import-pillar1');
 }
 
 Given(
@@ -726,8 +728,8 @@ Then(
   async ({ page }, first: string, second: string) => {
     const card = unscheduledCards(page)
       .filter({ hasText: 'coach-coaches-both-teams' })
-      .filter({ hasText: teamIdOf(first) })
-      .filter({ hasText: teamIdOf(second) });
+      .filter({ hasText: first })
+      .filter({ hasText: second });
     await expect(card).toHaveCount(1);
   }
 );
@@ -738,7 +740,7 @@ Then(
     const cards = unscheduledCards(page).filter({ hasText: 'coach-scheduling-conflict' });
     await expect(cards).toHaveCount(1);
     await expect(cards.getByRole('heading')).toHaveText(`Week ${week}`);
-    await expect(cards).toContainText(new RegExp(`${teamIdOf(first)}|${teamIdOf(second)}`));
+    await expect(cards).toContainText(new RegExp(`${first}|${second}`));
   }
 );
 

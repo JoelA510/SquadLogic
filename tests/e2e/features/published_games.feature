@@ -155,3 +155,9 @@ Feature: Published games on the Game Scheduling page (schedule expansion, PR 3)
     When I switch to the dark theme on this page
     Then the scan sees "(new time, made on Apply)" on the page
     And axe finds no serious or critical violations on "/schedule/game" in the "dark" theme
+
+  Scenario: A saved game uses the current names of its two teams
+    Given the saved game's two teams now have different directory names
+    When I open the Game Scheduling page and wait for its saved games
+    Then the game "North Lions" vs "South Wolves" is shown as "Not published" in the list
+    And the game "Hawks" vs "Owls" is shown as "Not published" in the list
